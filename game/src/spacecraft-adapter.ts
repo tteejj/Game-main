@@ -235,4 +235,22 @@ export class SpacecraftAdapter {
     getDockingTelemetry(): any {
         return this.spacecraft.getDockingTelemetry();
     }
+
+    // ========== COOLANT/THERMAL CONTROLS ==========
+
+    getCoolantTelemetry(): any {
+        return this.spacecraft.getCoolantTelemetry();
+    }
+
+    getThermalTelemetry(): any {
+        return this.spacecraft.getThermalTelemetry();
+    }
+
+    toggleCoolantPump(loopId: number, on: boolean): void {
+        if (on) {
+            this.spacecraft.startCoolantPump(loopId);
+        } else {
+            this.spacecraft.stopCoolantPump(loopId);
+        }
+    }
 }

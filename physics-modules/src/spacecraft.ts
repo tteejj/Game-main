@@ -1400,4 +1400,43 @@ export class Spacecraft {
       approachRate: state.approachRate
     };
   }
+
+  // =============================================================================
+  // Coolant and Thermal Control Methods
+  // =============================================================================
+
+  /**
+   * Get coolant system telemetry
+   */
+  getCoolantTelemetry() {
+    const state = this.coolant.getState();
+    return {
+      loops: state.loops.map(loop => ({
+        id: loop.id,
+        name: loop.name,
+        pumpActive: loop.pumpActive,
+        temperature: loop.temperature,
+        flowRate: loop.flowRateLPerMin,
+        coolantMass: loop.coolantMassKg,
+        maxCapacity: loop.maxCapacityKg,
+        radiatorTemp: loop.radiatorTemperature,
+        frozen: loop.frozen,
+        boiling: loop.boiling,
+        leakRate: loop.leakRateLPerMin
+      })),
+      crossConnectOpen: state.crossConnectOpen
+    };
+  }
+
+  /**
+   * Get thermal system telemetry
+   */
+  getThermalTelemetry() {
+    const state = this.thermal.getState();
+    return {
+      radiatorsDeployed: state.radiatorsDeployed,
+      radiatorHealth: state.radiatorHealth,
+      nodes: state.nodes
+    };
+  }
 }
