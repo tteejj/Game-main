@@ -53,16 +53,13 @@ export class SpacecraftAdapter {
 
     // ========== HELM / PROPULSION CONTROLS ==========
 
-    setFuelValve(open: boolean): void {
-        if (open) {
-            this.spacecraft.openMainEngineFuelValve();
-        } else {
-            this.spacecraft.closeMainEngineFuelValve();
-        }
+    setFuelValve(_open: boolean): void {
+        // The main engine doesn't have a separate fuel valve in this implementation
+        // Just track it as state if needed by UI
     }
 
     armIgnition(): void {
-        this.spacecraft.armMainEngine();
+        // Arming is implicit in this implementation
     }
 
     fireEngine(): void {
@@ -78,19 +75,20 @@ export class SpacecraftAdapter {
     }
 
     setGimbal(x: number, y: number): void {
-        // Convert degrees to radians
-        const xRad = (x * Math.PI) / 180;
-        const yRad = (y * Math.PI) / 180;
-        this.spacecraft.setMainEngineGimbal(xRad, yRad);
+        // MainEngine.setGimbal takes degrees, not radians
+        this.spacecraft.mainEngine.setGimbal(x, y);
     }
 
     fireRCS(thrusterIndex: number, fire: boolean): void {
-        // Map UI thruster indices to RCS system
-        // 0-11 maps to bow/mid/stern port/starboard/dorsal/ventral
+        // RCS uses group names, not individual thrusters in this implementation
+        // Map to basic groups for now
+        const groups = ['bow-port', 'bow-starboard', 'mid-port', 'mid-starboard',
+                        'stern-port', 'stern-starboard', 'dorsal', 'ventral'];
+        const groupIndex = thrusterIndex % groups.length;
         if (fire) {
-            this.spacecraft.fireRCSThruster(thrusterIndex);
+            this.spacecraft.activateRCS(groups[groupIndex]);
         } else {
-            this.spacecraft.stopRCSThruster(thrusterIndex);
+            this.spacecraft.deactivateRCS(groups[groupIndex]);
         }
     }
 
@@ -101,41 +99,37 @@ export class SpacecraftAdapter {
     }
 
     scramReactor(): void {
-        this.spacecraft.scramReactor();
+        this.spacecraft.electrical.SCRAM(0);
     }
 
     setReactorThrottle(percent: number): void {
-        this.spacecraft.setReactorPower(percent / 100);
+        this.spacecraft.electrical.setReactorThrottle(percent / 100);
     }
 
-    toggleBreaker(index: number, state: boolean): void {
-        this.spacecraft.setCircuitBreaker(index, state);
+    toggleBreaker(_index: number, _state: boolean): void {
+        // Circuit breakers not exposed by index directly, stub for UI
     }
 
-    toggleRadiators(deploy: boolean): void {
-        if (deploy) {
-            this.spacecraft.deployRadiators();
-        } else {
-            this.spacecraft.retractRadiators();
-        }
+    toggleRadiators(_deploy: boolean): void {
+        // Radiators not implemented as deployable, always active
     }
 
     toggleCoolantPump(index: number, on: boolean): void {
         if (on) {
             this.spacecraft.startCoolantPump(index);
         } else {
-            this.spacecraft.stopCoolantPump(index);
+            this.spacecraft.coolant.stopPump(index);
         }
     }
 
     // ========== NAVIGATION CONTROLS ==========
 
-    setRadarActive(active: boolean): void {
-        this.spacecraft.setRadarActive(active);
+    setRadarActive(_active: boolean): void {
+        // Radar activation not exposed directly, stub for UI
     }
 
-    setRadarRange(rangeKm: number): void {
-        this.spacecraft.setRadarRange(rangeKm * 1000); // Convert to meters
+    setRadarRange(_rangeKm: number): void {
+        // Radar range not settable directly, stub for UI
     }
 
     // ========== TELEMETRY GETTERS ==========
@@ -187,6 +181,6 @@ export class SpacecraftAdapter {
 
     isEngineFiring(): boolean {
         const state = this.spacecraft.mainEngine.getState();
-        return state.firing && state.thrust > 0;
+        return state.status === 'running' && state.currentThrustN > 0;
     }
 }

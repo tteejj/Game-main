@@ -9,11 +9,9 @@ import { Viewport } from './viewport';
 import { Vector3 } from '../../universe-system/src/CelestialBody';
 
 export class Game {
-    private canvas: HTMLCanvasElement;
     private ctx: CanvasRenderingContext2D;
     private running: boolean = false;
     private lastFrameTime: number = 0;
-    private fps: number = 60;
     private fixedTimestep: number = 1 / 60; // 60 FPS
 
     // Game state
@@ -27,7 +25,6 @@ export class Game {
     private viewport: Viewport;
 
     constructor(canvas: HTMLCanvasElement) {
-        this.canvas = canvas;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
             throw new Error('Could not get 2D context from canvas');
