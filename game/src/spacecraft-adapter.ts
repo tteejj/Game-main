@@ -179,4 +179,60 @@ export class SpacecraftAdapter {
     toggleCO2Scrubber(on: boolean): void {
         this.spacecraft.toggleCO2Scrubber(on);
     }
+
+    // ========== LANDING GEAR CONTROLS ==========
+
+    deployLandingGear(): boolean {
+        return this.spacecraft.deployLandingGear();
+    }
+
+    retractLandingGear(): boolean {
+        return this.spacecraft.retractLandingGear();
+    }
+
+    toggleLandingLights(on: boolean): void {
+        this.spacecraft.toggleLandingLights(on);
+    }
+
+    activateTerrainRadar(): boolean {
+        return this.spacecraft.activateTerrainRadar();
+    }
+
+    deactivateTerrainRadar(): void {
+        this.spacecraft.deactivateTerrainRadar();
+    }
+
+    checkLandingSafety(): { safe: boolean; reasons: string[] } {
+        return this.spacecraft.checkLandingSafety();
+    }
+
+    getLandingGearTelemetry(): any {
+        return this.spacecraft.getLandingGearTelemetry();
+    }
+
+    // ========== DOCKING CONTROLS ==========
+
+    initiateDocking(portId: string, target: any): boolean {
+        return this.spacecraft.initiateDocking(portId, target);
+    }
+
+    attemptDockingCapture(): boolean {
+        return this.spacecraft.attemptDockingCapture();
+    }
+
+    completeHardDock(): boolean {
+        return this.spacecraft.completeHardDock();
+    }
+
+    undock(portId: string): boolean {
+        return this.spacecraft.undock(portId);
+    }
+
+    getDockingGuidance(): any {
+        return this.spacecraft.getDockingGuidance();
+    }
+
+    getDockingTelemetry(): any {
+        return this.spacecraft.getDockingTelemetry();
+    }
 }

@@ -1269,4 +1269,135 @@ export class Spacecraft {
       radarTracks: radarState.tracks
     };
   }
+
+  // =============================================================================
+  // Landing Gear Control Methods
+  // =============================================================================
+
+  /**
+   * Deploy landing gear
+   */
+  deployLandingGear(): boolean {
+    return this.landing.deployGear();
+  }
+
+  /**
+   * Retract landing gear
+   */
+  retractLandingGear(): boolean {
+    return this.landing.retractGear();
+  }
+
+  /**
+   * Toggle landing lights
+   */
+  toggleLandingLights(on: boolean): void {
+    this.landing.toggleLights(on);
+  }
+
+  /**
+   * Activate terrain scanning radar
+   */
+  activateTerrainRadar(): boolean {
+    return this.landing.activateTerrainRadar();
+  }
+
+  /**
+   * Deactivate terrain scanning radar
+   */
+  deactivateTerrainRadar(): void {
+    this.landing.deactivateTerrainRadar();
+  }
+
+  /**
+   * Check if safe to land
+   */
+  checkLandingSafety(): { safe: boolean; reasons: string[] } {
+    return this.landing.isSafeToLand();
+  }
+
+  /**
+   * Get landing gear telemetry
+   */
+  getLandingGearTelemetry() {
+    const state = this.landing.getState();
+    return {
+      deployed: state.allGearDeployed,
+      locked: state.allGearLocked,
+      surfaceContact: state.surfaceContact,
+      gearHealth: Array.from(state.gear.values()).map(g => ({
+        id: g.id,
+        deployed: g.deployed,
+        locked: g.locked,
+        contact: g.contact,
+        health: g.health,
+        compression: g.strut.compression
+      })),
+      terrainRadarActive: state.terrainRadarActive,
+      terrainData: state.terrainData,
+      lightsOn: state.lightsOn
+    };
+  }
+
+  // =============================================================================
+  // Docking System Control Methods
+  // =============================================================================
+
+  /**
+   * Initiate docking sequence
+   */
+  initiateDocking(portId: string, target: any): boolean {
+    return this.docking.initiateDocking(portId, target);
+  }
+
+  /**
+   * Attempt to capture docking target
+   */
+  attemptDockingCapture(): boolean {
+    return this.docking.attemptCapture();
+  }
+
+  /**
+   * Complete hard dock
+   */
+  completeHardDock(): boolean {
+    return this.docking.completeHardDock();
+  }
+
+  /**
+   * Undock from target
+   */
+  undock(portId: string): boolean {
+    return this.docking.undock(portId);
+  }
+
+  /**
+   * Get docking alignment guidance
+   */
+  getDockingGuidance() {
+    return this.docking.getAlignmentGuidance();
+  }
+
+  /**
+   * Get docking system telemetry
+   */
+  getDockingTelemetry() {
+    const state = this.docking.getState();
+    return {
+      operational: state.operational,
+      activePort: state.activePort,
+      dockingInProgress: state.dockingInProgress,
+      latchProgress: state.latchProgress,
+      ports: Array.from(state.ports.values()).map(p => ({
+        id: p.id,
+        type: p.type,
+        status: p.status,
+        connectedTo: p.connectedTo,
+        sealIntegrity: p.sealIntegrity,
+        alignmentError: p.alignmentError
+      })),
+      targetData: state.targetData,
+      approachRate: state.approachRate
+    };
+  }
 }
