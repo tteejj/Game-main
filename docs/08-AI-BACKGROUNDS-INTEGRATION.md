@@ -774,435 +774,501 @@ class DynamicEventSpawner {
 
 ---
 
-## Part 4: Visual Rendering Systems
+## Part 4: Instrument Display Rendering
 
-### 4.1 Starfield Background
+**Key Principle**: You're looking at PANELS and INSTRUMENTS, not out windows. This is a submarine simulator.
 
-**Multi-Layer Parallax Starfield**:
+### 4.1 Tactical Radar Display
+
+**What You Actually See**: Simple 2D top-down radar on Navigation panel
+
 ```typescript
-interface StarfieldLayer {
-  stars: Star[];
-  depth: number;      // 0-1 (0 = far, 1 = close)
-  brightness: number;
-  parallaxFactor: number;
-}
+class TacticalRadarDisplay {
+  private centerX: number = 200;
+  private centerY: number = 200;
+  private radarRadius: number = 150;
 
-interface Star {
-  x: number;
-  y: number;
-  brightness: number; // 0-1
-  size: number;       // 0.5-2 pixels
-  color: string;
-}
-
-class StarfieldRenderer {
-  private layers: StarfieldLayer[] = [];
-  private canvas: HTMLCanvasElement;
-
-  constructor(width: number, height: number) {
-    this.generateStarfield(width, height);
-  }
-
-  private generateStarfield(width: number, height: number): void {
-    // 3 layers for parallax
-    this.layers = [
-      this.generateLayer(width, height, 0.2, 200, 0.1),  // Far dim stars
-      this.generateLayer(width, height, 0.5, 400, 0.3),  // Mid stars
-      this.generateLayer(width, height, 0.8, 100, 0.7)   // Close bright stars
-    ];
-  }
-
-  private generateLayer(w: number, h: number, depth: number, count: number, parallax: number): StarfieldLayer {
-    const stars: Star[] = [];
-
-    for (let i = 0; i < count; i++) {
-      stars.push({
-        x: Math.random() * w,
-        y: Math.random() * h,
-        brightness: 0.3 + Math.random() * 0.7,
-        size: this.getStarSize(),
-        color: this.getStarColor()
-      });
-    }
-
-    return { stars, depth, brightness: depth, parallaxFactor: parallax };
-  }
-
-  private getStarSize(): number {
-    const r = Math.random();
-    if (r < 0.7) return 1;       // 70% normal
-    if (r < 0.95) return 1.5;    // 25% bright
-    return 2;                     // 5% very bright
-  }
-
-  private getStarColor(): string {
-    const r = Math.random();
-    if (r < 0.7) return '#ffffff';   // White
-    if (r < 0.85) return '#ffffcc';  // Yellow-white
-    if (r < 0.95) return '#ccccff';  // Blue-white
-    return '#ffcccc';                 // Red
-  }
-
-  render(ctx: CanvasRenderingContext2D, cameraOffset: Vector2, palette: ColorPalette): void {
-    for (const layer of this.layers) {
-      ctx.fillStyle = palette.primary;
-      ctx.globalAlpha = layer.brightness * 0.8;
-
-      for (const star of layer.stars) {
-        // Apply parallax
-        const offsetX = cameraOffset.x * layer.parallaxFactor;
-        const offsetY = cameraOffset.y * layer.parallaxFactor;
-
-        // Wrap coordinates
-        let x = (star.x - offsetX) % ctx.canvas.width;
-        let y = (star.y - offsetY) % ctx.canvas.height;
-        if (x < 0) x += ctx.canvas.width;
-        if (y < 0) y += ctx.canvas.height;
-
-        // Draw star
-        ctx.fillRect(
-          Math.floor(x),
-          Math.floor(y),
-          Math.ceil(star.size),
-          Math.ceil(star.size)
-        );
-      }
-
-      ctx.globalAlpha = 1.0;
-    }
-  }
-}
-```
-
-**Result**: Depth through parallax, retro aesthetic, minimal performance impact
-
----
-
-### 4.2 Planet Rendering
-
-**When Player Near Planet**:
-```typescript
-class PlanetRenderer {
-  renderPlanet(ctx: CanvasRenderingContext2D, planet: Planet, camera: Camera, palette: ColorPalette): void {
-    const screenPos = this.worldToScreen(planet.position, camera);
-    const screenRadius = this.worldToScreenScale(planet.physical.radius, camera);
-
-    // Don't render if off-screen
-    if (!this.isOnScreen(screenPos, screenRadius)) return;
-
-    // Planet circle
+  render(ctx: CanvasRenderingContext2D, contacts: Contact[], player: Ship, range: number, palette: ColorPalette): void {
+    // Radar circle
     ctx.beginPath();
-    ctx.arc(screenPos.x, screenPos.y, screenRadius, 0, Math.PI * 2);
+    ctx.arc(this.centerX, this.centerY, this.radarRadius, 0, Math.PI * 2);
     ctx.strokeStyle = palette.primary;
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Atmosphere glow (if has atmosphere)
-    if (planet.physical.atmospherePressure && planet.physical.atmospherePressure > 0) {
-      const atmosphereRadius = screenRadius * 1.1;
-      ctx.beginPath();
-      ctx.arc(screenPos.x, screenPos.y, atmosphereRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = palette.secondary;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    // Label (if close enough)
-    if (screenRadius > 20) {
-      ctx.font = '12px monospace';
-      ctx.fillStyle = palette.primary;
-      ctx.textAlign = 'center';
-      ctx.fillText(planet.name, screenPos.x, screenPos.y - screenRadius - 10);
-
-      // Info (if very close)
-      if (screenRadius > 100) {
-        ctx.font = '10px monospace';
-        ctx.fillStyle = palette.secondary;
-        ctx.fillText(`${planet.planetClass}`, screenPos.x, screenPos.y - screenRadius - 25);
-      }
-    }
-  }
-}
-```
-
-**Atmosphere When in Orbit**:
-```typescript
-class AtmosphereRenderer {
-  renderAtmosphericView(ctx: CanvasRenderingContext2D, planet: Planet, altitude: number, palette: ColorPalette): void {
-    if (!planet.physical.atmospherePressure) return;
-
-    // Gradient sky based on altitude
-    const gradient = ctx.createLinearGradient(0, ctx.canvas.height, 0, 0);
-
-    const skyColor = this.getSkyColor(planet, altitude);
-    const altitudeFactor = Math.min(1, altitude / 100000); // Fade to black above 100km
-
-    gradient.addColorStop(0, skyColor);
-    gradient.addColorStop(altitudeFactor, `rgba(0, 0, 0, 0.5)`);
-    gradient.addColorStop(1, '#000000');
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-
-    // Horizon line (if close to surface)
-    if (altitude < 50000) {
-      const horizonY = ctx.canvas.height - (altitude / 50000) * ctx.canvas.height;
-      ctx.strokeStyle = palette.secondary;
-      ctx.beginPath();
-      ctx.moveTo(0, horizonY);
-      ctx.lineTo(ctx.canvas.width, horizonY);
-      ctx.stroke();
-    }
-  }
-
-  private getSkyColor(planet: Planet, altitude: number): string {
-    const atmos = planet.physical.atmosphereComposition;
-
-    if (atmos?.includes('O2')) {
-      // Earth-like
-      return `rgb(135, 206, 235)`; // Sky blue
-    } else if (atmos?.includes('CO2')) {
-      // Mars-like
-      return `rgb(255, 179, 102)`; // Butterscotch
-    } else if (atmos?.includes('CH4')) {
-      // Titan-like
-      return `rgb(255, 153, 51)`;  // Orange
-    }
-
-    return `rgb(50, 50, 50)`;      // Generic gray
-  }
-}
-```
-
----
-
-### 4.3 Ship Contact Rendering
-
-**Radar Display**:
-```typescript
-class RadarRenderer {
-  renderContacts(ctx: CanvasRenderingContext2D, contacts: Contact[], player: Ship, range: number, palette: ColorPalette): void {
-    const centerX = 200;
-    const centerY = 200;
-    const radarRadius = 150;
-
-    // Radar circle
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radarRadius, 0, Math.PI * 2);
-    ctx.strokeStyle = palette.primary;
-    ctx.stroke();
-
-    // Range rings
+    // Range rings (25%, 50%, 75%, 100%)
     ctx.strokeStyle = palette.secondary;
+    ctx.lineWidth = 1;
     for (let i = 1; i <= 3; i++) {
       ctx.beginPath();
-      ctx.arc(centerX, centerY, radarRadius * (i / 4), 0, Math.PI * 2);
+      ctx.arc(this.centerX, this.centerY, this.radarRadius * (i / 4), 0, Math.PI * 2);
       ctx.stroke();
     }
 
-    // Cardinal directions
-    ctx.fillStyle = palette.primary;
+    // Range labels
     ctx.font = '10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('N', centerX, centerY - radarRadius - 5);
-    ctx.fillText('S', centerX, centerY + radarRadius + 15);
-    ctx.textAlign = 'left';
-    ctx.fillText('E', centerX + radarRadius + 5, centerY + 5);
+    ctx.fillStyle = palette.secondary;
     ctx.textAlign = 'right';
-    ctx.fillText('W', centerX - radarRadius - 5, centerY + 5);
-    ctx.textAlign = 'left';
+    ctx.fillText(`${(range * 0.25).toFixed(1)}km`, this.centerX - 5, this.centerY);
+    ctx.fillText(`${(range * 0.5).toFixed(1)}km`, this.centerX - 5, this.centerY - this.radarRadius * 0.25);
+    ctx.fillText(`${(range * 0.75).toFixed(1)}km`, this.centerX - 5, this.centerY - this.radarRadius * 0.5);
+    ctx.fillText(`${range.toFixed(1)}km`, this.centerX - 5, this.centerY - this.radarRadius * 0.75);
 
-    // Player (center)
+    // Cardinal directions
+    ctx.font = '12px monospace';
+    ctx.fillStyle = palette.primary;
+    ctx.textAlign = 'center';
+    ctx.fillText('N', this.centerX, this.centerY - this.radarRadius - 10);
+    ctx.fillText('S', this.centerX, this.centerY + this.radarRadius + 20);
+    ctx.textAlign = 'left';
+    ctx.fillText('E', this.centerX + this.radarRadius + 10, this.centerY + 5);
+    ctx.textAlign = 'right';
+    ctx.fillText('W', this.centerX - this.radarRadius - 10, this.centerY + 5);
+
+    // Player ship (center)
     ctx.fillStyle = palette.accent;
-    ctx.fillRect(centerX - 2, centerY - 2, 4, 4);
+    ctx.fillRect(this.centerX - 3, this.centerY - 3, 6, 6);
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('YOU', this.centerX + 8, this.centerY + 5);
 
     // Contacts
     for (const contact of contacts) {
-      this.renderContact(ctx, contact, player, centerX, centerY, radarRadius, range, palette);
+      this.renderContact(ctx, contact, player, range, palette);
     }
+
+    // Heading indicator
+    ctx.strokeStyle = palette.accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.centerX, this.centerY);
+    const headingLength = 20;
+    ctx.lineTo(
+      this.centerX + Math.sin(player.heading) * headingLength,
+      this.centerY - Math.cos(player.heading) * headingLength
+    );
+    ctx.stroke();
   }
 
-  private renderContact(ctx: CanvasRenderingContext2D, contact: Contact, player: Ship, centerX: number, centerY: number, radarRadius: number, range: number, palette: ColorPalette): void {
+  private renderContact(ctx: CanvasRenderingContext2D, contact: Contact, player: Ship, range: number, palette: ColorPalette): void {
     // Calculate relative position
     const dx = contact.position.x - player.position.x;
     const dy = contact.position.y - player.position.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    if (distance > range) return; // Out of range
+    if (distance > range) return; // Out of radar range
 
     // Scale to radar
-    const scale = radarRadius / range;
-    const px = centerX + dx * scale;
-    const py = centerY + dy * scale;
+    const scale = this.radarRadius / range;
+    const px = this.centerX + dx * scale;
+    const py = this.centerY + dy * scale;
 
-    // Color based on type
-    let color = palette.primary;
-    let symbol = '*';
+    // Symbol and color based on contact type
+    const display = this.getContactDisplay(contact, player);
+
+    ctx.fillStyle = display.color;
+    ctx.font = '14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(display.symbol, px, py + 5);
+
+    // Label if targeted or very close
+    if (contact.targeted || distance < range * 0.1) {
+      ctx.font = '8px monospace';
+      ctx.fillText(contact.callsign || contact.id.substring(0, 6), px, py - 8);
+    }
+  }
+
+  private getContactDisplay(contact: Contact, player: Ship): { symbol: string; color: string } {
+    // Use palette.primary, palette.secondary, palette.accent, palette.good, palette.warning, palette.critical
 
     if (contact.type === 'STATION') {
-      color = palette.info;
-      symbol = '■';
+      return { symbol: '■', color: palette.info };
     } else if (contact.type === 'DERELICT') {
-      color = palette.secondary;
-      symbol = '○';
+      return { symbol: '○', color: palette.secondary };
     } else if (contact.type === 'DISTRESS') {
-      color = palette.danger;
-      symbol = '!';
-    } else if (contact.faction === player.faction) {
-      color = palette.good;
+      return { symbol: '!', color: palette.critical };
+    } else if (contact.type === 'ASTEROID') {
+      return { symbol: '·', color: palette.secondary };
+    } else if (contact.type === 'PLANET') {
+      return { symbol: '◯', color: palette.primary };
     } else if (contact.hostile) {
-      color = palette.danger;
-    }
-
-    ctx.fillStyle = color;
-    ctx.font = '14px monospace';
-    ctx.fillText(symbol, px - 4, py + 4);
-
-    // Label if targeted
-    if (contact.targeted) {
-      ctx.font = '10px monospace';
-      ctx.fillText(contact.name, px + 10, py);
+      return { symbol: '×', color: palette.critical };
+    } else if (contact.faction === player.faction) {
+      return { symbol: '*', color: palette.good };
+    } else {
+      return { symbol: '*', color: palette.primary };
     }
   }
 }
 ```
 
+**What it looks like**:
+```
+      N
+      ↑
+   50km
+
+W ●─────● E
+  │  ■  │
+  │ YOU │
+  │  *  │
+  └─────┘
+      S
+
+● = Player
+■ = Station
+* = Other ship
+○ = Derelict
+! = Distress
+```
+
 ---
 
-### 4.4 Asteroid Field Rendering
+### 4.2 Contact List Display
 
-**Visual Asteroid Field**:
+**Text-based contact listing** on Navigation panel:
+
 ```typescript
-class AsteroidFieldRenderer {
-  private asteroidSprites: Vector2[][] = []; // Pre-generated vector shapes
+class ContactListRenderer {
+  render(ctx: CanvasRenderingContext2D, contacts: Contact[], player: Ship, x: number, y: number, palette: ColorPalette): void {
+    ctx.font = '12px monospace';
+    ctx.fillStyle = palette.primary;
 
-  constructor() {
-    // Generate 10 different asteroid shapes
-    for (let i = 0; i < 10; i++) {
-      this.asteroidSprites.push(this.generateAsteroidShape());
-    }
-  }
+    // Header
+    ctx.fillText('CONTACTS', x, y);
+    y += 20;
 
-  private generateAsteroidShape(): Vector2[] {
-    const points: Vector2[] = [];
-    const numPoints = 6 + Math.floor(Math.random() * 4);
+    ctx.font = '10px monospace';
+    ctx.fillStyle = palette.secondary;
+    ctx.fillText('ID   RNG     BRG    VEL     TYPE', x, y);
+    y += 15;
 
-    for (let i = 0; i < numPoints; i++) {
-      const angle = (i / numPoints) * Math.PI * 2;
-      const radius = 5 + Math.random() * 10;
-      points.push({
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius
-      });
-    }
+    // Sort contacts by distance
+    const sorted = contacts
+      .map(c => ({
+        contact: c,
+        distance: this.calculateDistance(c.position, player.position)
+      }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 8); // Show only 8 closest
 
-    return points;
-  }
+    // List contacts
+    for (let i = 0; i < sorted.length; i++) {
+      const { contact, distance } = sorted[i];
+      const bearing = this.calculateBearing(contact.position, player.position, player.heading);
+      const relativeVel = this.calculateRelativeVelocity(contact.velocity, player.velocity);
 
-  render(ctx: CanvasRenderingContext2D, asteroids: Asteroid[], camera: Camera, palette: ColorPalette): void {
-    ctx.strokeStyle = palette.secondary;
-    ctx.lineWidth = 1;
-
-    for (const asteroid of asteroids) {
-      const screenPos = this.worldToScreen(asteroid.position, camera);
-
-      if (!this.isOnScreen(screenPos)) continue;
-
-      // Select sprite
-      const spriteIndex = asteroid.id % this.asteroidSprites.length;
-      const sprite = this.asteroidSprites[spriteIndex];
-
-      // Draw
-      ctx.beginPath();
-      const first = sprite[0];
-      ctx.moveTo(screenPos.x + first.x, screenPos.y + first.y);
-
-      for (let i = 1; i < sprite.length; i++) {
-        const point = sprite[i];
-        ctx.lineTo(screenPos.x + point.x, screenPos.y + point.y);
+      // Color code by type/status
+      if (contact.targeted) {
+        ctx.fillStyle = palette.accent;
+      } else if (contact.type === 'DISTRESS') {
+        ctx.fillStyle = palette.critical;
+      } else if (contact.hostile) {
+        ctx.fillStyle = palette.warning;
+      } else {
+        ctx.fillStyle = palette.primary;
       }
 
-      ctx.closePath();
+      const line = this.formatContactLine(i + 1, distance, bearing, relativeVel, contact.type);
+      ctx.fillText(line, x, y);
+      y += 15;
+
+      // Status indicator
+      if (distance < 1000) {
+        ctx.fillStyle = palette.good;
+        ctx.fillText('CLOSE', x + 280, y - 15);
+      } else if (relativeVel < 0) {
+        ctx.fillStyle = palette.warning;
+        ctx.fillText('CLOSING', x + 280, y - 15);
+      }
+    }
+  }
+
+  private formatContactLine(id: number, distance: number, bearing: number, velocity: number, type: string): string {
+    const distKm = (distance / 1000).toFixed(1);
+    const bearingDeg = Math.floor(bearing * 180 / Math.PI);
+    const velMs = velocity.toFixed(1);
+    const typeStr = type.substring(0, 6).toUpperCase();
+
+    return `${id}    ${distKm.padStart(6)}km ${bearingDeg.toString().padStart(3)}° ${velMs.padStart(6)}m/s ${typeStr}`;
+  }
+
+  private calculateDistance(pos1: Vector3, pos2: Vector3): number {
+    const dx = pos1.x - pos2.x;
+    const dy = pos1.y - pos2.y;
+    const dz = pos1.z - pos2.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  private calculateBearing(targetPos: Vector3, playerPos: Vector3, playerHeading: number): number {
+    const dx = targetPos.x - playerPos.x;
+    const dy = targetPos.y - playerPos.y;
+    let bearing = Math.atan2(dx, dy) - playerHeading;
+
+    // Normalize to 0-2π
+    while (bearing < 0) bearing += Math.PI * 2;
+    while (bearing >= Math.PI * 2) bearing -= Math.PI * 2;
+
+    return bearing;
+  }
+
+  private calculateRelativeVelocity(targetVel: Vector3, playerVel: Vector3): number {
+    const dx = targetVel.x - playerVel.x;
+    const dy = targetVel.y - playerVel.y;
+    const dz = targetVel.z - playerVel.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+}
+```
+
+**What it looks like**:
+```
+CONTACTS
+ID   RNG     BRG    VEL     TYPE
+1      8.2km 045°   12.5m/s TRADER   CLOSING
+2     15.7km 310°    5.2m/s MINER
+3      2.1km 180°   18.3m/s STATION  CLOSE
+4     45.3km 092°    8.1m/s PATROL
+```
+
+---
+
+### 4.3 Docking Camera View
+
+**Small viewport** for precision docking challenges (optional, could be text-only):
+
+```typescript
+class DockingCameraRenderer {
+  // Minimal wireframe view for docking
+  render(ctx: CanvasRenderingContext2D, target: Station | Ship, player: Ship, x: number, y: number, width: number, height: number, palette: ColorPalette): void {
+    // Draw viewport border
+    ctx.strokeStyle = palette.primary;
+    ctx.strokeRect(x, y, width, height);
+
+    // Label
+    ctx.font = '10px monospace';
+    ctx.fillStyle = palette.secondary;
+    ctx.fillText('DOCKING CAM', x + 5, y - 5);
+
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+
+    // Calculate relative position
+    const dx = target.position.x - player.position.x;
+    const dy = target.position.y - player.position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Scale (closer = bigger)
+    const scale = Math.min(1, 1000 / distance);
+    const targetSize = 30 * scale;
+
+    // Draw target (simple square/circle for station/ship)
+    if (target.type === 'STATION') {
+      ctx.strokeStyle = palette.accent;
+      ctx.strokeRect(
+        centerX - targetSize / 2,
+        centerY - targetSize / 2,
+        targetSize,
+        targetSize
+      );
+    } else {
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, targetSize / 2, 0, Math.PI * 2);
+      ctx.strokeStyle = palette.accent;
       ctx.stroke();
     }
+
+    // Docking alignment indicator
+    const alignmentError = this.calculateAlignmentError(player, target);
+    if (alignmentError < 0.1) {
+      ctx.fillStyle = palette.good;
+      ctx.fillText('ALIGNED', centerX - 20, y + height - 5);
+    } else {
+      ctx.fillStyle = palette.warning;
+      ctx.fillText('MISALIGNED', centerX - 30, y + height - 5);
+    }
+
+    // Distance readout
+    ctx.fillStyle = palette.primary;
+    ctx.fillText(`${distance.toFixed(0)}m`, centerX - 15, y + 15);
+
+    // Relative velocity indicator
+    const relVel = this.calculateApproachVelocity(player, target);
+    let velColor = palette.good;
+    if (Math.abs(relVel) > 5) velColor = palette.critical;
+    else if (Math.abs(relVel) > 2) velColor = palette.warning;
+
+    ctx.fillStyle = velColor;
+    ctx.fillText(`${relVel.toFixed(1)}m/s`, centerX - 20, y + height - 20);
+  }
+
+  private calculateAlignmentError(player: Ship, target: any): number {
+    // Simplified - returns 0-1 (0 = perfect, 1 = 180° off)
+    const dx = target.position.x - player.position.x;
+    const dy = target.position.y - player.position.y;
+    const targetBearing = Math.atan2(dx, dy);
+    const error = Math.abs(targetBearing - player.heading);
+    return Math.min(error / Math.PI, 1);
+  }
+
+  private calculateApproachVelocity(player: Ship, target: any): number {
+    // Velocity component along approach vector
+    const dx = target.position.x - player.position.x;
+    const dy = target.position.y - player.position.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    const approachX = dx / distance;
+    const approachY = dy / distance;
+
+    const relVelX = player.velocity.x - (target.velocity?.x || 0);
+    const relVelY = player.velocity.y - (target.velocity?.y || 0);
+
+    return -(relVelX * approachX + relVelY * approachY); // Negative = approaching
+  }
+}
+```
+
+**What it looks like**:
+```
+┌─ DOCKING CAM ──────┐
+│                    │
+│      150m          │
+│        ■           │
+│                    │
+│    MISALIGNED      │
+│     2.3m/s         │
+└────────────────────┘
+```
+
+---
+
+### 4.4 Panel Background Effects
+
+**CRT/Terminal aesthetics** for all panels:
+
+```typescript
+class PanelBackgroundRenderer {
+  private scanlineOpacity: number = 0.1;
+  private glowRadius: number = 10;
+
+  renderPanelBackground(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, palette: ColorPalette): void {
+    // Dark background
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(x, y, width, height);
+
+    // Panel border with glow
+    ctx.strokeStyle = palette.primary;
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = this.glowRadius;
+    ctx.shadowColor = palette.primary;
+    ctx.strokeRect(x, y, width, height);
+    ctx.shadowBlur = 0;
+
+    // Optional: Scanlines
+    if (this.scanlineOpacity > 0) {
+      ctx.fillStyle = `rgba(0, 0, 0, ${this.scanlineOpacity})`;
+      for (let i = y; i < y + height; i += 2) {
+        ctx.fillRect(x, i, width, 1);
+      }
+    }
+  }
+
+  renderCRTGlow(ctx: CanvasRenderingContext2D, palette: ColorPalette): void {
+    // Subtle screen glow effect over entire canvas
+    const gradient = ctx.createRadialGradient(
+      ctx.canvas.width / 2,
+      ctx.canvas.height / 2,
+      0,
+      ctx.canvas.width / 2,
+      ctx.canvas.height / 2,
+      Math.max(ctx.canvas.width, ctx.canvas.height) / 2
+    );
+
+    gradient.addColorStop(0, `rgba(${this.hexToRgb(palette.primary)}, 0.05)`);
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+
+  private hexToRgb(hex: string): string {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+      ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}`
+      : '0, 255, 0';
   }
 }
 ```
 
 ---
 
-## Part 5: Integration with Game Loop
+## Part 5: Game Loop Integration
 
-### 5.1 Rendering Pipeline
+### 5.1 What Actually Renders
 
-```typescript
-class GameRenderer {
-  private starfield: StarfieldRenderer;
-  private planetRenderer: PlanetRenderer;
-  private asteroidRenderer: AsteroidFieldRenderer;
-  private radarRenderer: RadarRenderer;
-  private shipRenderer: ShipRenderer;
+**You are looking at CONTROL PANELS**, not space:
 
-  render(ctx: CanvasRenderingContext2D, gameState: GameState): void {
-    const { player, system, camera, palette } = gameState;
-
-    // 1. Background layers (static or slow-moving)
-    this.starfield.render(ctx, camera.offset, palette);
-
-    // 2. Distant objects
-    if (gameState.nearPlanet) {
-      this.planetRenderer.renderAtmosphericView(ctx, gameState.nearPlanet, gameState.altitude, palette);
-    } else {
-      this.planetRenderer.renderPlanets(ctx, system.planets, camera, palette);
-    }
-
-    // 3. Asteroid fields
-    if (gameState.inAsteroidField) {
-      this.asteroidRenderer.render(ctx, gameState.nearbyAsteroids, camera, palette);
-    }
-
-    // 4. Stations
-    this.renderStations(ctx, system.stations, camera, palette);
-
-    // 5. NPC ships
-    this.shipRenderer.renderNPCShips(ctx, gameState.nearbyShips, camera, palette);
-
-    // 6. Player ship (if external view - for debugging)
-    if (gameState.viewMode === 'EXTERNAL') {
-      this.shipRenderer.renderPlayerShip(ctx, player, camera, palette);
-    }
-
-    // 7. UI overlays (panels rendered separately)
-    // This is just the space view background
-  }
-}
+```
+┌────────────────────────────────────────────────────────────┐
+│ [HELM]  [ENGINEERING]  [NAVIGATION]  [LIFE SUPPORT]       │ ← Station selector
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌─ NAVIGATION ─────────────┐  ┌─ TACTICAL ──────────┐   │
+│  │                           │  │      N              │   │
+│  │ SENSORS                   │  │      ↑              │   │
+│  │  RADAR:  ACTIVE           │  │   50km              │   │
+│  │  RANGE:  [||||] 50km      │  │                     │   │
+│  │  LIDAR:  PASSIVE          │  │  W  ●──■──●  E      │   │
+│  │                           │  │      │ YOU │        │   │
+│  │ CONTACTS (8)              │  │      │  *  │        │   │
+│  │  1   8.2km 045° TRADER    │  │      └─────┘        │   │
+│  │  2  15.7km 310° MINER     │  │         S           │   │
+│  │  3   2.1km 180° STATION   │  │                     │   │
+│  │  4  45.3km 092° PATROL    │  │  ● = Player         │   │
+│  │                           │  │  ■ = Station        │   │
+│  │ TARGET: Contact #3        │  │  * = Ship           │   │
+│  │  Δv: 8.5 m/s              │  └─────────────────────┘   │
+│  │  Intercept: 145s          │                            │
+│  └───────────────────────────┘                            │
+│                                                            │
+│  VEL: 15.2m/s @ 045°    FUEL: 450kg    POWER: 2.4kW      │ ← Status bar
+└────────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 Game Loop Integration
+No starfields. No beautiful planet renders. Just **DATA**.
+
+---
+
+### 5.2 Update Loop (What Matters)
 
 ```typescript
 class Game {
   private aiManager: AIManager;
   private trafficManager: SystemTrafficManager;
   private eventSpawner: DynamicEventSpawner;
-  private renderer: GameRenderer;
+  private currentStation: 'HELM' | 'ENGINEERING' | 'NAVIGATION' | 'LIFE_SUPPORT';
 
   update(deltaTime: number): void {
     // 1. Update universe (orbital mechanics)
+    // Planets, asteroids move along orbits
     this.currentSystem.update(deltaTime);
 
-    // 2. Update player ship
+    // 2. Update player ship physics & systems
     this.playerShip.update(deltaTime);
 
-    // 3. Update NPC AI (LOD-based)
+    // 3. Update NPC AI (LOD-based - THIS IS WHERE LOD MATTERS)
+    // Ships far away: update 0.1 Hz (every 10 seconds)
+    // Ships nearby: update 60 Hz (every frame)
     this.aiManager.update(deltaTime, this.npcShips, this.playerShip);
 
     // 4. Update station activity
     for (const station of this.currentSystem.stations) {
       station.dockingAI.update(deltaTime);
+      station.economyAI.update(deltaTime);
     }
 
     // 5. Update ambient traffic
+    // Ships docking/undocking, traders moving between stations
     this.trafficManager.update(deltaTime, this.playerShip);
 
     // 6. Check for dynamic events
@@ -1211,8 +1277,9 @@ class Game {
       this.triggerEvent(event);
     }
 
-    // 7. Update camera
-    this.camera.follow(this.playerShip.position);
+    // 7. Update sensor data
+    // What shows up on radar, contact list
+    this.sensorSystem.scan(this.playerShip, this.currentSystem);
   }
 
   render(): void {
@@ -1222,25 +1289,62 @@ class Game {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Render game world
-    this.renderer.render(ctx, {
-      player: this.playerShip,
-      system: this.currentSystem,
-      camera: this.camera,
-      palette: this.settings.palette,
-      nearPlanet: this.findNearestPlanet(),
-      altitude: this.calculateAltitude(),
-      inAsteroidField: this.isInAsteroidField(),
-      nearbyShips: this.getNearbyShips(),
-      nearbyAsteroids: this.getNearbyAsteroids(),
-      viewMode: 'COCKPIT' // or 'EXTERNAL' for debug
-    });
+    // Optional: CRT glow effect
+    this.panelBG.renderCRTGlow(ctx, this.settings.palette);
 
-    // UI panels rendered on top
-    this.uiManager.render(ctx);
+    // Render current station panel
+    switch (this.currentStation) {
+      case 'HELM':
+        this.helmPanel.render(ctx, this.playerShip, this.settings.palette);
+        break;
+      case 'ENGINEERING':
+        this.engineeringPanel.render(ctx, this.playerShip, this.settings.palette);
+        break;
+      case 'NAVIGATION':
+        this.navigationPanel.render(ctx, this.playerShip, this.sensorSystem.contacts, this.settings.palette);
+        break;
+      case 'LIFE_SUPPORT':
+        this.lifeSupportPanel.render(ctx, this.playerShip, this.settings.palette);
+        break;
+    }
+
+    // Status bar at bottom (always visible)
+    this.statusBar.render(ctx, this.playerShip, this.settings.palette);
   }
 }
 ```
+
+**Key Point**: The universe simulation runs in the background. You don't SEE it directly - you see its effects on instruments.
+
+---
+
+### 5.3 What "Background" Means
+
+**NOT visual backgrounds (starfields, planets)**
+
+**YES background simulation:**
+
+1. **NPC ships moving** between stations
+   - You see: Radar blips changing position
+   - Background: AI navigating trade routes
+
+2. **Station economy fluctuating**
+   - You see: Commodity prices when docked
+   - Background: Supply/demand simulation
+
+3. **Orbital mechanics**
+   - You see: Planet position on sensors
+   - Background: Orbital physics calculations
+
+4. **Traffic control**
+   - You see: "Docking queue position 3"
+   - Background: Other ships waiting in queue
+
+5. **Events spawning**
+   - You see: "Distress signal detected"
+   - Background: Event system checking triggers
+
+The universe is **alive** - you just perceive it through **instruments**, not visually.
 
 ---
 
@@ -1395,24 +1499,44 @@ const BALANCE_CONFIG = {
 
 ## Conclusion
 
-This design integrates your existing universe systems (13k lines of star systems, stations, NPC AI, factions, economy) with the Vector Moon Lander gameplay.
+This design integrates your existing universe systems (13k lines of star systems, stations, NPC AI, factions, economy) with the Vector Moon Lander gameplay model (submarine simulator - you see INSTRUMENTS, not space).
 
 **Key Integration Points**:
-1. **NPCShipAI** → Drives derelicts, distress signals, traders, patrols
-2. **SpaceStation** → Docking, trading, services, ambient traffic
-3. **StarSystem** → Provides celestial bodies, asteroid fields, hazards
-4. **FactionSystem** → Reputation affects station access, prices
-5. **TrafficControl** → Manages docking queues, collision avoidance
+1. **NPCShipAI** → Drives derelicts, distress signals, traders, patrols (you see them as radar blips)
+2. **SpaceStation** → Docking, trading, services, ambient traffic (you see text readouts and numbers)
+3. **StarSystem** → Provides celestial bodies, asteroid fields, hazards (you see sensor data)
+4. **FactionSystem** → Reputation affects station access, prices (you see prices change)
+5. **TrafficControl** → Manages docking queues, collision avoidance (you see "Queue position: 3")
 
-**Visual Style**: Retro vector graphics, monochrome terminal aesthetic, consistent with `06-VISUAL-DESIGN-REFERENCE.md`
+**What "Background" Means**:
+- **NOT**: Parallax starfields, beautiful planet renders, cinematic visuals
+- **YES**: Simulated universe running in background that you perceive through instruments
+  - Ships moving on trade routes → Radar blips
+  - Economy simulation → Price readouts
+  - Orbital mechanics → Sensor data
+  - Traffic control → Text messages
+  - Event triggers → Alert notifications
 
-**Performance**: LOD systems ensure 60 FPS even with 100+ ships
+**What You Actually See**:
+- Tactical radar (simple 2D top-down with dots/symbols)
+- Contact list (text: distance, bearing, velocity, type)
+- Docking camera (optional wireframe view)
+- Panel backgrounds (CRT glow, scanlines, terminal aesthetic)
+- Gauges, readouts, numbers, text
+
+**Performance - LOD for AI Simulation** (NOT rendering):
+- Near ships (< 10km): 60 Hz updates (full AI)
+- Medium ships (< 50km): 10 Hz updates (simplified AI)
+- Far ships (< 200km): 1 Hz updates (basic pathfollowing)
+- Very far ships: 0.1 Hz updates (position extrapolation)
+- Result: 60 FPS with 100+ ships
 
 **Next Steps**:
-1. Implement basic starfield renderer
-2. Hook NPCShipAI into event system
-3. Create station docking interface
-4. Add radar contact rendering
-5. Implement dynamic event spawning
+1. Implement tactical radar display (dots and lines on Nav panel)
+2. Implement contact list renderer (text readouts)
+3. Hook NPCShipAI behaviors into event system (derelicts drift, traders dock, patrol ships scan)
+4. Create station docking UI (text interface on Comms panel)
+5. Implement dynamic event spawning (distress signals appear in contact list)
+6. Add panel background effects (CRT glow, scanlines)
 
-The universe is ready - now we just need to render it and let the player interact with it.
+The universe simulates in background. You interact through control panels. This is Das Boot in space.
