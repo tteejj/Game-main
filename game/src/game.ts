@@ -5,7 +5,6 @@
 
 import { SpacecraftAdapter } from './spacecraft-adapter';
 import { StarSystem } from '../../universe-system/src/StarSystem';
-import { Viewport } from './viewport';
 import { Vector3 } from '../../universe-system/src/CelestialBody';
 
 export class Game {
@@ -22,7 +21,6 @@ export class Game {
 
     // Universe
     public starSystem: StarSystem;
-    private viewport: Viewport;
 
     constructor(canvas: HTMLCanvasElement) {
         const ctx = canvas.getContext('2d');
@@ -63,9 +61,6 @@ export class Game {
             this.spacecraft.setPosition(startPos);
             console.log(`🚀 Ship placed near ${planet.name} at altitude ${(orbitHeight / 1000).toFixed(0)} km`);
         }
-
-        // Create viewport
-        this.viewport = new Viewport(canvas);
 
         console.log('Spacecraft initialized');
     }
@@ -194,8 +189,9 @@ export class Game {
      * Render the current frame
      */
     private render(): void {
-        // Render viewport with universe
-        this.viewport.render(this.starSystem, this.spacecraft);
+        // Clear canvas
+        this.ctx.fillStyle = '#000000';
+        this.ctx.fillRect(0, 0, 1280, 720);
 
         // UI will be rendered on top by UIManager
     }
