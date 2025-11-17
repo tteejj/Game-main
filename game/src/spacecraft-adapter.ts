@@ -163,4 +163,20 @@ export class SpacecraftAdapter {
     getFuelState(): any {
         return this.spacecraft.getState().fuel;
     }
+
+    getLifeSupportTelemetry(): any {
+        return this.spacecraft.getLifeSupportTelemetry();
+    }
+
+    getSensorTelemetry(): any {
+        return this.spacecraft.getSensorTelemetry();
+    }
+
+    toggleO2Generator(on: boolean): void {
+        this.spacecraft.toggleO2Generator(on);
+    }
+
+    toggleCO2Scrubber(on: boolean): void {
+        this.spacecraft.toggleCO2Scrubber(on);
+    }
 }

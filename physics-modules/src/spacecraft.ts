@@ -67,6 +67,7 @@ import { ESMSystem } from './esm-system';
 import { SensorFusionSystem } from './sensor-fusion';
 import { CrewSystem } from './crew-system';
 import { OrbitalMechanicsSystem } from './orbital-mechanics';
+import { LifeSupportSystem } from './life-support-enhanced';
 
 export interface SpacecraftConfig {
   // Optional system configurations
@@ -89,6 +90,7 @@ export interface SpacecraftConfig {
   cargoConfig?: any;
   ewConfig?: any;
   environmentalConfig?: any;
+  lifeSupportConfig?: any;
 }
 
 export class Spacecraft {
@@ -137,6 +139,9 @@ export class Spacecraft {
 
   // Orbital mechanics
   public orbitalMechanics: OrbitalMechanicsSystem;
+
+  // Life support system
+  public lifeSupport: LifeSupportSystem;
 
   // Simulation time
   public simulationTime: number = 0;
@@ -216,6 +221,9 @@ export class Spacecraft {
 
     // Initialize orbital mechanics system (default to Earth)
     this.orbitalMechanics = new OrbitalMechanicsSystem();
+
+    // Initialize life support system
+    this.lifeSupport = new LifeSupportSystem(config?.lifeSupportConfig);
 
     // Initialize systems integrator (MUST be last - needs all systems initialized)
     this.systemsIntegrator = new SystemsIntegrator(this);
@@ -636,6 +644,7 @@ export class Spacecraft {
     this.ew.update(dt);
     this.environmental.update(dt);
     this.crew.update(dt);
+    this.lifeSupport.update(dt);
 
     // 18.5. Update weapons control system
     this.weapons.updateShipState(physicsState.position, {
@@ -782,7 +791,8 @@ export class Spacecraft {
       orbitalMechanics: {
         centralBody: this.orbitalMechanics.getCentralBody().name,
         mu: this.orbitalMechanics.getCentralBody().mu
-      }
+      },
+      lifeSupport: this.lifeSupport.getState()
     };
   }
 
@@ -1059,6 +1069,204 @@ export class Spacecraft {
       esm: this.esm.getEvents(),
       sensorFusion: this.sensorFusion.getEvents(),
       crew: this.crew.getEvents()
+    };
+  }
+
+  // =============================================================================
+  // Additional Command Interface Methods (for UI integration)
+  // =============================================================================
+
+  /**
+   * Open main engine fuel valve
+   */
+  openMainEngineFuelValve(): void {
+    // Set valve state - this is a simplified interface
+    // In a more detailed simulation, this would control actual valve positions
+    console.log('Main engine fuel valve opened');
+  }
+
+  /**
+   * Close main engine fuel valve
+   */
+  closeMainEngineFuelValve(): void {
+    console.log('Main engine fuel valve closed');
+  }
+
+  /**
+   * Arm main engine for ignition
+   */
+  armMainEngine(): void {
+    // Prepare engine for ignition sequence
+    console.log('Main engine armed');
+  }
+
+  /**
+   * Set main engine gimbal angles
+   */
+  setMainEngineGimbal(pitchRad: number, yawRad: number): void {
+    this.mainEngine.setGimbal(pitchRad, yawRad);
+  }
+
+  /**
+   * Fire RCS thruster by index
+   */
+  fireRCSThruster(thrusterIndex: number): void {
+    // Map thruster index to RCS groups
+    // This is simplified - actual implementation would map to specific thrusters
+    const groupMap = [
+      'bow_port', 'bow_starboard', 'bow_dorsal', 'bow_ventral',
+      'mid_port', 'mid_starboard', 'mid_dorsal', 'mid_ventral',
+      'stern_port', 'stern_starboard', 'stern_dorsal', 'stern_ventral'
+    ];
+
+    if (thrusterIndex >= 0 && thrusterIndex < groupMap.length) {
+      this.rcs.activateGroup(groupMap[thrusterIndex]);
+    }
+  }
+
+  /**
+   * Stop RCS thruster by index
+   */
+  stopRCSThruster(thrusterIndex: number): void {
+    const groupMap = [
+      'bow_port', 'bow_starboard', 'bow_dorsal', 'bow_ventral',
+      'mid_port', 'mid_starboard', 'mid_dorsal', 'mid_ventral',
+      'stern_port', 'stern_starboard', 'stern_dorsal', 'stern_ventral'
+    ];
+
+    if (thrusterIndex >= 0 && thrusterIndex < groupMap.length) {
+      this.rcs.deactivateGroup(groupMap[thrusterIndex]);
+    }
+  }
+
+  /**
+   * Emergency reactor SCRAM (shutdown)
+   */
+  scramReactor(): void {
+    this.electrical.scramReactor();
+  }
+
+  /**
+   * Set reactor power output (0-1)
+   */
+  setReactorPower(powerFraction: number): void {
+    this.electrical.setReactorPower(powerFraction);
+  }
+
+  /**
+   * Set circuit breaker state
+   */
+  setCircuitBreaker(index: number, state: boolean): void {
+    this.electrical.setCircuitBreaker(index, state);
+  }
+
+  /**
+   * Deploy thermal radiators
+   */
+  deployRadiators(): void {
+    this.thermal.deployRadiators();
+  }
+
+  /**
+   * Retract thermal radiators
+   */
+  retractRadiators(): void {
+    this.thermal.retractRadiators();
+  }
+
+  /**
+   * Stop coolant pump
+   */
+  stopCoolantPump(loopId: number): void {
+    this.coolant.stopPump(loopId);
+  }
+
+  /**
+   * Set radar active state
+   */
+  setRadarActive(active: boolean): void {
+    this.radar.setActive(active);
+  }
+
+  /**
+   * Set radar range in meters
+   */
+  setRadarRange(rangeMeters: number): void {
+    this.radar.setRange(rangeMeters);
+  }
+
+  /**
+   * Get life support telemetry for UI
+   */
+  getLifeSupportTelemetry() {
+    const state = this.lifeSupport.getState();
+
+    // Return telemetry for selected compartment (default to center)
+    const centerCompartment = state.compartments.find(c => c.id === 'center');
+
+    if (!centerCompartment) {
+      return {
+        o2Percent: 21,
+        co2Percent: 0.04,
+        pressure: 101,
+        temperature: 293,
+        o2GeneratorOn: state.o2GeneratorActive,
+        co2ScrubberOn: state.co2ScrubberActive,
+        compartments: state.compartments
+      };
+    }
+
+    // Calculate percentages from masses and volume
+    const totalMass = centerCompartment.o2Mass + centerCompartment.co2Mass + centerCompartment.n2Mass;
+    const o2Percent = (centerCompartment.o2Mass / totalMass) * 100;
+    const co2Percent = (centerCompartment.co2Mass / totalMass) * 100;
+
+    // Calculate pressure from ideal gas law: PV = nRT
+    const R = 8.314; // J/(mol·K)
+    const o2Moles = centerCompartment.o2Mass / 0.032;
+    const co2Moles = centerCompartment.co2Mass / 0.044;
+    const n2Moles = centerCompartment.n2Mass / 0.028;
+    const totalMoles = o2Moles + co2Moles + n2Moles;
+    const pressure = (totalMoles * R * centerCompartment.temperature) / centerCompartment.volume / 1000; // kPa
+
+    return {
+      o2Percent: parseFloat(o2Percent.toFixed(1)),
+      co2Percent: parseFloat(co2Percent.toFixed(2)),
+      pressure: parseFloat(pressure.toFixed(1)),
+      temperature: parseFloat(centerCompartment.temperature.toFixed(1)),
+      o2GeneratorOn: state.o2GeneratorActive,
+      co2ScrubberOn: state.co2ScrubberActive,
+      compartments: state.compartments
+    };
+  }
+
+  /**
+   * Toggle O2 generator
+   */
+  toggleO2Generator(on: boolean): void {
+    this.lifeSupport.o2GeneratorActive = on;
+  }
+
+  /**
+   * Toggle CO2 scrubber
+   */
+  toggleCO2Scrubber(on: boolean): void {
+    this.lifeSupport.co2ScrubberActive = on;
+  }
+
+  /**
+   * Get sensor telemetry for navigation panel
+   */
+  getSensorTelemetry() {
+    const radarState = this.radar.getState();
+
+    return {
+      radarActive: radarState.active,
+      radarRange: radarState.maxRange / 1000, // Convert to km
+      radarGain: 100, // Simplified - actual gain would come from radar config
+      lidarActive: false, // LIDAR not implemented yet
+      radarContacts: radarState.contacts,
+      radarTracks: radarState.tracks
     };
   }
 }

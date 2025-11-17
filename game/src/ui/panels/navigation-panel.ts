@@ -44,6 +44,7 @@ export class NavigationPanel {
     render(): void {
         const ctx = this.ctx;
         const navData = this.spacecraft.getNavigationTelemetry();
+        const sensorData = this.spacecraft.getSensorTelemetry();
 
         ctx.font = 'bold 20px "Courier New"';
         ctx.fillStyle = this.palette.info;
@@ -90,16 +91,16 @@ export class NavigationPanel {
         ctx.fillStyle = this.palette.primary;
         ctx.fillText('SENSORS', 450, y);
         y += 30;
-        ctx.fillStyle = this.radarActive ? this.palette.primary : this.palette.muted;
-        ctx.fillText(`RADAR: ${this.radarActive ? 'ACTIVE' : 'OFF'}  (R)`, 470, y);
+        ctx.fillStyle = sensorData.radarActive ? this.palette.primary : this.palette.muted;
+        ctx.fillText(`RADAR: ${sensorData.radarActive ? 'ACTIVE' : 'OFF'}  (R)`, 470, y);
         y += 25;
         ctx.fillStyle = this.palette.secondary;
         ctx.fillText(`Range: ${this.radarRange}km  (Z/X)`, 470, y);
         y += 20;
-        ctx.fillText(`Gain: ${this.radarGain}%  (C/V)`, 470, y);
+        ctx.fillText(`Gain: ${sensorData.radarGain}%  (C/V)`, 470, y);
         y += 40;
-        ctx.fillStyle = this.lidarActive ? this.palette.primary : this.palette.muted;
-        ctx.fillText(`LIDAR: ${this.lidarActive ? 'ACTIVE' : 'PASSIVE'}  (L)`, 470, y);
+        ctx.fillStyle = sensorData.lidarActive ? this.palette.primary : this.palette.muted;
+        ctx.fillText(`LIDAR: ${sensorData.lidarActive ? 'ACTIVE' : 'PASSIVE'}  (L)`, 470, y);
 
         // Contacts
         y += 50;

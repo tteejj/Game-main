@@ -22,6 +22,7 @@ export class LifeSupportPanel {
 
     handleInput(key: string): void {
         const keyLower = key.toLowerCase();
+        const lifeSupport = this.spacecraft.getLifeSupportTelemetry();
 
         switch (keyLower) {
             case '1': case '2': case '3': case '4': case '5': case '6':
@@ -29,18 +30,19 @@ export class LifeSupportPanel {
                 console.log(`Selected compartment: ${this.selectedCompartment}`);
                 break;
             case 'o':
-                this.o2GeneratorOn = !this.o2GeneratorOn;
-                console.log(`O2 Generator: ${this.o2GeneratorOn ? 'ON' : 'OFF'}`);
+                this.spacecraft.toggleO2Generator(!lifeSupport.o2GeneratorOn);
+                console.log(`O2 Generator: ${!lifeSupport.o2GeneratorOn ? 'ON' : 'OFF'}`);
                 break;
             case 's':
-                this.co2ScrubberOn = !this.co2ScrubberOn;
-                console.log(`CO2 Scrubber: ${this.co2ScrubberOn ? 'ON' : 'OFF'}`);
+                this.spacecraft.toggleCO2Scrubber(!lifeSupport.co2ScrubberOn);
+                console.log(`CO2 Scrubber: ${!lifeSupport.co2ScrubberOn ? 'ON' : 'OFF'}`);
                 break;
         }
     }
 
     render(): void {
         const ctx = this.ctx;
+        const lifeSupport = this.spacecraft.getLifeSupportTelemetry();
 
         ctx.font = 'bold 20px "Courier New"';
         ctx.fillStyle = this.palette.info;
@@ -73,27 +75,27 @@ export class LifeSupportPanel {
         // Atmosphere readings
         ctx.fillText('ATMOSPHERE', 60, y);
         y += 25;
-        const o2Color = this.o2Percent < 19 ? this.palette.warning : this.palette.primary;
+        const o2Color = lifeSupport.o2Percent < 19 ? this.palette.warning : this.palette.primary;
         ctx.fillStyle = o2Color;
-        ctx.fillText(`O2:    ${this.o2Percent}%  (NORM: 21%)`, 80, y);
+        ctx.fillText(`O2:    ${lifeSupport.o2Percent}%  (NORM: 21%)`, 80, y);
         y += 20;
         ctx.fillStyle = this.palette.secondary;
-        ctx.fillText(`CO2:   ${this.co2Percent}%  (NORM: <1%)`, 80, y);
+        ctx.fillText(`CO2:   ${lifeSupport.co2Percent}%  (NORM: <1%)`, 80, y);
         y += 20;
-        ctx.fillText(`PRESS: ${this.pressure}kPa  (NORM: 101kPa)`, 80, y);
+        ctx.fillText(`PRESS: ${lifeSupport.pressure}kPa  (NORM: 101kPa)`, 80, y);
         y += 20;
-        ctx.fillText(`TEMP:  ${this.temperature}K  (NORM: 293K)`, 80, y);
+        ctx.fillText(`TEMP:  ${lifeSupport.temperature}K  (NORM: 293K)`, 80, y);
 
         // Global systems
         y += 50;
         ctx.fillStyle = this.palette.primary;
         ctx.fillText('GLOBAL SYSTEMS', 40, y);
         y += 25;
-        ctx.fillStyle = this.o2GeneratorOn ? this.palette.primary : this.palette.danger;
-        ctx.fillText(`O2 Generator: ${this.o2GeneratorOn ? 'ON' : 'OFF'}  (O)`, 60, y);
+        ctx.fillStyle = lifeSupport.o2GeneratorOn ? this.palette.primary : this.palette.danger;
+        ctx.fillText(`O2 Generator: ${lifeSupport.o2GeneratorOn ? 'ON' : 'OFF'}  (O)`, 60, y);
         y += 25;
-        ctx.fillStyle = this.co2ScrubberOn ? this.palette.primary : this.palette.danger;
-        ctx.fillText(`CO2 Scrubber: ${this.co2ScrubberOn ? 'ON' : 'OFF'}  (S)`, 60, y);
+        ctx.fillStyle = lifeSupport.co2ScrubberOn ? this.palette.primary : this.palette.danger;
+        ctx.fillText(`CO2 Scrubber: ${lifeSupport.co2ScrubberOn ? 'ON' : 'OFF'}  (S)`, 60, y);
 
         // Keyboard hints
         const hintsY = ctx.canvas.height - 30;
