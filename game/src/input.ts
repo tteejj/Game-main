@@ -19,7 +19,7 @@ export class InputManager {
         window.addEventListener('keyup', this.onKeyUp);
     }
 
-    private onKeyDown = (e: KeyboardEvent): void => {
+    private onKeyDown = (e: KeyboardEvent) => {
         const key = e.key;
         this.keysPressed.add(key);
 
@@ -46,7 +46,7 @@ export class InputManager {
         }
     };
 
-    private onKeyUp = (e: KeyboardEvent): void {
+    private onKeyUp = (e: KeyboardEvent) => {
         this.keysPressed.delete(e.key);
     };
 
