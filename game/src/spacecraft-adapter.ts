@@ -279,4 +279,22 @@ export class SpacecraftAdapter {
     getBreachStatus(): Array<{ id: string; breached: boolean; breachSize: number }> {
         return this.spacecraft.getBreachStatus();
     }
+
+    // ========== FUEL TRANSFER/VENTING CONTROLS ==========
+
+    transferFuel(sourceTankId: string, destTankId: string): boolean {
+        return this.spacecraft.transferFuel(sourceTankId, destTankId);
+    }
+
+    stopFuelTransfer(tankId: string): boolean {
+        return this.spacecraft.stopFuelTransfer(tankId);
+    }
+
+    emergencyFuelDump(tankId: string, enable: boolean): boolean {
+        return this.spacecraft.emergencyFuelDump(tankId, enable);
+    }
+
+    getFuelTransferStatus(): Array<{ tankId: string; transferringTo: string | undefined; venting: boolean }> {
+        return this.spacecraft.getFuelTransferStatus();
+    }
 }

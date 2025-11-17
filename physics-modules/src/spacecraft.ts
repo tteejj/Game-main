@@ -1495,4 +1495,43 @@ export class Spacecraft {
       breachSize: comp.breachSize
     }));
   }
+
+  // =============================================================================
+  // Fuel Transfer and Venting Control Methods
+  // =============================================================================
+
+  /**
+   * Transfer fuel from one tank to another
+   */
+  transferFuel(sourceTankId: string, destTankId: string): boolean {
+    return this.fuel.setCrossfeed(sourceTankId, destTankId);
+  }
+
+  /**
+   * Stop fuel transfer from a tank
+   */
+  stopFuelTransfer(tankId: string): boolean {
+    return this.fuel.setCrossfeed(tankId, undefined);
+  }
+
+  /**
+   * Emergency fuel dump - vent fuel from a tank to space
+   */
+  emergencyFuelDump(tankId: string, enable: boolean): boolean {
+    return this.fuel.setValve(tankId, 'vent', enable);
+  }
+
+  /**
+   * Get fuel transfer status
+   */
+  getFuelTransferStatus(): Array<{ tankId: string; transferringTo: string | undefined; venting: boolean }> {
+    const state = this.fuel.getState();
+    const fullState = (this.fuel as any).tanks; // Access internal tanks for valve status
+    return fullState.map((tank: any) => ({
+      tankId: tank.id,
+      transferringTo: tank.valves.crossfeedTo,
+      venting: tank.valves.vent
+    }));
+  }
 }
+
