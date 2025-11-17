@@ -23,6 +23,7 @@ export class LifeSupportPanel {
     handleInput(key: string): void {
         const keyLower = key.toLowerCase();
         const lifeSupport = this.spacecraft.getLifeSupportTelemetry();
+        const compartmentId = this.getCompartmentId(this.selectedCompartment);
 
         switch (keyLower) {
             case '1': case '2': case '3': case '4': case '5': case '6':
@@ -37,7 +38,49 @@ export class LifeSupportPanel {
                 this.spacecraft.toggleCO2Scrubber(!lifeSupport.co2ScrubberOn);
                 console.log(`CO2 Scrubber: ${!lifeSupport.co2ScrubberOn ? 'ON' : 'OFF'}`);
                 break;
+            case 'd':
+                // Toggle door - prompt for adjacent compartment
+                // For now, toggle all doors connected to selected compartment
+                const adjacentComps = this.getAdjacentCompartments(this.selectedCompartment);
+                if (adjacentComps.length > 0) {
+                    const adjId = this.getCompartmentId(adjacentComps[0]);
+                    this.spacecraft.toggleBulkheadDoor(compartmentId, adjId);
+                    console.log(`Toggled door between ${compartmentId} and ${adjId}`);
+                }
+                break;
+            case 'b':
+                // Seal breach in selected compartment
+                const sealed = this.spacecraft.sealBreach(compartmentId);
+                console.log(sealed ? `Breach sealed in ${compartmentId}` : `No breach to seal in ${compartmentId}`);
+                break;
+            case 'v':
+                // Vent compartment to space
+                this.spacecraft.ventCompartment(compartmentId);
+                console.log(`Venting ${compartmentId} to space...`);
+                break;
+            case 'f':
+                // Suppress fire
+                const suppressed = this.spacecraft.suppressFire(compartmentId);
+                console.log(suppressed ? `Fire suppressed in ${compartmentId}` : `No fire in ${compartmentId}`);
+                break;
         }
+    }
+
+    private getCompartmentId(compNum: number): string {
+        const compartmentNames = ['bow', 'bridge', 'engineering', 'port', 'center', 'stern'];
+        return compartmentNames[compNum - 1] || 'center';
+    }
+
+    private getAdjacentCompartments(compNum: number): number[] {
+        const adjacency: { [key: number]: number[] } = {
+            1: [2, 4],  // bow -> bridge, port
+            2: [1, 3, 5],  // bridge -> bow, engineering, center
+            3: [2, 6],  // engineering -> bridge, stern
+            4: [1, 5],  // port -> bow, center
+            5: [2, 4, 6],  // center -> bridge, port, stern
+            6: [3, 5]   // stern -> engineering, center
+        };
+        return adjacency[compNum] || [];
     }
 
     render(): void {
@@ -86,8 +129,49 @@ export class LifeSupportPanel {
         y += 20;
         ctx.fillText(`TEMP:  ${lifeSupport.temperature}K  (NORM: 293K)`, 80, y);
 
-        // Global systems
+        // Compartment status
         y += 50;
+        ctx.fillStyle = this.palette.primary;
+        ctx.fillText('COMPARTMENT STATUS', 40, y);
+        y += 25;
+
+        const compartmentId = this.getCompartmentId(this.selectedCompartment);
+        const breachStatus = this.spacecraft.getBreachStatus();
+        const doorStatus = this.spacecraft.getDoorStatus();
+        const compartmentBreach = breachStatus.find(b => b.id === compartmentId);
+
+        // Breach status
+        if (compartmentBreach && compartmentBreach.breached) {
+            ctx.fillStyle = this.palette.danger;
+            const breachPercent = (compartmentBreach.breachSize * 100).toFixed(1);
+            ctx.fillText(`⚠ HULL BREACH: ${breachPercent}%  (B=Seal)`, 60, y);
+            y += 25;
+        } else {
+            ctx.fillStyle = this.palette.primary;
+            ctx.fillText(`Hull: INTACT`, 60, y);
+            y += 25;
+        }
+
+        // Door status for adjacent compartments
+        const adjacentComps = this.getAdjacentCompartments(this.selectedCompartment);
+        ctx.fillStyle = this.palette.secondary;
+        ctx.fillText('Doors:  (D=Toggle)', 60, y);
+        y += 20;
+        adjacentComps.forEach(adjNum => {
+            const adjId = this.getCompartmentId(adjNum);
+            const door = doorStatus.find(d =>
+                (d.comp1 === compartmentId && d.comp2 === adjId) ||
+                (d.comp2 === compartmentId && d.comp1 === adjId)
+            );
+            const doorOpen = door ? door.open : false;
+            const doorColor = doorOpen ? this.palette.primary : this.palette.warning;
+            ctx.fillStyle = doorColor;
+            ctx.fillText(`  → ${adjId}: ${doorOpen ? 'OPEN' : 'CLOSED'}`, 80, y);
+            y += 18;
+        });
+
+        // Global systems
+        y += 30;
         ctx.fillStyle = this.palette.primary;
         ctx.fillText('GLOBAL SYSTEMS', 40, y);
         y += 25;
@@ -101,6 +185,6 @@ export class LifeSupportPanel {
         const hintsY = ctx.canvas.height - 30;
         ctx.fillStyle = this.palette.muted;
         ctx.font = '12px "Courier New"';
-        ctx.fillText('1-6=Select Compartment  O=O2 Gen  S=Scrubber', 40, hintsY);
+        ctx.fillText('1-6=Comp  O=O2  S=Scrub  D=Door  B=SealBreach  V=Vent  F=Fire', 40, hintsY);
     }
 }

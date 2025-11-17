@@ -253,4 +253,30 @@ export class SpacecraftAdapter {
             this.spacecraft.stopCoolantPump(loopId);
         }
     }
+
+    // ========== LIFE SUPPORT DOOR/BREACH CONTROLS ==========
+
+    toggleBulkheadDoor(comp1Id: string, comp2Id: string): boolean {
+        return this.spacecraft.toggleBulkheadDoor(comp1Id, comp2Id);
+    }
+
+    sealBreach(compartmentId: string): boolean {
+        return this.spacecraft.sealBreach(compartmentId);
+    }
+
+    ventCompartment(compartmentId: string): void {
+        this.spacecraft.ventCompartment(compartmentId);
+    }
+
+    suppressFire(compartmentId: string): boolean {
+        return this.spacecraft.suppressFire(compartmentId);
+    }
+
+    getDoorStatus(): Array<{ comp1: string; comp2: string; open: boolean }> {
+        return this.spacecraft.getDoorStatus();
+    }
+
+    getBreachStatus(): Array<{ id: string; breached: boolean; breachSize: number }> {
+        return this.spacecraft.getBreachStatus();
+    }
 }

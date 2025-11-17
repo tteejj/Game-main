@@ -1439,4 +1439,60 @@ export class Spacecraft {
       nodes: state.nodes
     };
   }
+
+  // =============================================================================
+  // Life Support Door and Breach Control Methods
+  // =============================================================================
+
+  /**
+   * Toggle a bulkhead door between two compartments
+   */
+  toggleBulkheadDoor(comp1Id: string, comp2Id: string): boolean {
+    return this.lifeSupport.toggleBulkheadDoor(comp1Id, comp2Id);
+  }
+
+  /**
+   * Seal a breach in a compartment
+   */
+  sealBreach(compartmentId: string): boolean {
+    return this.lifeSupport.sealBreach(compartmentId);
+  }
+
+  /**
+   * Vent a compartment to space (emergency depressurization)
+   */
+  ventCompartment(compartmentId: string): void {
+    this.lifeSupport.ventCompartment(compartmentId);
+  }
+
+  /**
+   * Suppress fire in a compartment
+   */
+  suppressFire(compartmentId: string): boolean {
+    return this.lifeSupport.suppressFire(compartmentId);
+  }
+
+  /**
+   * Get door status for all compartment connections
+   */
+  getDoorStatus(): Array<{ comp1: string; comp2: string; open: boolean }> {
+    const state = this.lifeSupport.getState();
+    return state.connections.map(conn => ({
+      comp1: conn.compartment1,
+      comp2: conn.compartment2,
+      open: conn.doorOpen
+    }));
+  }
+
+  /**
+   * Get breach status for all compartments
+   */
+  getBreachStatus(): Array<{ id: string; breached: boolean; breachSize: number }> {
+    const state = this.lifeSupport.getState();
+    return state.compartments.map(comp => ({
+      id: comp.id,
+      breached: comp.breached,
+      breachSize: comp.breachSize
+    }));
+  }
 }
