@@ -15,13 +15,16 @@ import { TerrainSystem } from './terrain-system';
 import { EnvironmentSystem } from './environment';
 import { OrbitalBodiesManager, createDefaultSatellite } from './orbital-bodies';
 import { WaypointManager, createPracticeWaypoints } from './waypoints';
+import { SatelliteManager, SatelliteFactory } from './satellite';
 import { Vector3 } from './types';
 
 export interface GameWorldConfig {
   /** Create default moon surface */
   createMoon?: boolean;
-  /** Create practice satellite */
+  /** Create practice satellite (old orbital body system) */
   createSatellite?: boolean;
+  /** Create advanced satellites (new comprehensive system) */
+  createAdvancedSatellites?: boolean;
   /** Create practice waypoints */
   createWaypoints?: boolean;
   /** Terrain seed for procedural generation */
@@ -37,10 +40,14 @@ export class GameWorld {
   public readonly terrain: TerrainSystem;
   public readonly environment: EnvironmentSystem;
   public readonly orbitalBodies: OrbitalBodiesManager;
+  public readonly satellites: SatelliteManager;
   public readonly waypoints: WaypointManager;
 
   // World reference body (the Moon)
   private moonBody: CelestialBody | null = null;
+
+  // Stellar body (the Sun) for satellite solar calculations
+  private stellarBody: { position: Vector3; luminosity: number } | null = null;
 
   constructor(config: GameWorldConfig = {}) {
     // Initialize core world
@@ -60,8 +67,14 @@ export class GameWorld {
     // Initialize orbital bodies manager
     this.orbitalBodies = new OrbitalBodiesManager();
 
+    // Initialize satellite manager (new comprehensive system)
+    this.satellites = new SatelliteManager();
+
     // Initialize waypoint manager
     this.waypoints = new WaypointManager();
+
+    // Create stellar body (Sun) for satellite calculations
+    this.createStellarBody();
 
     // Create default world objects
     if (config.createMoon !== false) {
@@ -72,9 +85,26 @@ export class GameWorld {
       this.createDefaultSatellite();
     }
 
+    if (config.createAdvancedSatellites) {
+      this.createAdvancedSatellites();
+    }
+
     if (config.createWaypoints) {
       this.createDefaultWaypoints();
     }
+  }
+
+  /**
+   * Create stellar body (Sun) for satellite solar power calculations
+   */
+  private createStellarBody(): void {
+    // Simplified stellar body at a fixed distance
+    // In reality, the Sun-Moon distance varies
+    const AU = 1.496e11; // meters
+    this.stellarBody = {
+      position: { x: AU, y: 0, z: 0 }, // 1 AU away
+      luminosity: 3.828e26 // watts (Sun's luminosity)
+    };
   }
 
   /**
@@ -135,6 +165,40 @@ export class GameWorld {
   }
 
   /**
+   * Create advanced satellites with comprehensive subsystems
+   */
+  private createAdvancedSatellites(): void {
+    // Create a communications relay satellite at 200km
+    const commsSat = SatelliteFactory.createCommunicationsSatellite('CommRelay-1', 200000);
+    commsSat.deploySolarPanels();
+    commsSat.deployAntennas();
+    this.satellites.addSatellite(commsSat);
+
+    // Create a reconnaissance satellite at 100km (low orbit for imaging)
+    const reconSat = SatelliteFactory.createReconnaissanceSatellite('ReconSat-1', 100000);
+    reconSat.deploySolarPanels();
+    reconSat.setAttitudeMode('earth_pointing');
+    this.satellites.addSatellite(reconSat);
+
+    // Create navigation satellites (constellation of 3 at 1000km)
+    for (let i = 0; i < 3; i++) {
+      const navSat = SatelliteFactory.createNavigationSatellite(`NavSat-${i + 1}`, 1000000);
+      navSat.deploySolarPanels();
+
+      // Offset the orbital position to spread them out
+      navSat.orbitalBody.M0 = (i * 2 * Math.PI) / 3; // 120 degrees apart
+
+      this.satellites.addSatellite(navSat);
+    }
+
+    // Create a weather/environmental satellite in polar orbit at 500km
+    const weatherSat = SatelliteFactory.createWeatherSatellite('WeatherSat-1', 500000);
+    weatherSat.deploySolarPanels();
+    weatherSat.setAttitudeMode('earth_pointing');
+    this.satellites.addSatellite(weatherSat);
+  }
+
+  /**
    * Update all world systems
    */
   update(dt: number): void {
@@ -147,6 +211,9 @@ export class GameWorld {
     // Update orbital bodies (satellite positions using Kepler mechanics)
     const currentTime = this.world.getTime();
     this.orbitalBodies.update(dt, currentTime);
+
+    // Update advanced satellites with full subsystem modeling
+    this.satellites.update(dt, this.stellarBody);
 
     // Sync orbital body positions to world bodies
     this.syncOrbitalBodiesToWorld();
@@ -291,5 +358,40 @@ export class GameWorld {
    */
   getGravityAt(position: Vector3, excludeId?: string): Vector3 {
     return this.world.getGravityAt(position, excludeId);
+  }
+
+  /**
+   * Get satellite relay network status
+   */
+  getRelayNetworkStatus() {
+    return this.satellites.getRelayNetworkStatus();
+  }
+
+  /**
+   * Get nearest advanced satellite to a position
+   */
+  getNearestSatellite(position: Vector3) {
+    return this.satellites.findNearestSatellite(position);
+  }
+
+  /**
+   * Get all operational satellites
+   */
+  getOperationalSatellites() {
+    return this.satellites.getOperationalSatellites();
+  }
+
+  /**
+   * Get complete game world state including all satellites
+   */
+  getCompleteState() {
+    return {
+      time: this.getTime(),
+      celestialBodies: this.getAllBodies(),
+      satellites: this.satellites.getState(),
+      orbitalBodies: this.orbitalBodies.getAllBodies().map(b => b.getState()),
+      waypoints: Array.from(this.waypoints['waypoints'].values()),
+      relayNetwork: this.getRelayNetworkStatus()
+    };
   }
 }
