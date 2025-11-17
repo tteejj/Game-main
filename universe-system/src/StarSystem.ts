@@ -17,6 +17,7 @@ import {
 import { PlanetGenerator, PlanetGenerationConfig } from './PlanetGenerator';
 import { StationGenerator, SpaceStation } from './StationGenerator';
 import { HazardSystem, Hazard } from './HazardSystem';
+import { Satellite, SatelliteFactory, SatelliteType } from '../../physics-modules/src/satellite';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -24,6 +25,7 @@ export interface StarSystemConfig {
   numPlanets?: { min: number; max: number };
   allowAsteroidBelt?: boolean;
   allowStations?: boolean;
+  allowSatellites?: boolean;
   allowHazards?: boolean;
   civilizationLevel?: number; // 0-10 (0 = uninhabited, 10 = high tech)
   position?: Vector3; // Position in galaxy
@@ -37,6 +39,7 @@ export interface StarSystemData {
   moons: Moon[];
   asteroids: Asteroid[];
   stations: SpaceStation[];
+  satellites: Satellite[];
   hazards: Hazard[];
   position: Vector3;
 }
@@ -52,6 +55,7 @@ export class StarSystem {
   public moons: Moon[] = [];
   public asteroids: Asteroid[] = [];
   public stations: SpaceStation[] = [];
+  public satellites: Satellite[] = [];
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
@@ -109,6 +113,11 @@ export class StarSystem {
     // Generate stations
     if (config.allowStations !== false) {
       this.generateStations(config.civilizationLevel || 5);
+    }
+
+    // Generate satellites
+    if (config.allowSatellites !== false) {
+      this.generateSatellites(config.civilizationLevel || 5);
     }
 
     // Generate hazards
@@ -389,6 +398,107 @@ export class StarSystem {
   }
 
   /**
+   * Generate satellites
+   */
+  private generateSatellites(civilizationLevel: number): void {
+    // More advanced civilizations have more satellites
+    if (civilizationLevel < 3) return; // Low-tech systems don't have satellites
+
+    // Number of satellites scales with civilization level
+    // Level 3-5: 1-2 satellites (basic comms)
+    // Level 6-7: 3-5 satellites (comms + recon)
+    // Level 8-10: 6-10 satellites (full constellation)
+
+    let numSatellites = 0;
+    if (civilizationLevel >= 8) {
+      numSatellites = Math.floor(this.rng.range(6, 10));
+    } else if (civilizationLevel >= 6) {
+      numSatellites = Math.floor(this.rng.range(3, 5));
+    } else {
+      numSatellites = Math.floor(this.rng.range(1, 2));
+    }
+
+    // Find inhabited planets/moons to place satellites around
+    const inhabitedBodies = this.planets.filter(p =>
+      p.isHabitable || p.resources.size > 0 || p.children.length > 0
+    );
+
+    if (inhabitedBodies.length === 0 && this.planets.length > 0) {
+      // Fall back to any planet
+      inhabitedBodies.push(this.planets[0]);
+    }
+
+    if (inhabitedBodies.length === 0) return;
+
+    // Generate satellites around inhabited bodies
+    for (let i = 0; i < numSatellites; i++) {
+      const body = this.rng.choice(inhabitedBodies);
+      const bodyRadius = body.physical.radius;
+
+      // Choose satellite type based on civilization level
+      let satType: SatelliteType;
+      const roll = this.rng.next();
+
+      if (civilizationLevel >= 8) {
+        // High-tech: mix of all types
+        if (roll < 0.3) satType = SatelliteType.COMMUNICATIONS;
+        else if (roll < 0.5) satType = SatelliteType.RECONNAISSANCE;
+        else if (roll < 0.7) satType = SatelliteType.NAVIGATION;
+        else satType = SatelliteType.WEATHER;
+      } else if (civilizationLevel >= 6) {
+        // Mid-tech: comms and recon
+        if (roll < 0.6) satType = SatelliteType.COMMUNICATIONS;
+        else satType = SatelliteType.RECONNAISSANCE;
+      } else {
+        // Basic tech: mostly comms
+        satType = SatelliteType.COMMUNICATIONS;
+      }
+
+      // Determine orbit altitude (100km - 2000km)
+      const orbitAltitude = this.rng.range(100000, 2000000);
+
+      // Create satellite
+      const satName = `${body.name}-Sat-${i + 1}`;
+      let satellite: Satellite;
+
+      switch (satType) {
+        case SatelliteType.COMMUNICATIONS:
+          satellite = SatelliteFactory.createCommunicationsSatellite(satName, orbitAltitude);
+          break;
+        case SatelliteType.RECONNAISSANCE:
+          satellite = SatelliteFactory.createReconnaissanceSatellite(satName, orbitAltitude);
+          break;
+        case SatelliteType.NAVIGATION:
+          satellite = SatelliteFactory.createNavigationSatellite(satName, orbitAltitude);
+          break;
+        case SatelliteType.WEATHER:
+          satellite = SatelliteFactory.createWeatherSatellite(satName, orbitAltitude);
+          break;
+        default:
+          satellite = SatelliteFactory.createCommunicationsSatellite(satName, orbitAltitude);
+      }
+
+      // Deploy systems
+      satellite.deploySolarPanels();
+      if (satType === SatelliteType.COMMUNICATIONS) {
+        satellite.deployAntennas();
+      }
+
+      // Set attitude mode
+      if (satType === SatelliteType.RECONNAISSANCE || satType === SatelliteType.WEATHER) {
+        satellite.setAttitudeMode('earth_pointing');
+      } else {
+        satellite.setAttitudeMode('sun_pointing');
+      }
+
+      // Randomize orbital position
+      satellite.orbitalBody.M0 = this.rng.range(0, 2 * Math.PI);
+
+      this.satellites.push(satellite);
+    }
+  }
+
+  /**
    * Update entire system
    */
   update(deltaTime: number): void {
@@ -413,6 +523,15 @@ export class StarSystem {
     // Update stations
     for (const station of this.stations) {
       station.updateOrbitalPosition(deltaTime);
+    }
+
+    // Update satellites with stellar body
+    const stellarBody = {
+      position: this.star.position,
+      luminosity: this.star.luminosity
+    };
+    for (const satellite of this.satellites) {
+      satellite.update(deltaTime, stellarBody);
     }
 
     // Update hazards
@@ -488,6 +607,7 @@ export class StarSystem {
       moons: this.moons,
       asteroids: this.asteroids,
       stations: this.stations,
+      satellites: this.satellites,
       hazards: this.hazardSystem.getActiveHazards(),
       position: this.position
     };
