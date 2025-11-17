@@ -173,6 +173,64 @@ export function getSystemReport(system: StarSystem): string {
     lines.push('');
   }
 
+  // NPC Traffic
+  const npcShips = system.trafficManager.getAllVessels();
+  if (npcShips.length > 0) {
+    lines.push('═══ NPC TRAFFIC ═══');
+    lines.push(`Active Vessels: ${npcShips.length}`);
+    lines.push('');
+
+    // Show traffic statistics
+    const stats = system.trafficManager.getStatistics();
+    lines.push(`Traffic Statistics:`);
+    lines.push(`  Average Speed: ${(stats.avgSpeed / 1000).toFixed(1)} km/s`);
+    lines.push(`  Max Speed: ${(stats.maxSpeed / 1000).toFixed(1)} km/s`);
+    lines.push('');
+
+    // Show vessels by type
+    lines.push(`Vessels by Type:`);
+    stats.vesselsByType.forEach((count, type) => {
+      lines.push(`  • ${type}: ${count}`);
+    });
+    lines.push('');
+
+    // Show sample ships (first 5)
+    lines.push(`Sample Traffic:`);
+    for (let i = 0; i < Math.min(5, npcShips.length); i++) {
+      const ship = npcShips[i];
+      const state = ship.getState();
+      lines.push(`\n  ${i + 1}. ${ship.name} [${ship.type}]`);
+      lines.push(`     Status: ${state.status}`);
+      lines.push(`     Speed: ${(state.speed / 1000).toFixed(1)} km/s`);
+
+      if (state.destinationName) {
+        lines.push(`     Route: ${ship.originName || 'Unknown'} → ${state.destinationName}`);
+        if (state.eta < Infinity) {
+          const etaMinutes = Math.floor(state.eta / 60);
+          const etaHours = Math.floor(etaMinutes / 60);
+          if (etaHours > 0) {
+            lines.push(`     ETA: ${etaHours}h ${etaMinutes % 60}m`);
+          } else {
+            lines.push(`     ETA: ${etaMinutes}m`);
+          }
+        }
+      }
+
+      if (state.cargo.length > 0) {
+        const cargoSummary = state.cargo
+          .map(c => `${c.amount.toFixed(0)}t ${c.type}`)
+          .join(', ');
+        lines.push(`     Cargo: ${cargoSummary}`);
+      }
+    }
+
+    if (npcShips.length > 5) {
+      lines.push(`\n  ... and ${npcShips.length - 5} more vessels`);
+    }
+
+    lines.push('');
+  }
+
   // Hazards
   const hazards = system.hazardSystem.getActiveHazards();
   if (hazards.length > 0) {
@@ -288,6 +346,10 @@ export function analyzeSystemCompleteness(system: StarSystem): {
   if (system.satellites.length > 0) score += 15;
   else missing.push('Satellite network');
 
+  // Check NPC traffic
+  if (system.trafficManager.getVesselCount() > 0) score += 15;
+  else missing.push('NPC ship traffic');
+
   // Check habitable worlds
   if (system.getHabitablePlanets().length > 0) score += 10;
   else recommendations.push('Add at least one habitable planet');
@@ -310,8 +372,7 @@ export function analyzeSystemCompleteness(system: StarSystem): {
   if (planetTypes.size >= 3) score += 5;
   else recommendations.push('Add more diverse planet types');
 
-  // Missing features
-  missing.push('NPC ship traffic');
+  // Missing features (still to implement)
   missing.push('Dynamic events');
   missing.push('Local news/comms chatter');
   missing.push('Trade routes visualization');

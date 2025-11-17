@@ -18,6 +18,7 @@ import { PlanetGenerator, PlanetGenerationConfig } from './PlanetGenerator';
 import { StationGenerator, SpaceStation } from './StationGenerator';
 import { HazardSystem, Hazard } from './HazardSystem';
 import { Satellite, SatelliteFactory, SatelliteType } from '../../physics-modules/src/satellite';
+import { TrafficManager, NPCShip, ShipType } from './npc-traffic';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -27,6 +28,7 @@ export interface StarSystemConfig {
   allowStations?: boolean;
   allowSatellites?: boolean;
   allowHazards?: boolean;
+  allowNPCTraffic?: boolean;
   civilizationLevel?: number; // 0-10 (0 = uninhabited, 10 = high tech)
   position?: Vector3; // Position in galaxy
 }
@@ -40,6 +42,7 @@ export interface StarSystemData {
   asteroids: Asteroid[];
   stations: SpaceStation[];
   satellites: Satellite[];
+  npcShips: NPCShip[];
   hazards: Hazard[];
   position: Vector3;
 }
@@ -56,6 +59,7 @@ export class StarSystem {
   public asteroids: Asteroid[] = [];
   public stations: SpaceStation[] = [];
   public satellites: Satellite[] = [];
+  public trafficManager: TrafficManager<NPCShip>;
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
@@ -95,6 +99,7 @@ export class StarSystem {
     this.planetGenerator = new PlanetGenerator(seed);
     this.stationGenerator = new StationGenerator(seed + 1);
     this.hazardSystem = new HazardSystem(seed + 2);
+    this.trafficManager = new TrafficManager<NPCShip>(100000, 100);
 
     // Generate the star
     this.star = this.generateStar(config.starClass);
@@ -118,6 +123,11 @@ export class StarSystem {
     // Generate satellites
     if (config.allowSatellites !== false) {
       this.generateSatellites(config.civilizationLevel || 5);
+    }
+
+    // Generate NPC traffic
+    if (config.allowNPCTraffic !== false) {
+      this.generateNPCTraffic(config.civilizationLevel || 5);
     }
 
     // Generate hazards
@@ -499,6 +509,119 @@ export class StarSystem {
   }
 
   /**
+   * Generate NPC traffic
+   */
+  private generateNPCTraffic(civilizationLevel: number): void {
+    // No traffic in low-civilization systems
+    if (civilizationLevel < 3) return;
+    if (this.stations.length === 0) return; // Need stations for traffic
+
+    // Number of ships scales with civilization level and number of stations
+    // Level 3-5: 1-2 ships per station
+    // Level 6-7: 2-4 ships per station
+    // Level 8-10: 3-6 ships per station
+
+    let shipsPerStation = 0;
+    if (civilizationLevel >= 8) {
+      shipsPerStation = Math.floor(this.rng.range(3, 6));
+    } else if (civilizationLevel >= 6) {
+      shipsPerStation = Math.floor(this.rng.range(2, 4));
+    } else {
+      shipsPerStation = Math.floor(this.rng.range(1, 2));
+    }
+
+    const numShips = Math.min(shipsPerStation * this.stations.length, 100); // Cap at 100 ships
+
+    for (let i = 0; i < numShips; i++) {
+      // Choose ship type based on station types and civilization level
+      let shipType: ShipType;
+      const roll = this.rng.next();
+
+      if (roll < 0.3) {
+        shipType = ShipType.CARGO_FREIGHTER;
+      } else if (roll < 0.5) {
+        shipType = ShipType.CARGO_SHUTTLE;
+      } else if (roll < 0.65) {
+        shipType = ShipType.MINING_VESSEL;
+      } else if (roll < 0.8) {
+        shipType = ShipType.PATROL_SHIP;
+      } else if (roll < 0.9) {
+        shipType = ShipType.PASSENGER_LINER;
+      } else if (roll < 0.95) {
+        shipType = ShipType.RESEARCH;
+      } else {
+        shipType = ShipType.SALVAGE;
+      }
+
+      // Create ship near a random station
+      const station = this.rng.choice(this.stations);
+      const stationPos = station.position;
+
+      // Random offset from station (1000-10000 km)
+      const offsetDistance = this.rng.range(1000000, 10000000);
+      const offsetAngle = this.rng.range(0, 2 * Math.PI);
+      const offsetPhi = this.rng.range(0, Math.PI);
+
+      const position = {
+        x: stationPos.x + offsetDistance * Math.sin(offsetPhi) * Math.cos(offsetAngle),
+        y: stationPos.y + offsetDistance * Math.sin(offsetPhi) * Math.sin(offsetAngle),
+        z: stationPos.z + offsetDistance * Math.cos(offsetPhi)
+      };
+
+      // Random velocity (0-100 m/s)
+      const speed = this.rng.range(0, 100);
+      const velAngle = this.rng.range(0, 2 * Math.PI);
+      const velPhi = this.rng.range(0, Math.PI);
+
+      const velocity = {
+        x: speed * Math.sin(velPhi) * Math.cos(velAngle),
+        y: speed * Math.sin(velPhi) * Math.sin(velAngle),
+        z: speed * Math.cos(velPhi)
+      };
+
+      // Create ship
+      const shipId = `${this.id}-ship-${i}`;
+      const shipName = this.generateShipName(shipType, i);
+      const ship = new NPCShip(shipId, shipName, shipType, position, velocity);
+
+      // Set a destination (another station)
+      if (this.stations.length > 1) {
+        // Pick different station as destination
+        const destinations = this.stations.filter(s => s !== station);
+        if (destinations.length > 0) {
+          const destination = this.rng.choice(destinations);
+          ship.setDestination(destination.position, destination.name);
+          ship.originName = station.name;
+        }
+      }
+
+      // Add to traffic manager
+      this.trafficManager.addVessel(ship);
+    }
+  }
+
+  /**
+   * Generate ship name
+   */
+  private generateShipName(type: ShipType, index: number): string {
+    const prefixes: Record<ShipType, string[]> = {
+      [ShipType.CARGO_FREIGHTER]: ['Titan\'s Bounty', 'Iron Hauler', 'Merchant Prince', 'Trade Wind'],
+      [ShipType.CARGO_SHUTTLE]: ['Quick Silver', 'Swift Cargo', 'Rapid Transit', 'Express'],
+      [ShipType.MINING_VESSEL]: ['Prospector', 'Ore Finder', 'Rock Hound', 'Claim Jumper'],
+      [ShipType.PATROL_SHIP]: ['Defender', 'Guardian', 'Sentinel', 'Watchdog'],
+      [ShipType.PASSENGER_LINER]: ['Stellar Princess', 'Star Voyager', 'Cosmic Cruise', 'Nebula Queen'],
+      [ShipType.PIRATE]: ['Black Flag', 'Raider', 'Marauder', 'Rogue'],
+      [ShipType.RESEARCH]: ['Discovery', 'Explorer', 'Surveyor', 'Science Vessel'],
+      [ShipType.SALVAGE]: ['Scrap Hunter', 'Wreck Finder', 'Salvage King', 'Reclaimer']
+    };
+
+    const names = prefixes[type] || ['Unknown'];
+    const baseName = this.rng.choice(names);
+
+    return `${baseName} ${index + 1}`;
+  }
+
+  /**
    * Update entire system
    */
   update(deltaTime: number): void {
@@ -533,6 +656,20 @@ export class StarSystem {
     for (const satellite of this.satellites) {
       satellite.update(deltaTime, stellarBody);
     }
+
+    // Update NPC ships
+    const allShips = this.trafficManager.getAllVessels();
+    for (const ship of allShips) {
+      // Get nearby ships for collision avoidance
+      const nearbyShips = this.trafficManager.getVesselsNear(ship.position, 50000) // 50 km radius
+        .filter(s => s.id !== ship.id); // Exclude self
+
+      // Update ship with nearby ships for collision avoidance
+      ship.update(deltaTime, nearbyShips);
+    }
+
+    // Update traffic manager (rebuild spatial grid)
+    this.trafficManager.update(deltaTime);
 
     // Update hazards
     this.hazardSystem.update(deltaTime);
@@ -608,6 +745,7 @@ export class StarSystem {
       asteroids: this.asteroids,
       stations: this.stations,
       satellites: this.satellites,
+      npcShips: this.trafficManager.getAllVessels(),
       hazards: this.hazardSystem.getActiveHazards(),
       position: this.position
     };
