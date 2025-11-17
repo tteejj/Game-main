@@ -163,4 +163,30 @@ export class SpacecraftAdapter {
     getFuelState(): any {
         return this.spacecraft.getState().fuel;
     }
+
+    // ========== PHYSICS INTERFACE ==========
+
+    getPosition(): { x: number; y: number; z: number } {
+        return this.spacecraft.physics.position;
+    }
+
+    setPosition(pos: { x: number; y: number; z: number }): void {
+        this.spacecraft.physics.position = pos;
+    }
+
+    getVelocity(): { x: number; y: number; z: number } {
+        return this.spacecraft.physics.velocity;
+    }
+
+    applyGravity(gravity: { x: number; y: number; z: number }, deltaTime: number): void {
+        // Apply gravitational acceleration to velocity
+        this.spacecraft.physics.velocity.x += gravity.x * deltaTime;
+        this.spacecraft.physics.velocity.y += gravity.y * deltaTime;
+        this.spacecraft.physics.velocity.z += gravity.z * deltaTime;
+    }
+
+    isEngineFiring(): boolean {
+        const state = this.spacecraft.mainEngine.getState();
+        return state.firing && state.thrust > 0;
+    }
 }
