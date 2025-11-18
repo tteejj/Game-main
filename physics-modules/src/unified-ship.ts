@@ -1,6 +1,10 @@
 /**
  * Unified Ship - Complete integration of physics and subsystems
  *
+ * @deprecated Use CompleteShip from complete-ship.ts instead
+ * This class is kept for backwards compatibility but will be removed in a future version.
+ * CompleteShip has ALL functionality including weapons, combat, and proper event handling.
+ *
  * Single entity that exists in BOTH the physics world AND has all subsystems
  */
 
