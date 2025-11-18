@@ -245,7 +245,7 @@ export {
   EventConsequence,
   EventOutcome,
   EventRewards,
-  Derelict Ship,
+  DerelictShip as DynamicDerelictShip,
   Anomaly,
   AnomalyType,
   AnomalyEffect,

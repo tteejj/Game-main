@@ -270,7 +270,7 @@ export const STATION_VARIANTS: Record<string, StationVariant> = {
 
   THE_KEEP: {
     variantName: 'The Keep',
-    baseType: StationType.FORTRESS,
+    baseType: StationType.MILITARY_BASE,
     description: 'Ancient defensive station guarding strategic chokepoint',
     uniqueFeatures: [
       'Pre-war construction',
