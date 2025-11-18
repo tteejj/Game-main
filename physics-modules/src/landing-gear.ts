@@ -16,6 +16,13 @@ export interface Vector3 {
   z: number;
 }
 
+export interface Quaternion {
+  w: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface LandingLeg {
   position: Vector3;      // Position in body frame (meters from CoM)
   extended: boolean;      // Is leg deployed?
@@ -221,7 +228,7 @@ export class LandingGear {
   /**
    * Get landing gear state
    */
-  getState(): LandingGearState {
+  getState(orientation?: Quaternion): LandingGearState {
     const legsInContact = this.legs.filter(leg => leg.inContact);
     const totalForce = legsInContact.reduce((sum, leg) => sum + leg.contactForce, 0);
 
@@ -238,8 +245,11 @@ export class LandingGear {
       cop.z /= totalForce;
     }
 
-    // Check stability (CoP should be within support polygon)
-    const isStable = this.checkStability(legsInContact);
+    // Calculate tip angle from orientation
+    const tipAngle = orientation ? this.calculateTipAngle(orientation) : 0;
+
+    // Check stability (CoP should be within support polygon AND tip angle reasonable)
+    const isStable = this.checkStability(legsInContact, tipAngle);
 
     // Calculate average compression
     const avgCompression = legsInContact.length > 0
@@ -258,7 +268,7 @@ export class LandingGear {
       totalContactForce: totalForce,
       centerOfPressure: cop,
       isStable,
-      tipAngle: 0, // TODO: Calculate from attitude
+      tipAngle,
       avgCompression,
       maxLegForce: maxForce,
       damagedLegs
@@ -266,10 +276,49 @@ export class LandingGear {
   }
 
   /**
-   * Check if landing is stable (CoP within support polygon)
+   * Calculate tip angle from spacecraft orientation
+   * Returns angle in degrees from vertical (0° = perfectly upright, 90° = on side)
    */
-  private checkStability(legsInContact: LandingLeg[]): boolean {
+  private calculateTipAngle(orientation: Quaternion): number {
+    // Extract the "up" vector from the quaternion
+    // The up vector in body frame is (0, 0, 1) for a spacecraft with +Z up
+    // We need to rotate this vector by the orientation quaternion
+
+    const { w, x, y, z } = orientation;
+
+    // Rotate the up vector (0, 0, 1) by the quaternion
+    // Using quaternion rotation formula: v' = q * v * q^-1
+    // For unit quaternions, this simplifies to:
+    const upX = 2 * (x * z + w * y);
+    const upY = 2 * (y * z - w * x);
+    const upZ = 1 - 2 * (x * x + y * y);
+
+    // The angle from vertical is the angle between (0, 0, 1) and the rotated up vector
+    // Using dot product: cos(angle) = upZ / |up|
+    const magnitude = Math.sqrt(upX * upX + upY * upY + upZ * upZ);
+
+    if (magnitude < 0.001) {
+      return 90;  // Degenerate case - assume sideways
+    }
+
+    const cosAngle = upZ / magnitude;
+    const angleRad = Math.acos(Math.max(-1, Math.min(1, cosAngle)));  // Clamp to [-1, 1] for numerical stability
+    const angleDeg = (angleRad * 180) / Math.PI;
+
+    return angleDeg;
+  }
+
+  /**
+   * Check if landing is stable (CoP within support polygon and attitude acceptable)
+   */
+  private checkStability(legsInContact: LandingLeg[], tipAngle: number): boolean {
+    // Need at least 3 legs for stability
     if (legsInContact.length < 3) return false;
+
+    // Check tip angle - if too far from vertical, unstable regardless of leg contact
+    // Allow up to 45 degrees before considering unstable
+    const MAX_STABLE_TIP_ANGLE = 45;
+    if (tipAngle > MAX_STABLE_TIP_ANGLE) return false;
 
     // For 4 legs, check if CoP is within the quad
     // Simplified: check if we have at least 3 legs in contact
@@ -293,9 +342,10 @@ export class LandingGear {
   /**
    * Get contact status
    */
-  getContactStatus() {
+  getContactStatus(orientation?: Quaternion) {
     const legsInContact = this.legs.filter(leg => leg.inContact).length;
-    const isStable = this.checkStability(this.legs.filter(leg => leg.inContact));
+    const tipAngle = orientation ? this.calculateTipAngle(orientation) : 0;
+    const isStable = this.checkStability(this.legs.filter(leg => leg.inContact), tipAngle);
 
     return {
       legsInContact,
