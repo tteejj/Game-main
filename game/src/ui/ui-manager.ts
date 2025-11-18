@@ -8,8 +8,9 @@ import { HelmPanel } from './panels/helm-panel';
 import { EngineeringPanel } from './panels/engineering-panel';
 import { NavigationPanel } from './panels/navigation-panel';
 import { LifeSupportPanel } from './panels/lifesupport-panel';
+import { WeaponsPanel } from './panels/weapons-panel';
 
-export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel;
+export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel;
 
 export class UIManager {
     private canvas: HTMLCanvasElement;
@@ -41,7 +42,8 @@ export class UIManager {
             new HelmPanel(this.ctx, this.palette, spacecraft),           // Station 1
             new EngineeringPanel(this.ctx, this.palette, spacecraft),    // Station 2
             new NavigationPanel(this.ctx, this.palette, spacecraft),     // Station 3
-            new LifeSupportPanel(this.ctx, this.palette, spacecraft)     // Station 4
+            new LifeSupportPanel(this.ctx, this.palette, spacecraft),    // Station 4
+            new WeaponsPanel(this.ctx, this.palette, spacecraft)         // Station 5
         ];
 
         // Start rendering
@@ -102,13 +104,13 @@ export class UIManager {
      */
     private renderStationIndicator(): void {
         const stationNum = this.activeStationIndex + 1;
-        const stationNames = ['HELM', 'ENGINEERING', 'NAVIGATION', 'LIFE SUPPORT'];
+        const stationNames = ['HELM', 'ENGINEERING', 'NAVIGATION', 'LIFE SUPPORT', 'WEAPONS'];
         const stationName = stationNames[this.activeStationIndex] || 'UNKNOWN';
 
         this.ctx.font = '16px "Courier New"';
         this.ctx.fillStyle = this.palette.info;
         this.ctx.textAlign = 'right';
-        this.ctx.fillText(`[${stationNum}/4] ${stationName}`, this.canvas.width - 20, 30);
+        this.ctx.fillText(`[${stationNum}/5] ${stationName}`, this.canvas.width - 20, 30);
         this.ctx.textAlign = 'left'; // Reset
     }
 }
