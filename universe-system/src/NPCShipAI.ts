@@ -476,7 +476,28 @@ export class NPCShipAI {
         break;
 
       case 'MINER':
-        // Find nearest asteroid field
+        // Mine resources faction needs (if faction system available)
+        if (factionSystem && ship.faction) {
+          try {
+            const economy = factionSystem.getFactionEconomy(ship.faction);
+            // Find most critical mineral need
+            let mostCritical = { commodity: 'iron', urgency: 0 };
+            for (const [commodity, need] of economy.criticalResources) {
+              if ((commodity === 'iron' || commodity === 'rare_earth' || commodity === 'uranium') &&
+                  (need.inCrisis || need.daysRemaining < 30)) {
+                const urgency = need.inCrisis ? 100 : (100 - need.daysRemaining);
+                if (urgency > mostCritical.urgency) {
+                  mostCritical = { commodity, urgency };
+                }
+              }
+            }
+            // Store target resource in ship memory for MINING state
+            (ship as any).targetResource = mostCritical.commodity;
+          } catch (e) {
+            // Faction economy not ready, mine default resource
+            (ship as any).targetResource = 'iron';
+          }
+        }
         ship.state = 'MINING';
         break;
 
