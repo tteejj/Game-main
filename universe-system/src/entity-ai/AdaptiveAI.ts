@@ -278,12 +278,13 @@ export class AdaptiveAI {
         lastApplied: event.timestamp
       };
 
-      this.memory.addLearnedBehavior(
-        this.memory.entityId,
-        lesson.condition,
-        lesson.action,
-        `learning_event_${event.timestamp}`
-      );
+      // TODO: addLearnedBehavior method not implemented yet in ExtendedNPCMemory
+      // this.memory.addLearnedBehavior(
+      //   this.memory.entityId,
+      //   lesson.condition,
+      //   lesson.action,
+      //   `learning_event_${event.timestamp}`
+      // );
     } else if (event.outcome === 'FAILURE' && event.reward < -5) {
       // Negative lesson - avoid this
       const lesson: Lesson = {
@@ -324,7 +325,8 @@ export class AdaptiveAI {
           witnesses: [],
           lessonLearned: lesson,
           memoryStrength: 1.0,
-          recallCount: 0
+          recallCount: 0,
+          consolidated: false
         };
 
         this.memory.recordExperience(experience);

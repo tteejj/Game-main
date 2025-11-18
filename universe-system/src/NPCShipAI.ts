@@ -23,6 +23,7 @@ import {
   PlannedAction,
   ActionPlan
 } from './entity-ai/NPCGoalSystem';
+import { AdaptiveAI, ExpertiseDomain } from './entity-ai/AdaptiveAI';
 
 export type ShipType = 'TRADER' | 'MINER' | 'PIRATE' | 'PATROL' | 'COURIER' | 'EXPLORER' | 'PASSENGER';
 export type ShipState = 'IDLE' | 'TRAVELING' | 'DOCKING' | 'DOCKED' | 'TRADING' | 'MINING' | 'ATTACKING' | 'FLEEING' | 'PATROLLING';
@@ -65,6 +66,7 @@ export interface NPCShip {
   memory: ShipMemory;         // Legacy simple memory (for backward compatibility)
   extendedMemory: ExtendedNPCMemory;  // New sophisticated memory system
   goalSystem: NPCGoalSystem;  // Goal-based planning and decision making
+  adaptiveAI: AdaptiveAI;     // Learning system for skill progression and strategy evolution
   emotionalState: {           // Current emotional state
     stress: number;           // 0-10
     satisfaction: number;     // -10 to +10
@@ -142,11 +144,14 @@ export class NPCShipAI {
       adaptability: type === 'EXPLORER' ? 0.8 : 0.5
     };
 
-    // Create extended memory first (needed for goal system)
+    // Create extended memory first (needed for goal system and adaptive AI)
     const extendedMemory = new ExtendedNPCMemory(shipId, 'SHIP', extendedPersonality);
 
     // Create goal system
     const goalSystem = new NPCGoalSystem(extendedMemory);
+
+    // Create adaptive AI (learning and skill progression)
+    const adaptiveAI = new AdaptiveAI(extendedMemory, goalSystem);
 
     const ship: NPCShip = {
       id: shipId,
@@ -171,6 +176,7 @@ export class NPCShipAI {
       },
       extendedMemory,
       goalSystem,
+      adaptiveAI,
       emotionalState: {
         stress: 0,
         satisfaction: 0,
@@ -234,6 +240,9 @@ export class NPCShipAI {
       // Fall back to state machine for behaviors not yet goal-driven
       this.executeStateMachine(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
     }
+
+    // Skill decay: skills atrophy without practice (1% per day after 7 days)
+    ship.adaptiveAI.decaySkills(deltaTime);
 
     // Update position
     ship.position.x += ship.velocity.x * deltaTime;
@@ -746,6 +755,16 @@ export class NPCShipAI {
         ship.currentGoalAction.status = 'COMPLETED';
       }
       this.updateGoalProgress(ship, 'completed_trade', { profit });
+
+      // Record learning outcome for adaptive AI
+      const normalizedReward = Math.max(-10, Math.min(10, profit / 1000)); // Normalize to -10 to +10
+      ship.adaptiveAI.recordOutcome(
+        `trading_${ship.route.commodity}`,
+        `route_${ship.route.fromStation}_to_${ship.route.toStation}`,
+        'SUCCESS',
+        normalizedReward,
+        { profit, commodity: ship.route.commodity }
+      );
     }
   }
 
@@ -790,6 +809,16 @@ export class NPCShipAI {
             6,
             [playerShip.id]
           );
+
+          // Record learning outcome for adaptive AI (successful combat engagement)
+          const combatReward = severity * 3; // Higher severity = more impressive victory
+          ship.adaptiveAI.recordOutcome(
+            `combat_with_${playerShip.faction}`,
+            'engage_attack',
+            'SUCCESS',
+            combatReward,
+            { severity, distance, weaponPower: ship.stats.weaponPower }
+          );
         }
       }
     }
@@ -805,6 +834,16 @@ export class NPCShipAI {
           -8, // Very negative emotional impact
           9,  // Highly memorable
           [playerShip.id]
+        );
+
+        // Record learning outcome for adaptive AI (combat failure)
+        const defeatPenalty = -(100 - ship.stats.hullStrength) / 10; // More damage = worse failure
+        ship.adaptiveAI.recordOutcome(
+          `combat_with_${playerShip.faction}`,
+          'engage_attack',
+          'FAILURE',
+          defeatPenalty,
+          { hullStrength: ship.stats.hullStrength, distance }
         );
       }
 
@@ -860,6 +899,16 @@ export class NPCShipAI {
           3, // Relief
           7,
           [playerShip.id]
+        );
+
+        // Record learning outcome for adaptive AI (successful escape)
+        const escapeReward = 5; // Successful survival is rewarding
+        ship.adaptiveAI.recordOutcome(
+          `threat_from_${playerShip.faction}`,
+          'flee_to_safety',
+          'SUCCESS',
+          escapeReward,
+          { hullStrength: ship.stats.hullStrength, distance }
         );
       }
       ship.state = 'IDLE';
