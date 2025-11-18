@@ -1061,4 +1061,11 @@ export class ExtendedNPCMemory {
       lessons: this.lessons.size
     };
   }
+
+  /**
+   * Get total number of experiences recorded
+   */
+  public getExperienceCount(): number {
+    return this.totalExperiences;
+  }
 }
