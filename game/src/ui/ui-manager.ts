@@ -11,6 +11,8 @@ import { LifeSupportPanel } from './panels/lifesupport-panel';
 import { WeaponsPanel } from './panels/weapons-panel';
 import { HUD } from './hud';
 import { AlertSystem, AlertDisplay, AlertPriority, AlertCategory } from './alert-system';
+import { NPCShipMonitor, NPCShipContact } from './npc-ship-monitor';
+import { NPCShip } from '../../../universe-system/src/npc-traffic/npc-ship';
 
 export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel;
 
@@ -25,6 +27,11 @@ export class UIManager {
     // Alert system
     public alertSystem: AlertSystem;
     public alertDisplay: AlertDisplay;
+
+    // NPC ship monitoring
+    public npcMonitor: NPCShipMonitor;
+    public npcContacts: NPCShipContact[] = [];
+    private npcShips: NPCShip[] = [];
 
     // Color palette (green monochrome by default)
     palette = {
@@ -49,6 +56,9 @@ export class UIManager {
         // Initialize alert system
         this.alertSystem = new AlertSystem();
         this.alertDisplay = new AlertDisplay(this.alertSystem, this.palette);
+
+        // Initialize NPC ship monitor
+        this.npcMonitor = new NPCShipMonitor(this.alertSystem);
 
         // Initialize all station panels with spacecraft reference
         this.stations = [
@@ -87,6 +97,37 @@ export class UIManager {
     }
 
     /**
+     * Update NPC ship data (called by Game)
+     */
+    updateNPCShips(npcShips: NPCShip[]): void {
+        this.npcShips = npcShips;
+
+        // Monitor NPC ships and generate alerts
+        const playerPos = this.spacecraft.getPosition();
+        this.npcContacts = this.npcMonitor.monitorNPCShips(
+            npcShips,
+            playerPos,
+            100000 // 100km scan range
+        );
+    }
+
+    /**
+     * Get NPC contacts (for panels to access)
+     */
+    getNPCContacts(): NPCShipContact[] {
+        return this.npcContacts;
+    }
+
+    /**
+     * Get NPC ship details (for panels to access)
+     */
+    getNPCShipDetails(shipId: string): string | null {
+        const npc = this.npcShips.find(ship => ship.id === shipId);
+        if (!npc) return null;
+        return this.npcMonitor.getShipDetails(npc);
+    }
+
+    /**
      * Start the render loop
      */
     private startRenderLoop(): void {
@@ -104,6 +145,13 @@ export class UIManager {
         // Clear canvas
         this.ctx.fillStyle = this.palette.background;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Update NPC ships from game
+        const game = (window as any).game;
+        if (game && game.getNearbyNPCVessels) {
+            const nearbyNPCs = game.getNearbyNPCVessels(100000); // 100km range
+            this.updateNPCShips(nearbyNPCs);
+        }
 
         // Update alert system
         this.alertSystem.update();
@@ -176,7 +224,7 @@ export class UIManager {
                     'FUEL ALERTS'
                 );
                 break;
-            case 3: // Navigation - Navigation and systems
+            case 3: // Navigation - Navigation and systems + NPC contacts
                 this.alertDisplay.renderCornerBlock(
                     this.ctx,
                     10,
@@ -191,6 +239,8 @@ export class UIManager {
                     AlertCategory.SYSTEMS,
                     'SYSTEMS'
                 );
+                // Render NPC contacts list
+                this.renderNPCContacts();
                 break;
             case 4: // Life Support - Life support and hull
                 this.alertDisplay.renderCornerBlock(
@@ -233,6 +283,96 @@ export class UIManager {
         this.ctx.textAlign = 'right';
         this.ctx.fillText(`[F${stationNum}] ${stationName}`, this.canvas.width - 20, 30);
         this.ctx.textAlign = 'left'; // Reset
+    }
+
+    /**
+     * Render NPC contacts list (navigation panel)
+     */
+    private renderNPCContacts(): void {
+        if (this.npcContacts.length === 0) return;
+
+        const x = this.canvas.width - 420;
+        const y = 50;
+        const width = 400;
+        const maxDisplayed = 8;
+
+        // Background
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        this.ctx.fillRect(x, y, width, Math.min(maxDisplayed, this.npcContacts.length) * 40 + 50);
+
+        // Border
+        this.ctx.strokeStyle = this.palette.primary;
+        this.ctx.lineWidth = 1;
+        this.ctx.strokeRect(x, y, width, Math.min(maxDisplayed, this.npcContacts.length) * 40 + 50);
+
+        // Title
+        this.ctx.font = 'bold 14px "Courier New"';
+        this.ctx.fillStyle = this.palette.info;
+        this.ctx.fillText('NEARBY VESSELS', x + 10, y + 20);
+
+        // Contact list
+        this.ctx.font = '12px "Courier New"';
+        let contactY = y + 40;
+
+        for (let i = 0; i < Math.min(maxDisplayed, this.npcContacts.length); i++) {
+            const contact = this.npcContacts[i];
+
+            // Color based on status
+            let color = this.palette.primary;
+            if (contact.needsAssistance) {
+                color = this.palette.danger;
+            } else if (contact.inDistress) {
+                color = this.palette.warning;
+            }
+
+            this.ctx.fillStyle = color;
+
+            // Name and type
+            const name = contact.name.substring(0, 20).padEnd(20);
+            this.ctx.fillText(name, x + 10, contactY);
+
+            // Distance
+            const distKm = (contact.distance / 1000).toFixed(1);
+            this.ctx.fillText(`${distKm}km`.padStart(8), x + 230, contactY);
+
+            // Health bar
+            const healthBarX = x + 300;
+            const healthBarY = contactY - 10;
+            const healthBarWidth = 80;
+            const healthBarHeight = 12;
+
+            // Background
+            this.ctx.fillStyle = 'rgba(50, 50, 50, 0.8)';
+            this.ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+
+            // Health
+            const healthColor = contact.health > 0.7 ? this.palette.primary :
+                               contact.health > 0.4 ? this.palette.warning :
+                               this.palette.danger;
+            this.ctx.fillStyle = healthColor;
+            this.ctx.fillRect(healthBarX, healthBarY, healthBarWidth * contact.health, healthBarHeight);
+
+            // Border
+            this.ctx.strokeStyle = this.palette.muted;
+            this.ctx.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+
+            // Emergency indicator
+            if (contact.needsAssistance && contact.emergencyType) {
+                this.ctx.fillStyle = this.palette.danger;
+                this.ctx.font = 'bold 10px "Courier New"';
+                const emergencyText = contact.emergencyType.replace(/_/g, ' ');
+                this.ctx.fillText(`⚠ ${emergencyText}`, x + 10, contactY + 12);
+            }
+
+            contactY += 40;
+        }
+
+        // Show more indicator
+        if (this.npcContacts.length > maxDisplayed) {
+            this.ctx.fillStyle = this.palette.muted;
+            this.ctx.font = '11px "Courier New"';
+            this.ctx.fillText(`+ ${this.npcContacts.length - maxDisplayed} more...`, x + 10, contactY);
+        }
     }
 
     /**

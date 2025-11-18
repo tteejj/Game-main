@@ -670,4 +670,19 @@ export class Game {
             }
         };
     }
+
+    /**
+     * Get all NPC vessels
+     */
+    getNPCVessels() {
+        return this.trafficManager.getAllVessels();
+    }
+
+    /**
+     * Get nearby NPC vessels
+     */
+    getNearbyNPCVessels(maxDistance: number = 100000) {
+        const shipPos = this.spacecraft.getPosition();
+        return this.trafficManager.getVesselsNear(shipPos, maxDistance);
+    }
 }
