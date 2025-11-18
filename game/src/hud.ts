@@ -1,10 +1,19 @@
 /**
  * HUD (Heads-Up Display) Renderer
- * Displays game information, targeting, navigation aids
+ * Retro vector graphics style display - inspired by Apollo mission controls
  */
 
 import { Vector3 } from '../../universe-system/src/CelestialBody';
 import { Camera } from './camera';
+
+// Retro color palette
+const HUD_COLORS = {
+    primary: '#00ff00',
+    secondary: '#00cc00',
+    warning: '#ffff00',
+    critical: '#ff0000',
+    dim: '#006600'
+};
 
 export interface HUDData {
     // Ship status
@@ -84,48 +93,50 @@ export class HUDRenderer {
     }
 
     /**
-     * Render ship status (top-left)
+     * Render ship status (top-left, terminal style)
      */
     private renderShipStatus(data: HUDData): void {
-        const x = 20;
-        let y = 30;
+        const x = 15;
+        let y = 25;
 
-        this.drawBox(x - 5, y - 20, 200, 130);
-
-        this.ctx.font = '14px "Courier New"';
-        this.ctx.fillStyle = '#00ff00';
+        this.ctx.font = '11px "Courier New", monospace';
         this.ctx.textAlign = 'left';
+        this.ctx.textBaseline = 'top';
 
-        this.ctx.fillText('═══ SHIP STATUS ═══', x, y);
-        y += 25;
+        // Header
+        this.ctx.fillStyle = HUD_COLORS.primary;
+        this.ctx.fillText('SHIP STATUS', x, y);
+        y += 15;
+
+        this.ctx.font = '10px "Courier New", monospace';
 
         // Velocity
         const speed = Math.sqrt(
             data.velocity.x ** 2 + data.velocity.y ** 2 + data.velocity.z ** 2
         );
-        this.ctx.fillStyle = '#00ff00';
-        this.ctx.fillText(`SPEED: ${(speed / 1000).toFixed(2)} km/s`, x, y);
-        y += 20;
+        this.ctx.fillStyle = HUD_COLORS.secondary;
+        this.ctx.fillText(`VEL ${(speed / 1000).toFixed(2)} km/s`, x, y);
+        y += 14;
 
         // Fuel
-        const fuelColor = data.fuel > 50 ? '#00ff00' : data.fuel > 25 ? '#ffff00' : '#ff0000';
+        const fuelColor = data.fuel > 50 ? HUD_COLORS.primary : data.fuel > 25 ? HUD_COLORS.warning : HUD_COLORS.critical;
         this.ctx.fillStyle = fuelColor;
-        this.ctx.fillText(`FUEL:  ${data.fuel.toFixed(0)}%`, x, y);
-        this.drawBar(x + 100, y - 10, 80, 12, data.fuel / 100, fuelColor);
-        y += 20;
+        this.ctx.fillText(`FUEL ${data.fuel.toFixed(0).padStart(3, ' ')}%`, x, y);
+        this.drawBarRetro(x + 80, y + 1, 60, 8, data.fuel / 100, fuelColor);
+        y += 14;
 
         // Power
-        const powerColor = data.power > 50 ? '#00ff00' : data.power > 25 ? '#ffff00' : '#ff0000';
+        const powerColor = data.power > 50 ? HUD_COLORS.primary : data.power > 25 ? HUD_COLORS.warning : HUD_COLORS.critical;
         this.ctx.fillStyle = powerColor;
-        this.ctx.fillText(`POWER: ${data.power.toFixed(0)}%`, x, y);
-        this.drawBar(x + 100, y - 10, 80, 12, data.power / 100, powerColor);
-        y += 20;
+        this.ctx.fillText(`PWR  ${data.power.toFixed(0).padStart(3, ' ')}%`, x, y);
+        this.drawBarRetro(x + 80, y + 1, 60, 8, data.power / 100, powerColor);
+        y += 14;
 
         // Hull
-        const hullColor = data.health > 75 ? '#00ff00' : data.health > 50 ? '#ffff00' : '#ff0000';
+        const hullColor = data.health > 75 ? HUD_COLORS.primary : data.health > 50 ? HUD_COLORS.warning : HUD_COLORS.critical;
         this.ctx.fillStyle = hullColor;
-        this.ctx.fillText(`HULL:  ${data.health.toFixed(0)}%`, x, y);
-        this.drawBar(x + 100, y - 10, 80, 12, data.health / 100, hullColor);
+        this.ctx.fillText(`HULL ${data.health.toFixed(0).padStart(3, ' ')}%`, x, y);
+        this.drawBarRetro(x + 80, y + 1, 60, 8, data.health / 100, hullColor);
     }
 
     /**
@@ -358,35 +369,35 @@ export class HUDRenderer {
     }
 
     /**
-     * Draw a box with border
+     * Draw a retro progress bar (segmented blocks)
      */
-    private drawBox(x: number, y: number, width: number, height: number): void {
-        // Background
-        this.ctx.fillStyle = '#000000';
-        this.ctx.globalAlpha = 0.7;
-        this.ctx.fillRect(x, y, width, height);
+    private drawBarRetro(x: number, y: number, width: number, height: number, progress: number, color: string): void {
+        const segments = 20;
+        const segmentWidth = (width - segments + 1) / segments;
+        const filledSegments = Math.floor(segments * Math.max(0, Math.min(1, progress)));
 
-        // Border
-        this.ctx.strokeStyle = '#00ff00';
-        this.ctx.globalAlpha = 1.0;
+        this.ctx.strokeStyle = HUD_COLORS.dim;
         this.ctx.lineWidth = 1;
-        this.ctx.strokeRect(x, y, width, height);
+
+        // Draw empty segments
+        for (let i = 0; i < segments; i++) {
+            const segX = x + i * (segmentWidth + 1);
+            this.ctx.strokeRect(segX, y, segmentWidth, height);
+        }
+
+        // Fill progress segments
+        this.ctx.fillStyle = color;
+        for (let i = 0; i < filledSegments; i++) {
+            const segX = x + i * (segmentWidth + 1);
+            this.ctx.fillRect(segX + 1, y + 1, segmentWidth - 1, height - 1);
+        }
     }
 
     /**
-     * Draw a progress bar
+     * Draw a box with border (simple wireframe)
      */
-    private drawBar(x: number, y: number, width: number, height: number, progress: number, color: string): void {
-        // Background
-        this.ctx.fillStyle = '#333333';
-        this.ctx.fillRect(x, y, width, height);
-
-        // Progress
-        this.ctx.fillStyle = color;
-        this.ctx.fillRect(x, y, width * Math.max(0, Math.min(1, progress)), height);
-
-        // Border
-        this.ctx.strokeStyle = color;
+    private drawBox(x: number, y: number, width: number, height: number): void {
+        this.ctx.strokeStyle = HUD_COLORS.dim;
         this.ctx.lineWidth = 1;
         this.ctx.strokeRect(x, y, width, height);
     }

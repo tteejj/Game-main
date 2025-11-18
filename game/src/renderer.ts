@@ -1,6 +1,9 @@
 /**
- * Visual Renderer for Space Game
- * Handles all 3D to 2D rendering of universe elements
+ * Vector Graphics Renderer for Space Game
+ * Retro wireframe/vector display aesthetic inspired by:
+ * - Lunar Lander (1979)
+ * - Elite (1984)
+ * - Apollo mission displays
  */
 
 import { Camera } from './camera';
@@ -17,6 +20,17 @@ export interface RenderableObject {
     color?: string;
 }
 
+// Color palette for retro vector display
+const VECTOR_COLORS = {
+    primary: '#00ff00',      // Bright green (classic phosphor)
+    secondary: '#00cc00',    // Dim green
+    tertiary: '#008800',     // Very dim green
+    star: '#ffff00',         // Yellow for stars
+    station: '#00ffff',      // Cyan for stations
+    hostile: '#ff0000',      // Red for threats
+    dim: '#004400'           // Very dim for background elements
+};
+
 export class SpaceRenderer {
     private ctx: CanvasRenderingContext2D;
     private canvas: HTMLCanvasElement;
@@ -31,12 +45,18 @@ export class SpaceRenderer {
     // Selection
     private selectedObject: string | null = null;
 
+    // Scanline effect
+    private scanlineOffset: number = 0;
+
     constructor(canvas: HTMLCanvasElement, camera: Camera) {
         this.canvas = canvas;
         const ctx = canvas.getContext('2d');
         if (!ctx) throw new Error('Could not get 2D context');
         this.ctx = ctx;
         this.camera = camera;
+
+        // Set up for crisp vector graphics
+        this.ctx.imageSmoothingEnabled = false;
     }
 
     /**
@@ -131,37 +151,65 @@ export class SpaceRenderer {
     }
 
     /**
-     * Clear screen
+     * Clear screen with CRT effect
      */
     private clear(): void {
+        // Black background
         this.ctx.fillStyle = '#000000';
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Add subtle CRT scanlines
+        this.renderScanlines();
     }
 
     /**
-     * Render starfield background
+     * Render CRT scanlines
+     */
+    private renderScanlines(): void {
+        this.ctx.globalAlpha = 0.05;
+        this.ctx.fillStyle = '#000000';
+
+        this.scanlineOffset = (this.scanlineOffset + 1) % 4;
+
+        for (let y = this.scanlineOffset; y < this.canvas.height; y += 3) {
+            this.ctx.fillRect(0, y, this.canvas.width, 1);
+        }
+
+        this.ctx.globalAlpha = 1.0;
+    }
+
+    /**
+     * Render starfield background (sparse dots, not filled)
      */
     private renderStarfield(): void {
-        // Generate deterministic star positions based on camera position
-        const starCount = 500;
+        // Much sparser starfield for cleaner vector look
+        const starCount = 100;
         const seed = Math.floor(this.camera.position.x / 1e6) * 1000 +
                      Math.floor(this.camera.position.y / 1e6);
 
-        // Simple pseudo-random generator
         const random = (index: number) => {
             const x = Math.sin(seed + index * 12.9898) * 43758.5453;
             return x - Math.floor(x);
         };
 
-        this.ctx.fillStyle = '#ffffff';
+        this.ctx.strokeStyle = VECTOR_COLORS.dim;
+        this.ctx.lineWidth = 1;
+
         for (let i = 0; i < starCount; i++) {
             const x = random(i) * this.canvas.width;
             const y = random(i + 1000) * this.canvas.height;
             const brightness = random(i + 2000);
-            const size = brightness > 0.98 ? 2 : 1;
 
-            this.ctx.globalAlpha = brightness * 0.8;
-            this.ctx.fillRect(x, y, size, size);
+            if (brightness > 0.7) {
+                this.ctx.globalAlpha = brightness * 0.5;
+                // Draw as small plus sign
+                this.ctx.beginPath();
+                this.ctx.moveTo(x - 1, y);
+                this.ctx.lineTo(x + 1, y);
+                this.ctx.moveTo(x, y - 1);
+                this.ctx.lineTo(x, y + 1);
+                this.ctx.stroke();
+            }
         }
         this.ctx.globalAlpha = 1.0;
     }
@@ -224,172 +272,253 @@ export class SpaceRenderer {
     }
 
     /**
-     * Render a celestial body
+     * Render a celestial body (wireframe style)
      */
     private renderCelestialBody(body: CelestialBody, screenPos: any): void {
         const screenRadius = this.camera.getScreenSize(body.physical.radius, screenPos.distance);
-        const minRadius = body.type === 'STAR' ? 5 : 2;
-        const finalRadius = Math.max(minRadius, Math.min(screenRadius, 200));
+        const minRadius = body.type === CelestialBodyType.STAR ? 8 : 3;
+        const finalRadius = Math.max(minRadius, Math.min(screenRadius, 150));
 
         // Get body color
         const color = this.getCelestialColor(body);
 
-        // Draw glow for stars
-        if (body.type === CelestialBodyType.STAR) {
-            const gradient = this.ctx.createRadialGradient(
-                screenPos.x, screenPos.y, 0,
-                screenPos.x, screenPos.y, finalRadius * 3
-            );
-            gradient.addColorStop(0, color);
-            gradient.addColorStop(0.3, color + '88');
-            gradient.addColorStop(1, color + '00');
+        // Draw wireframe circle for body
+        this.ctx.strokeStyle = color;
+        this.ctx.lineWidth = body.type === CelestialBodyType.STAR ? 2 : 1;
 
-            this.ctx.fillStyle = gradient;
-            this.ctx.beginPath();
-            this.ctx.arc(screenPos.x, screenPos.y, finalRadius * 3, 0, Math.PI * 2);
-            this.ctx.fill();
-        }
-
-        // Draw body
-        this.ctx.fillStyle = color;
+        // Main circle
         this.ctx.beginPath();
         this.ctx.arc(screenPos.x, screenPos.y, finalRadius, 0, Math.PI * 2);
-        this.ctx.fill();
+        this.ctx.stroke();
 
-        // Draw selection highlight
-        if (this.selectedObject === body.id) {
-            this.ctx.strokeStyle = '#00ff00';
-            this.ctx.lineWidth = 2;
+        // For stars, add cross or additional rings for glow
+        if (body.type === CelestialBodyType.STAR) {
+            // Inner ring
+            this.ctx.globalAlpha = 0.6;
             this.ctx.beginPath();
-            this.ctx.arc(screenPos.x, screenPos.y, finalRadius + 5, 0, Math.PI * 2);
+            this.ctx.arc(screenPos.x, screenPos.y, finalRadius * 0.7, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            // Outer glow ring
+            this.ctx.globalAlpha = 0.3;
+            this.ctx.beginPath();
+            this.ctx.arc(screenPos.x, screenPos.y, finalRadius * 1.5, 0, Math.PI * 2);
+            this.ctx.stroke();
+
+            // Star cross
+            this.ctx.globalAlpha = 0.8;
+            this.ctx.beginPath();
+            this.ctx.moveTo(screenPos.x - finalRadius * 1.3, screenPos.y);
+            this.ctx.lineTo(screenPos.x + finalRadius * 1.3, screenPos.y);
+            this.ctx.moveTo(screenPos.x, screenPos.y - finalRadius * 1.3);
+            this.ctx.lineTo(screenPos.x, screenPos.y + finalRadius * 1.3);
+            this.ctx.stroke();
+
+            this.ctx.globalAlpha = 1.0;
+        }
+
+        // For large planets, add equator line
+        if (finalRadius > 15 && body.type === CelestialBodyType.PLANET) {
+            this.ctx.globalAlpha = 0.5;
+            const equatorWidth = finalRadius * 0.9;
+            this.ctx.beginPath();
+            this.ctx.ellipse(screenPos.x, screenPos.y, equatorWidth, finalRadius * 0.2, 0, 0, Math.PI * 2);
+            this.ctx.stroke();
+            this.ctx.globalAlpha = 1.0;
+        }
+
+        // Draw selection highlight (blinking brackets)
+        if (this.selectedObject === body.id) {
+            this.ctx.strokeStyle = VECTOR_COLORS.primary;
+            this.ctx.lineWidth = 2;
+
+            const bracketSize = finalRadius + 8;
+            const bracketLen = 10;
+
+            // Four corner brackets
+            this.ctx.beginPath();
+            // Top-left
+            this.ctx.moveTo(screenPos.x - bracketSize, screenPos.y - bracketSize + bracketLen);
+            this.ctx.lineTo(screenPos.x - bracketSize, screenPos.y - bracketSize);
+            this.ctx.lineTo(screenPos.x - bracketSize + bracketLen, screenPos.y - bracketSize);
+            // Top-right
+            this.ctx.moveTo(screenPos.x + bracketSize - bracketLen, screenPos.y - bracketSize);
+            this.ctx.lineTo(screenPos.x + bracketSize, screenPos.y - bracketSize);
+            this.ctx.lineTo(screenPos.x + bracketSize, screenPos.y - bracketSize + bracketLen);
+            // Bottom-right
+            this.ctx.moveTo(screenPos.x + bracketSize, screenPos.y + bracketSize - bracketLen);
+            this.ctx.lineTo(screenPos.x + bracketSize, screenPos.y + bracketSize);
+            this.ctx.lineTo(screenPos.x + bracketSize - bracketLen, screenPos.y + bracketSize);
+            // Bottom-left
+            this.ctx.moveTo(screenPos.x - bracketSize + bracketLen, screenPos.y + bracketSize);
+            this.ctx.lineTo(screenPos.x - bracketSize, screenPos.y + bracketSize);
+            this.ctx.lineTo(screenPos.x - bracketSize, screenPos.y + bracketSize - bracketLen);
             this.ctx.stroke();
         }
 
         // Draw label
-        if (this.showLabels && screenRadius > 5) {
-            this.drawLabel(screenPos.x, screenPos.y + finalRadius + 15, body.name, color);
+        if (this.showLabels && finalRadius > 8) {
+            this.drawLabel(screenPos.x, screenPos.y + finalRadius + 12, body.name, color);
         }
     }
 
     /**
-     * Get color for celestial body based on type
+     * Get color for celestial body based on type (vector graphics palette)
      */
     private getCelestialColor(body: CelestialBody): string {
         switch (body.type) {
             case CelestialBodyType.STAR:
-                // Color based on star class for Star instances
-                if (body instanceof Star) {
-                    const classMap: Record<string, string> = {
-                        'O': '#9bb0ff', 'B': '#aabfff', 'A': '#cad8ff',
-                        'F': '#f8f7ff', 'G': '#fff4ea', 'K': '#ffd2a1',
-                        'M': '#ffcc6f'
-                    };
-                    return classMap[body.starClass[0]] || '#ffffff';
-                }
-                return '#ffff00';
+                return VECTOR_COLORS.star; // Bright yellow for stars
             case CelestialBodyType.PLANET:
-                // Check if it's a planet with atmosphere
-                if (body instanceof Planet) {
-                    return body.hasAtmosphere ? '#6688ff' : '#888888';
-                }
-                return '#888888';
+                return VECTOR_COLORS.primary; // Green for planets
             case CelestialBodyType.MOON:
-                return '#aaaaaa';
+                return VECTOR_COLORS.secondary; // Dim green for moons
             case CelestialBodyType.ASTEROID:
-                return '#666666';
+                return VECTOR_COLORS.tertiary; // Very dim green for asteroids
             case CelestialBodyType.STATION:
-                return '#00ff00';
+                return VECTOR_COLORS.station; // Cyan for stations
             default:
-                return '#ffffff';
+                return VECTOR_COLORS.primary;
         }
     }
 
     /**
-     * Render NPC ship
+     * Render NPC ship (wireframe triangle)
      */
     private renderNPCShip(npc: NPCShip, screenPos: any): void {
-        const size = Math.max(3, this.camera.getScreenSize(50, screenPos.distance));
+        const size = Math.max(4, this.camera.getScreenSize(50, screenPos.distance));
 
-        // Draw ship as triangle
-        this.ctx.fillStyle = '#ff8800';
+        // Draw ship as wireframe triangle with central dot
+        this.ctx.strokeStyle = VECTOR_COLORS.secondary;
+        this.ctx.lineWidth = 1;
+
         this.ctx.beginPath();
         this.ctx.moveTo(screenPos.x, screenPos.y - size);
         this.ctx.lineTo(screenPos.x - size * 0.6, screenPos.y + size * 0.6);
         this.ctx.lineTo(screenPos.x + size * 0.6, screenPos.y + size * 0.6);
         this.ctx.closePath();
-        this.ctx.fill();
+        this.ctx.stroke();
 
-        // Draw selection highlight
+        // Central dot
+        this.ctx.fillStyle = VECTOR_COLORS.secondary;
+        this.ctx.fillRect(screenPos.x - 1, screenPos.y - 1, 2, 2);
+
+        // Draw selection highlight (brackets)
         if (this.selectedObject === npc.id) {
-            this.ctx.strokeStyle = '#ffff00';
+            this.ctx.strokeStyle = VECTOR_COLORS.primary;
             this.ctx.lineWidth = 2;
+
+            const bracketSize = size * 2;
+            const bracketLen = 6;
+
             this.ctx.beginPath();
-            this.ctx.arc(screenPos.x, screenPos.y, size * 2, 0, Math.PI * 2);
+            // Top-left
+            this.ctx.moveTo(screenPos.x - bracketSize, screenPos.y - bracketSize + bracketLen);
+            this.ctx.lineTo(screenPos.x - bracketSize, screenPos.y - bracketSize);
+            this.ctx.lineTo(screenPos.x - bracketSize + bracketLen, screenPos.y - bracketSize);
+            // Top-right
+            this.ctx.moveTo(screenPos.x + bracketSize - bracketLen, screenPos.y - bracketSize);
+            this.ctx.lineTo(screenPos.x + bracketSize, screenPos.y - bracketSize);
+            this.ctx.lineTo(screenPos.x + bracketSize, screenPos.y - bracketSize + bracketLen);
+            // Bottom-right
+            this.ctx.moveTo(screenPos.x + bracketSize, screenPos.y + bracketSize - bracketLen);
+            this.ctx.lineTo(screenPos.x + bracketSize, screenPos.y + bracketSize);
+            this.ctx.lineTo(screenPos.x + bracketSize - bracketLen, screenPos.y + bracketSize);
+            // Bottom-left
+            this.ctx.moveTo(screenPos.x - bracketSize + bracketLen, screenPos.y + bracketSize);
+            this.ctx.lineTo(screenPos.x - bracketSize, screenPos.y + bracketSize);
+            this.ctx.lineTo(screenPos.x - bracketSize, screenPos.y + bracketSize - bracketLen);
             this.ctx.stroke();
         }
 
         // Draw label for close ships
         if (this.showLabels && screenPos.distance < 1e5) {
-            this.drawLabel(screenPos.x, screenPos.y + size + 12, npc.name, '#ff8800');
+            this.drawLabel(screenPos.x, screenPos.y + size + 12, npc.name, VECTOR_COLORS.secondary);
         }
     }
 
     /**
-     * Render player ship
+     * Render player ship (wireframe lander style)
      */
     private renderPlayerShip(_ship: any, screenPos: any): void {
-        const size = Math.max(4, this.camera.getScreenSize(50, screenPos.distance));
+        const size = Math.max(5, this.camera.getScreenSize(50, screenPos.distance));
 
-        // Draw ship as diamond
-        this.ctx.fillStyle = '#00ff00';
-        this.ctx.strokeStyle = '#00ff00';
+        this.ctx.strokeStyle = VECTOR_COLORS.primary;
         this.ctx.lineWidth = 2;
 
+        // Draw ship as classic lander shape (like Lunar Lander)
         this.ctx.beginPath();
-        this.ctx.moveTo(screenPos.x, screenPos.y - size);
-        this.ctx.lineTo(screenPos.x + size, screenPos.y);
-        this.ctx.lineTo(screenPos.x, screenPos.y + size);
-        this.ctx.lineTo(screenPos.x - size, screenPos.y);
-        this.ctx.closePath();
+        // Main body (rectangle)
+        this.ctx.rect(screenPos.x - size * 0.5, screenPos.y - size * 0.4, size, size * 0.8);
+        // Landing legs
+        this.ctx.moveTo(screenPos.x - size * 0.4, screenPos.y + size * 0.4);
+        this.ctx.lineTo(screenPos.x - size * 0.8, screenPos.y + size * 0.8);
+        this.ctx.moveTo(screenPos.x + size * 0.4, screenPos.y + size * 0.4);
+        this.ctx.lineTo(screenPos.x + size * 0.8, screenPos.y + size * 0.8);
+        // Thruster nozzle
+        this.ctx.moveTo(screenPos.x - size * 0.2, screenPos.y + size * 0.4);
+        this.ctx.lineTo(screenPos.x - size * 0.2, screenPos.y + size * 0.6);
+        this.ctx.lineTo(screenPos.x + size * 0.2, screenPos.y + size * 0.6);
+        this.ctx.lineTo(screenPos.x + size * 0.2, screenPos.y + size * 0.4);
         this.ctx.stroke();
 
-        // Draw crosshair at center of player ship
-        this.ctx.strokeStyle = '#00ff00';
+        // Central cross for targeting
+        this.ctx.strokeStyle = VECTOR_COLORS.primary;
         this.ctx.lineWidth = 1;
-        const crossSize = size * 2;
+        const crossSize = size * 2.5;
         this.ctx.beginPath();
         this.ctx.moveTo(screenPos.x - crossSize, screenPos.y);
+        this.ctx.lineTo(screenPos.x - size * 1.5, screenPos.y);
+        this.ctx.moveTo(screenPos.x + size * 1.5, screenPos.y);
         this.ctx.lineTo(screenPos.x + crossSize, screenPos.y);
         this.ctx.moveTo(screenPos.x, screenPos.y - crossSize);
+        this.ctx.lineTo(screenPos.x, screenPos.y - size * 1.5);
+        this.ctx.moveTo(screenPos.x, screenPos.y + size * 1.5);
         this.ctx.lineTo(screenPos.x, screenPos.y + crossSize);
         this.ctx.stroke();
+
+        // Center dot
+        this.ctx.fillStyle = VECTOR_COLORS.primary;
+        this.ctx.fillRect(screenPos.x - 1, screenPos.y - 1, 3, 3);
     }
 
     /**
-     * Render satellite
+     * Render satellite (wireframe)
      */
     private renderSatellite(sat: any, screenPos: any): void {
-        const size = Math.max(2, this.camera.getScreenSize(10, screenPos.distance));
+        const size = Math.max(3, this.camera.getScreenSize(10, screenPos.distance));
 
-        // Draw satellite as square
-        this.ctx.fillStyle = '#00ffff';
-        this.ctx.fillRect(screenPos.x - size / 2, screenPos.y - size / 2, size, size);
+        // Draw satellite as wireframe with solar panels
+        this.ctx.strokeStyle = VECTOR_COLORS.station;
+        this.ctx.lineWidth = 1;
+
+        // Main body (square)
+        this.ctx.beginPath();
+        this.ctx.rect(screenPos.x - size / 2, screenPos.y - size / 2, size, size);
+        // Solar panels
+        this.ctx.rect(screenPos.x - size * 1.5, screenPos.y - size * 0.3, size * 0.4, size * 0.6);
+        this.ctx.rect(screenPos.x + size * 1.1, screenPos.y - size * 0.3, size * 0.4, size * 0.6);
+        this.ctx.stroke();
+
+        // Center dot
+        this.ctx.fillStyle = VECTOR_COLORS.station;
+        this.ctx.fillRect(screenPos.x - 1, screenPos.y - 1, 2, 2);
 
         // Draw label if close
         if (this.showLabels && screenPos.distance < 5e4) {
-            this.drawLabel(screenPos.x, screenPos.y + size + 10, sat.name, '#00ffff');
+            this.drawLabel(screenPos.x, screenPos.y + size + 10, sat.name, VECTOR_COLORS.station);
         }
     }
 
     /**
-     * Render orbital paths
+     * Render orbital paths (dotted circles)
      */
     private renderOrbits(starSystem: StarSystem): void {
-        this.ctx.strokeStyle = '#ffffff';
-        this.ctx.globalAlpha = 0.2;
+        this.ctx.strokeStyle = VECTOR_COLORS.tertiary;
+        this.ctx.globalAlpha = 0.4;
         this.ctx.lineWidth = 1;
 
-        // Render planet orbits around star
+        // Render planet orbits around star (dotted)
         const star = starSystem.star;
         const starScreen = this.camera.worldToScreen(star.position);
 
@@ -400,10 +529,13 @@ export class SpaceRenderer {
 
             const screenRadius = this.camera.getScreenSize(orbitRadius, starScreen.distance);
 
-            if (screenRadius > 5 && screenRadius < 2000) {
+            if (screenRadius > 10 && screenRadius < 2000) {
+                // Draw dotted circle
+                this.ctx.setLineDash([3, 6]);
                 this.ctx.beginPath();
                 this.ctx.arc(starScreen.x, starScreen.y, screenRadius, 0, Math.PI * 2);
                 this.ctx.stroke();
+                this.ctx.setLineDash([]);
             }
         }
 
@@ -411,7 +543,7 @@ export class SpaceRenderer {
     }
 
     /**
-     * Render velocity vector
+     * Render velocity vector (bright line with arrowhead)
      */
     private renderVelocityVector(ship: any, screenPos: any): void {
         const velMag = Math.sqrt(
@@ -421,7 +553,7 @@ export class SpaceRenderer {
         if (velMag < 1) return; // Don't draw if nearly stationary
 
         // Calculate velocity endpoint in world space
-        const scale = 1000; // Scale factor for visibility
+        const scale = 1500; // Scale factor for visibility
         const velEnd: Vector3 = {
             x: ship.position.x + (ship.velocity.x / velMag) * scale,
             y: ship.position.y + (ship.velocity.y / velMag) * scale,
@@ -430,9 +562,11 @@ export class SpaceRenderer {
 
         const velEndScreen = this.camera.worldToScreen(velEnd);
 
-        // Draw velocity vector
-        this.ctx.strokeStyle = '#ffff00';
-        this.ctx.lineWidth = 2;
+        // Draw velocity vector (bright yellow-green)
+        this.ctx.strokeStyle = VECTOR_COLORS.star;
+        this.ctx.lineWidth = 1;
+        this.ctx.globalAlpha = 0.8;
+
         this.ctx.beginPath();
         this.ctx.moveTo(screenPos.x, screenPos.y);
         this.ctx.lineTo(velEndScreen.x, velEndScreen.y);
@@ -440,42 +574,40 @@ export class SpaceRenderer {
 
         // Draw arrowhead
         const angle = Math.atan2(velEndScreen.y - screenPos.y, velEndScreen.x - screenPos.x);
-        const arrowSize = 10;
+        const arrowSize = 8;
         this.ctx.beginPath();
         this.ctx.moveTo(velEndScreen.x, velEndScreen.y);
         this.ctx.lineTo(
             velEndScreen.x - arrowSize * Math.cos(angle - Math.PI / 6),
             velEndScreen.y - arrowSize * Math.sin(angle - Math.PI / 6)
         );
-        this.ctx.moveTo(velEndScreen.x, velEndScreen.y);
         this.ctx.lineTo(
             velEndScreen.x - arrowSize * Math.cos(angle + Math.PI / 6),
             velEndScreen.y - arrowSize * Math.sin(angle + Math.PI / 6)
         );
+        this.ctx.closePath();
         this.ctx.stroke();
+
+        this.ctx.globalAlpha = 1.0;
     }
 
     /**
-     * Draw text label
+     * Draw text label (monospace, retro terminal style)
      */
     private drawLabel(x: number, y: number, text: string, color: string): void {
-        this.ctx.font = '11px "Courier New"';
+        this.ctx.font = '10px "Courier New", monospace';
         this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'top';
 
-        // Draw background
-        const metrics = this.ctx.measureText(text);
-        this.ctx.fillStyle = '#000000';
-        this.ctx.globalAlpha = 0.7;
-        this.ctx.fillRect(
-            x - metrics.width / 2 - 2,
-            y - 10,
-            metrics.width + 4,
-            14
-        );
-
-        // Draw text
-        this.ctx.globalAlpha = 1.0;
+        // Draw text with slight glow effect
         this.ctx.fillStyle = color;
+        this.ctx.globalAlpha = 0.3;
+        this.ctx.fillText(text, x - 1, y);
+        this.ctx.fillText(text, x + 1, y);
+        this.ctx.fillText(text, x, y - 1);
+        this.ctx.fillText(text, x, y + 1);
+
+        this.ctx.globalAlpha = 1.0;
         this.ctx.fillText(text, x, y);
     }
 
