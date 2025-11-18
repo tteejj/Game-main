@@ -33,6 +33,11 @@ import {
   CommodityCategory,
   getCommoditiesByCategory
 } from './economy';
+import {
+  POIManager,
+  PointOfInterest
+} from './poi';
+import { Vector3 as Vector3Class } from '../../physics-modules/src/Vector3';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -44,6 +49,7 @@ export interface StarSystemConfig {
   allowHazards?: boolean;
   allowNPCTraffic?: boolean;
   allowCommunications?: boolean;
+  allowPOIs?: boolean;
   civilizationLevel?: number; // 0-10 (0 = uninhabited, 10 = high tech)
   position?: Vector3; // Position in galaxy
 }
@@ -58,6 +64,7 @@ export interface StarSystemData {
   stations: SpaceStation[];
   satellites: Satellite[];
   npcShips: NPCShip[];
+  pois: PointOfInterest[];
   hazards: Hazard[];
   position: Vector3;
 }
@@ -78,6 +85,7 @@ export class StarSystem {
   public relayNetwork: RelayNetwork;
   public communicationsManager: CommunicationsManager;
   public markets: Map<string, Market> = new Map(); // station id -> market
+  public poiManager: POIManager;
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
@@ -120,6 +128,7 @@ export class StarSystem {
     this.trafficManager = new TrafficManager<NPCShip>(100000, 100);
     this.relayNetwork = new RelayNetwork(1e10); // 10 million km max range
     this.communicationsManager = new CommunicationsManager(this.relayNetwork);
+    this.poiManager = new POIManager();
 
     // Generate the star
     this.star = this.generateStar(config.starClass);
@@ -165,6 +174,11 @@ export class StarSystem {
 
     // Initialize station markets
     this.initializeMarkets(config.civilizationLevel || 5);
+
+    // Generate Points of Interest
+    if (config.allowPOIs !== false) {
+      this.generatePOIs(config.civilizationLevel || 5);
+    }
   }
 
   /**
@@ -902,6 +916,46 @@ export class StarSystem {
   }
 
   /**
+   * Generate Points of Interest
+   */
+  private generatePOIs(civilizationLevel: number): void {
+    // Calculate system radius (outermost planet orbit + some buffer)
+    let maxOrbit = this.star.physical.radius * 10; // Default minimum
+    for (const planet of this.planets) {
+      if (planet.orbital && planet.orbital.semiMajorAxis > maxOrbit) {
+        maxOrbit = planet.orbital.semiMajorAxis;
+      }
+    }
+    const systemRadius = maxOrbit * 1.5; // Add 50% buffer
+
+    // Get station positions for minimum distance checking
+    // Convert from Vector3 interface to Vector3 class
+    const stationPositions = this.stations.map(s =>
+      new Vector3Class(s.position.x, s.position.y, s.position.z)
+    );
+
+    // POI density increases with lower civilization
+    // (uninhabited systems have more derelicts/anomalies)
+    const baseDensity = 0.5; // POIs per cubic AU
+    const densityMultiplier = 1 + (10 - civilizationLevel) * 0.2;
+    const density = baseDensity * densityMultiplier;
+
+    // Generate POIs
+    this.poiManager.generatePOIs(
+      {
+        density,
+        derelictProbability: 0.5, // 50% derelicts
+        anomalyProbability: 0.3, // 30% anomalies
+        cacheProbability: 0.2, // 20% caches
+        minDistanceFromStations: 100000, // 100 km minimum
+        maxDistanceFromStar: systemRadius
+      },
+      systemRadius,
+      stationPositions
+    );
+  }
+
+  /**
    * Update entire system
    */
   update(deltaTime: number): void {
@@ -958,6 +1012,9 @@ export class StarSystem {
     for (const market of this.markets.values()) {
       market.update(deltaTime);
     }
+
+    // Update Points of Interest
+    this.poiManager.update(deltaTime);
 
     // Update hazards
     this.hazardSystem.update(deltaTime);
@@ -1034,6 +1091,7 @@ export class StarSystem {
       stations: this.stations,
       satellites: this.satellites,
       npcShips: this.trafficManager.getAllVessels(),
+      pois: this.poiManager.getAllPOIs(),
       hazards: this.hazardSystem.getActiveHazards(),
       position: this.position
     };

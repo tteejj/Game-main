@@ -336,6 +336,71 @@ export function getSystemReport(system: StarSystem): string {
     }
   }
 
+  // Points of Interest
+  const poiStats = system.poiManager.getStatistics();
+  if (poiStats.totalPOIs > 0) {
+    lines.push('═══ POINTS OF INTEREST ═══');
+    lines.push(`Total POIs: ${poiStats.totalPOIs}`);
+    lines.push('');
+
+    lines.push(`Discovery Progress:`);
+    lines.push(`  Undiscovered: ${poiStats.undiscovered} (${((poiStats.undiscovered / poiStats.totalPOIs) * 100).toFixed(0)}%)`);
+    lines.push(`  Detected: ${poiStats.detected}`);
+    lines.push(`  Identified: ${poiStats.identified}`);
+    lines.push(`  Scanned: ${poiStats.scanned}`);
+    lines.push(`  Salvaged: ${poiStats.salvaged}`);
+    lines.push('');
+
+    lines.push(`POI Types:`);
+    for (const [type, count] of poiStats.byType.entries()) {
+      lines.push(`  • ${type}: ${count}`);
+    }
+    lines.push('');
+
+    lines.push(`Total Value: ${poiStats.totalValue.toLocaleString()} credits`);
+    lines.push(`Discovered Value: ${poiStats.discoveredValue.toLocaleString()} credits`);
+    lines.push('');
+
+    // Show some discovered POIs
+    const allPOIs = system.poiManager.getAllPOIs();
+    const discoveredPOIs = allPOIs.filter(poi => poi.isDiscovered());
+
+    if (discoveredPOIs.length > 0) {
+      lines.push(`Discovered POIs (showing ${Math.min(5, discoveredPOIs.length)}):`);
+      for (let i = 0; i < Math.min(5, discoveredPOIs.length); i++) {
+        const poi = discoveredPOIs[i];
+        const stateSymbol = poi.discoveryState === 'SCANNED' ? '✓' :
+                           poi.discoveryState === 'IDENTIFIED' ? '○' : '?';
+        lines.push(`  ${stateSymbol} ${poi.name} [${poi.type}]`);
+
+        if (poi.discoveryState === 'SCANNED') {
+          const value = poi.loot.reduce((sum, item) => sum + item.value, 0);
+          lines.push(`     Value: ${value.toLocaleString()} credits, XP: ${poi.experienceReward}`);
+        } else if (poi.discoveryState === 'IDENTIFIED') {
+          lines.push(`     ${poi.description}`);
+        }
+      }
+
+      if (discoveredPOIs.length > 5) {
+        lines.push(`  ... and ${discoveredPOIs.length - 5} more discovered POIs`);
+      }
+      lines.push('');
+    }
+
+    // Show recent discoveries
+    const recentDiscoveries = system.poiManager.getRecentDiscoveries(3);
+    if (recentDiscoveries.length > 0) {
+      lines.push(`Recent Discoveries:`);
+      for (const discovery of recentDiscoveries) {
+        lines.push(`  • ${discovery.poi.name} - ${discovery.discoveryType} by ${discovery.discovererID}`);
+        if (discovery.scanResult) {
+          lines.push(`    Signal: ${discovery.scanResult.signalStrength.toFixed(1)} dBm, Quality: ${(discovery.scanResult.quality * 100).toFixed(0)}%`);
+        }
+      }
+      lines.push('');
+    }
+  }
+
   // Hazards
   const hazards = system.hazardSystem.getActiveHazards();
   if (hazards.length > 0) {
