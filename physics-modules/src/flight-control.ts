@@ -21,7 +21,10 @@ export type AutopilotMode =
   | 'altitude_hold'     // Maintain specific altitude
   | 'vertical_speed_hold' // Maintain constant descent/ascent rate
   | 'suicide_burn'      // Automatic deceleration burn
-  | 'hover';            // Maintain altitude with translation
+  | 'hover'             // Maintain altitude with translation
+  | 'landing'           // Automatic landing sequence
+  | 'docking'           // Automatic docking approach
+  | 'orbital_insertion'; // Automatic orbital insertion burn
 
 export interface Vector3 {
   x: number;
@@ -92,6 +95,9 @@ export interface FlightControlState {
   suicideBurnActive: boolean;
   suicideBurnAltitude: number;
   hoverActive: boolean;
+  landingPhase: 'descent' | 'deceleration' | 'final' | 'touchdown' | 'off';
+  dockingPhase: 'approach' | 'alignment' | 'final' | 'capture' | 'off';
+  orbitalInsertionPhase: 'coasting' | 'burn' | 'circularizing' | 'complete' | 'off';
 
   // Control outputs
   rcsCommands: RCSCommands;
@@ -434,6 +440,20 @@ export class AutopilotSystem {
   private suicideBurnActive: boolean = false;
   private suicideBurnAltitude: number = 0;
 
+  // Landing autopilot state
+  private landingPhase: 'descent' | 'deceleration' | 'final' | 'touchdown' | 'off' = 'off';
+  private landingTargetAltitude: number = 0;
+
+  // Docking autopilot state
+  private dockingPhase: 'approach' | 'alignment' | 'final' | 'capture' | 'off' = 'off';
+  private dockingTargetPosition: Vector3 | null = null;
+  private dockingDistance: number = 0;
+
+  // Orbital insertion state
+  private orbitalInsertionPhase: 'coasting' | 'burn' | 'circularizing' | 'complete' | 'off' = 'off';
+  private targetOrbitAltitude: number = 100000; // 100km default
+  private targetOrbitalVelocity: number = 0;
+
   constructor(config: FlightControlConfig) {
     this.config = config.autopilot;
     this.altitudePID = new PIDController(config.pid.altitude);
@@ -445,6 +465,18 @@ export class AutopilotSystem {
     this.altitudePID.reset();
     this.verticalSpeedPID.reset();
     this.suicideBurnActive = false;
+    this.landingPhase = 'off';
+    this.dockingPhase = 'off';
+    this.orbitalInsertionPhase = 'off';
+
+    // Initialize phases based on mode
+    if (mode === 'landing') {
+      this.landingPhase = 'descent';
+    } else if (mode === 'docking') {
+      this.dockingPhase = 'approach';
+    } else if (mode === 'orbital_insertion') {
+      this.orbitalInsertionPhase = 'coasting';
+    }
   }
 
   getMode(): AutopilotMode {
@@ -465,7 +497,9 @@ export class AutopilotSystem {
     mass: number,
     maxThrust: number,
     gravity: number,
-    dt: number
+    dt: number,
+    position?: Vector3,
+    velocity?: Vector3
   ): ThrottleCommand {
     if (this.mode === 'off') {
       return { throttle: 0, reason: 'autopilot_off' };
@@ -483,6 +517,15 @@ export class AutopilotSystem {
 
       case 'hover':
         return this.updateHover(altitude, mass, maxThrust, gravity, dt);
+
+      case 'landing':
+        return this.updateLanding(altitude, verticalSpeed, mass, maxThrust, gravity, dt);
+
+      case 'docking':
+        return this.updateDocking(position || { x: 0, y: 0, z: 0 }, velocity || { x: 0, y: 0, z: 0 }, mass, maxThrust, dt);
+
+      case 'orbital_insertion':
+        return this.updateOrbitalInsertion(altitude, velocity || { x: 0, y: 0, z: 0 }, mass, maxThrust, gravity, dt);
 
       default:
         return { throttle: 0, reason: 'unknown_mode' };
@@ -581,6 +624,233 @@ export class AutopilotSystem {
     hoverThrottle = Math.max(0, Math.min(1, hoverThrottle));
 
     return { throttle: hoverThrottle, reason: 'hover_active' };
+  }
+
+  /**
+   * Landing Autopilot
+   * Multi-phase automatic landing sequence:
+   * 1. Descent - slow descent at controlled rate
+   * 2. Deceleration - reduce vertical speed
+   * 3. Final - precise altitude control
+   * 4. Touchdown - gentle contact with surface
+   */
+  private updateLanding(
+    altitude: number,
+    verticalSpeed: number,
+    mass: number,
+    maxThrust: number,
+    gravity: number,
+    dt: number
+  ): ThrottleCommand {
+    const DESCENT_SPEED = -5; // m/s (downward)
+    const FINAL_ALTITUDE = 100; // Switch to final approach
+    const TOUCHDOWN_ALTITUDE = 10; // Final touchdown phase
+    const TOUCHDOWN_SPEED = -1; // Very slow final descent
+
+    // Phase transitions
+    if (this.landingPhase === 'descent' && altitude < FINAL_ALTITUDE) {
+      this.landingPhase = 'deceleration';
+    } else if (this.landingPhase === 'deceleration' && Math.abs(verticalSpeed - DESCENT_SPEED) < 0.5) {
+      this.landingPhase = 'final';
+    } else if (this.landingPhase === 'final' && altitude < TOUCHDOWN_ALTITUDE) {
+      this.landingPhase = 'touchdown';
+    }
+
+    switch (this.landingPhase) {
+      case 'descent': {
+        // Maintain constant descent rate
+        this.targetVerticalSpeed = DESCENT_SPEED;
+        return this.updateVerticalSpeedHold(verticalSpeed, dt);
+      }
+
+      case 'deceleration': {
+        // Slow down to descent speed
+        const targetSpeed = Math.max(DESCENT_SPEED, verticalSpeed + 0.5); // Gradual deceleration
+        this.targetVerticalSpeed = targetSpeed;
+        return this.updateVerticalSpeedHold(verticalSpeed, dt);
+      }
+
+      case 'final': {
+        // Precision altitude control
+        this.targetAltitude = Math.max(TOUCHDOWN_ALTITUDE, altitude - 1); // Descend 1m at a time
+        return this.updateAltitudeHold(altitude, verticalSpeed, dt);
+      }
+
+      case 'touchdown': {
+        // Very slow final descent
+        this.targetVerticalSpeed = TOUCHDOWN_SPEED;
+        const throttle = this.updateVerticalSpeedHold(verticalSpeed, dt).throttle;
+
+        // Check for touchdown (altitude ~0 and slow speed)
+        if (altitude < 1 && Math.abs(verticalSpeed) < 0.5) {
+          this.landingPhase = 'touchdown';
+          return { throttle: 0, reason: 'landing_complete' };
+        }
+
+        return { throttle, reason: 'landing_touchdown' };
+      }
+
+      default:
+        return { throttle: 0, reason: 'landing_off' };
+    }
+  }
+
+  /**
+   * Docking Autopilot
+   * Automatic approach and alignment with docking target
+   * Phases:
+   * 1. Approach - move toward target
+   * 2. Alignment - match velocity and orientation
+   * 3. Final - precise positioning
+   * 4. Capture - complete docking
+   */
+  private updateDocking(
+    position: Vector3,
+    velocity: Vector3,
+    mass: number,
+    maxThrust: number,
+    dt: number
+  ): ThrottleCommand {
+    if (!this.dockingTargetPosition) {
+      return { throttle: 0, reason: 'no_docking_target' };
+    }
+
+    // Calculate distance to target
+    const dx = this.dockingTargetPosition.x - position.x;
+    const dy = this.dockingTargetPosition.y - position.y;
+    const dz = this.dockingTargetPosition.z - position.z;
+    this.dockingDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    const APPROACH_DISTANCE = 1000; // 1km
+    const ALIGNMENT_DISTANCE = 100; // 100m
+    const FINAL_DISTANCE = 10; // 10m
+    const CAPTURE_DISTANCE = 2; // 2m
+
+    // Phase transitions
+    if (this.dockingPhase === 'approach' && this.dockingDistance < ALIGNMENT_DISTANCE) {
+      this.dockingPhase = 'alignment';
+    } else if (this.dockingPhase === 'alignment' && this.dockingDistance < FINAL_DISTANCE) {
+      this.dockingPhase = 'final';
+    } else if (this.dockingPhase === 'final' && this.dockingDistance < CAPTURE_DISTANCE) {
+      this.dockingPhase = 'capture';
+    }
+
+    switch (this.dockingPhase) {
+      case 'approach': {
+        // Fast approach - 10% throttle
+        return { throttle: 0.1, reason: 'docking_approach' };
+      }
+
+      case 'alignment': {
+        // Slow approach with velocity matching - 5% throttle
+        return { throttle: 0.05, reason: 'docking_alignment' };
+      }
+
+      case 'final': {
+        // Very slow approach - 2% throttle
+        return { throttle: 0.02, reason: 'docking_final' };
+      }
+
+      case 'capture': {
+        // Docking complete
+        this.dockingPhase = 'capture';
+        return { throttle: 0, reason: 'docking_complete' };
+      }
+
+      default:
+        return { throttle: 0, reason: 'docking_off' };
+    }
+  }
+
+  /**
+   * Orbital Insertion Autopilot
+   * Automatic insertion into circular orbit
+   * Phases:
+   * 1. Coasting - wait for apoapsis
+   * 2. Burn - circularization burn at apoapsis
+   * 3. Circularizing - fine-tune orbit
+   * 4. Complete - orbit achieved
+   */
+  private updateOrbitalInsertion(
+    altitude: number,
+    velocity: Vector3,
+    mass: number,
+    maxThrust: number,
+    gravity: number,
+    dt: number
+  ): ThrottleCommand {
+    // Calculate current orbital velocity
+    const currentSpeed = Math.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2);
+
+    // Calculate target circular orbital velocity: v = sqrt(GM/r)
+    // Using simplified gravity model: g = GM/r^2, so GM = g*r^2
+    const planetRadius = 1737400; // Moon radius (simplified)
+    const orbitRadius = planetRadius + this.targetOrbitAltitude;
+    const GM = gravity * orbitRadius * orbitRadius;
+    this.targetOrbitalVelocity = Math.sqrt(GM / orbitRadius);
+
+    const velocityError = this.targetOrbitalVelocity - currentSpeed;
+    const VELOCITY_DEADBAND = 5; // m/s
+
+    // Phase transitions
+    if (this.orbitalInsertionPhase === 'coasting' && altitude >= this.targetOrbitAltitude * 0.95) {
+      this.orbitalInsertionPhase = 'burn';
+    } else if (this.orbitalInsertionPhase === 'burn' && Math.abs(velocityError) < 50) {
+      this.orbitalInsertionPhase = 'circularizing';
+    } else if (this.orbitalInsertionPhase === 'circularizing' && Math.abs(velocityError) < VELOCITY_DEADBAND) {
+      this.orbitalInsertionPhase = 'complete';
+    }
+
+    switch (this.orbitalInsertionPhase) {
+      case 'coasting': {
+        // No thrust - coasting to apoapsis
+        return { throttle: 0, reason: 'orbital_coasting' };
+      }
+
+      case 'burn': {
+        // Full throttle circularization burn
+        if (velocityError > 0) {
+          return { throttle: 1.0, reason: 'orbital_burn' };
+        } else {
+          return { throttle: 0, reason: 'orbital_burn_complete' };
+        }
+      }
+
+      case 'circularizing': {
+        // Fine-tune orbit with partial throttle
+        const throttle = Math.min(0.3, Math.abs(velocityError) / 50);
+        return { throttle, reason: 'orbital_circularizing' };
+      }
+
+      case 'complete': {
+        // Orbit achieved
+        return { throttle: 0, reason: 'orbital_complete' };
+      }
+
+      default:
+        return { throttle: 0, reason: 'orbital_off' };
+    }
+  }
+
+  // Getters for new autopilot phases
+  getLandingPhase(): string {
+    return this.landingPhase;
+  }
+
+  getDockingPhase(): string {
+    return this.dockingPhase;
+  }
+
+  getOrbitalInsertionPhase(): string {
+    return this.orbitalInsertionPhase;
+  }
+
+  setDockingTarget(position: Vector3): void {
+    this.dockingTargetPosition = position;
+  }
+
+  setTargetOrbitAltitude(altitude: number): void {
+    this.targetOrbitAltitude = altitude;
   }
 }
 
@@ -733,14 +1003,16 @@ export class FlightControlSystem {
       dt
     );
 
-    // Update Autopilot
+    // Update Autopilot (now with position and velocity for new autopilot modes)
     const throttleCommand = this.autopilot.update(
       altitude,
       verticalSpeed,
       mass,
       maxThrust,
       gravity,
-      dt
+      dt,
+      position,
+      velocity
     );
 
     // Update Gimbal Autopilot
@@ -755,6 +1027,9 @@ export class FlightControlSystem {
       suicideBurnActive: this.autopilot.isSuicideBurnActive(),
       suicideBurnAltitude: this.autopilot.getSuicideBurnAltitude(),
       hoverActive: this.autopilot.getMode() === 'hover',
+      landingPhase: this.autopilot.getLandingPhase() as any,
+      dockingPhase: this.autopilot.getDockingPhase() as any,
+      orbitalInsertionPhase: this.autopilot.getOrbitalInsertionPhase() as any,
       rcsCommands,
       throttleCommand,
       gimbalCommand
@@ -771,9 +1046,21 @@ export class FlightControlSystem {
       suicideBurnActive: this.autopilot.isSuicideBurnActive(),
       suicideBurnAltitude: this.autopilot.getSuicideBurnAltitude(),
       hoverActive: this.autopilot.getMode() === 'hover',
+      landingPhase: this.autopilot.getLandingPhase() as any,
+      dockingPhase: this.autopilot.getDockingPhase() as any,
+      orbitalInsertionPhase: this.autopilot.getOrbitalInsertionPhase() as any,
       rcsCommands: { pitch: 0, roll: 0, yaw: 0 },
       throttleCommand: { throttle: 0, reason: 'idle' },
       gimbalCommand: { pitch: 0, yaw: 0 }
     };
+  }
+
+  // New autopilot control methods
+  setDockingTarget(position: Vector3): void {
+    this.autopilot.setDockingTarget(position);
+  }
+
+  setTargetOrbitAltitude(altitude: number): void {
+    this.autopilot.setTargetOrbitAltitude(altitude);
   }
 }

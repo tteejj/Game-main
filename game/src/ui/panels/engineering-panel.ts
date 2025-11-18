@@ -199,10 +199,210 @@ export class EngineeringPanel {
         ctx.fillStyle = xconnectColor;
         ctx.fillText(`Cross-Connect: ${xconnectStatus ? 'OPEN' : 'CLOSED'}  (X)`, 60, y);
 
+        // DAMAGE VISUALIZATION SECTION
+        y += 40;
+        ctx.fillStyle = this.palette.primary;
+        ctx.fillText('DAMAGE CONTROL', 450, 80);
+        let damageY = 105;
+
+        // Hull Integrity (overall)
+        const hullIntegrity = this.getHullIntegrity();
+        const hullColor = hullIntegrity > 80 ? this.palette.primary :
+                         hullIntegrity > 50 ? this.palette.warning :
+                         hullIntegrity > 20 ? this.palette.danger :
+                         this.palette.danger;
+        ctx.fillStyle = hullColor;
+        ctx.fillText(`Hull Integrity: ${hullIntegrity.toFixed(0)}%`, 470, damageY);
+        damageY += 18;
+
+        // Hull integrity bar
+        const barWidth = 200;
+        const barHeight = 10;
+        const barX = 470;
+        const barY = damageY;
+        ctx.strokeStyle = this.palette.muted;
+        ctx.strokeRect(barX, barY, barWidth, barHeight);
+        ctx.fillStyle = hullColor;
+        ctx.fillRect(barX, barY, barWidth * (hullIntegrity / 100), barHeight);
+        damageY += 25;
+
+        // Compartment Status
+        ctx.fillStyle = this.palette.secondary;
+        ctx.font = '12px "Courier New"';
+        ctx.fillText('Compartments:', 470, damageY);
+        ctx.font = '14px "Courier New"';
+        damageY += 20;
+
+        const compartments = this.getCompartmentStatus();
+        compartments.forEach((comp: any, index: number) => {
+            const compIntegrity = comp.integrity * 100;
+            const compColor = compIntegrity > 80 ? this.palette.primary :
+                             compIntegrity > 50 ? this.palette.warning :
+                             this.palette.danger;
+
+            ctx.fillStyle = compColor;
+            ctx.font = '11px "Courier New"';
+            const status = comp.breached ? '⚠ BREACH' : comp.onFire ? '🔥 FIRE' : 'OK';
+            ctx.fillText(`${comp.name}: ${compIntegrity.toFixed(0)}% ${status}`, 490, damageY);
+            damageY += 16;
+        });
+
+        ctx.font = '14px "Courier New"';
+        damageY += 10;
+
+        // System Status
+        ctx.fillStyle = this.palette.secondary;
+        ctx.font = '12px "Courier New"';
+        ctx.fillText('Critical Systems:', 470, damageY);
+        ctx.font = '14px "Courier New"';
+        damageY += 20;
+
+        const systems = this.getCriticalSystems();
+        systems.forEach((system: any) => {
+            const sysColor = system.operational ? this.palette.primary :
+                            system.health > 50 ? this.palette.warning :
+                            this.palette.danger;
+
+            ctx.fillStyle = sysColor;
+            ctx.font = '11px "Courier New"';
+            const status = system.operational ? 'OK' : system.repairing ? 'REPAIR' : 'DOWN';
+            ctx.fillText(`${system.name}: ${system.health.toFixed(0)}% [${status}]`, 490, damageY);
+            damageY += 16;
+        });
+
+        ctx.font = '14px "Courier New"';
+        damageY += 10;
+
+        // Repair Progress (if any)
+        const repairs = this.getActiveRepairs();
+        if (repairs.length > 0) {
+            ctx.fillStyle = this.palette.info;
+            ctx.font = '12px "Courier New"';
+            ctx.fillText('Active Repairs:', 470, damageY);
+            ctx.font = '14px "Courier New"';
+            damageY += 20;
+
+            repairs.forEach((repair: any) => {
+                ctx.fillStyle = this.palette.secondary;
+                ctx.font = '11px "Courier New"';
+                const progress = (repair.progress * 100).toFixed(0);
+                ctx.fillText(`${repair.component}: ${progress}%`, 490, damageY);
+
+                // Progress bar
+                const repairBarWidth = 100;
+                const repairBarHeight = 6;
+                const repairBarX = 620;
+                const repairBarY = damageY - 8;
+                ctx.strokeStyle = this.palette.muted;
+                ctx.strokeRect(repairBarX, repairBarY, repairBarWidth, repairBarHeight);
+                ctx.fillStyle = this.palette.info;
+                ctx.fillRect(repairBarX, repairBarY, repairBarWidth * repair.progress, repairBarHeight);
+
+                damageY += 16;
+            });
+        }
+
         // Keyboard hints
         const hintsY = ctx.canvas.height - 30;
         ctx.fillStyle = this.palette.muted;
         ctx.font = '12px "Courier New"';
         ctx.fillText('R=Reactor T=SCRAM I/K=Throttle 1-0=Breakers G=Radiators P=Pump1 C=Pump2 X=XConnect', 40, hintsY);
+    }
+
+    /**
+     * Get hull integrity percentage (mock data for now - would come from ship state)
+     */
+    private getHullIntegrity(): number {
+        // TODO: Get actual hull integrity from spacecraft state
+        // For now, return a simulated value based on various damage factors
+        const thermal = this.spacecraft.getThermalState();
+        const electrical = this.spacecraft.getElectricalState();
+
+        // Base integrity
+        let integrity = 100;
+
+        // Reduce integrity if reactor is damaged or offline
+        if (electrical.reactor.status !== 'online') {
+            integrity -= 5;
+        }
+
+        // Reduce integrity if thermal damage
+        if (thermal.nodes?.reactor?.temperature > 800) {
+            integrity -= Math.min(20, (thermal.nodes.reactor.temperature - 800) / 10);
+        }
+
+        return Math.max(0, Math.min(100, integrity));
+    }
+
+    /**
+     * Get compartment status (mock data)
+     */
+    private getCompartmentStatus(): any[] {
+        const lifeSupport = this.spacecraft.getLifeSupportTelemetry();
+
+        return [
+            {
+                name: 'Bridge',
+                integrity: lifeSupport.pressure > 90 ? 1.0 : lifeSupport.pressure / 100,
+                breached: lifeSupport.pressure < 50,
+                onFire: false
+            },
+            {
+                name: 'Engineering',
+                integrity: 0.95,
+                breached: false,
+                onFire: false
+            },
+            {
+                name: 'Cargo',
+                integrity: 1.0,
+                breached: false,
+                onFire: false
+            }
+        ];
+    }
+
+    /**
+     * Get critical systems status (mock data)
+     */
+    private getCriticalSystems(): any[] {
+        const electrical = this.spacecraft.getElectricalState();
+        const mainEngine = this.spacecraft.getMainEngineState();
+
+        return [
+            {
+                name: 'Reactor',
+                health: electrical.reactor.status === 'online' ? 100 : 50,
+                operational: electrical.reactor.status === 'online',
+                repairing: false
+            },
+            {
+                name: 'Main Engine',
+                health: mainEngine.status === 'running' || mainEngine.status === 'ready' ? 100 : 80,
+                operational: mainEngine.status !== 'damaged',
+                repairing: false
+            },
+            {
+                name: 'Life Support',
+                health: 100,
+                operational: true,
+                repairing: false
+            },
+            {
+                name: 'Sensors',
+                health: 100,
+                operational: true,
+                repairing: false
+            }
+        ];
+    }
+
+    /**
+     * Get active repairs (mock data)
+     */
+    private getActiveRepairs(): any[] {
+        // TODO: Get actual repair data from spacecraft state
+        // For now, return empty array (no active repairs)
+        return [];
     }
 }
