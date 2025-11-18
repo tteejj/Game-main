@@ -70,6 +70,17 @@ export class EngineeringPanel {
                 this.spacecraft.toggleCoolantPump(1, !secondaryLoop.pumpActive);
                 console.log(`Secondary coolant pump: ${!secondaryLoop.pumpActive ? 'ON' : 'OFF'}`);
                 break;
+            case 'x':
+                // Toggle coolant cross-connect
+                const xconnectStatus = this.spacecraft.getCoolantCrossConnectStatus();
+                if (xconnectStatus) {
+                    this.spacecraft.closeCoolantCrossConnect();
+                    console.log('Coolant cross-connect: CLOSED');
+                } else {
+                    this.spacecraft.openCoolantCrossConnect();
+                    console.log('Coolant cross-connect: OPEN');
+                }
+                break;
         }
     }
 
@@ -181,10 +192,17 @@ export class EngineeringPanel {
             }
         });
 
+        // Cross-connect status
+        y += 10;
+        const xconnectStatus = this.spacecraft.getCoolantCrossConnectStatus();
+        const xconnectColor = xconnectStatus ? this.palette.primary : this.palette.muted;
+        ctx.fillStyle = xconnectColor;
+        ctx.fillText(`Cross-Connect: ${xconnectStatus ? 'OPEN' : 'CLOSED'}  (X)`, 60, y);
+
         // Keyboard hints
         const hintsY = ctx.canvas.height - 30;
         ctx.fillStyle = this.palette.muted;
         ctx.font = '12px "Courier New"';
-        ctx.fillText('R=Reactor  T=SCRAM  I/K=Throttle  1-0=Breakers  G=Radiators  P=Pump1  C=Pump2', 40, hintsY);
+        ctx.fillText('R=Reactor T=SCRAM I/K=Throttle 1-0=Breakers G=Radiators P=Pump1 C=Pump2 X=XConnect', 40, hintsY);
     }
 }

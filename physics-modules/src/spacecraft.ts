@@ -1533,5 +1533,132 @@ export class Spacecraft {
       venting: tank.valves.vent
     }));
   }
+
+  // =============================================================================
+  // Sensor Control Methods
+  // =============================================================================
+
+  /**
+   * Set radar mode
+   */
+  setRadarMode(mode: 'search' | 'track' | 'mapping' | 'off'): void {
+    this.radar.setMode(mode as any);
+  }
+
+  /**
+   * Set optical sensor mode
+   */
+  setOpticalMode(mode: 'visual' | 'infrared' | 'combined'): void {
+    this.opticalSensors.setMode(mode as any);
+  }
+
+  /**
+   * Initiate radar track on contact
+   */
+  initiateRadarTrack(contactId: string): boolean {
+    return this.radar.initiateTrack(contactId);
+  }
+
+  /**
+   * Drop radar track
+   */
+  dropRadarTrack(contactId: string): void {
+    this.radar.dropTrack(contactId);
+  }
+
+  /**
+   * Get all radar contacts
+   */
+  getRadarContacts(): any[] {
+    return this.radar.getContacts();
+  }
+
+  /**
+   * Get all optical contacts
+   */
+  getOpticalContacts(): any[] {
+    return this.opticalSensors.getContacts();
+  }
+
+  /**
+   * Get all ESM contacts
+   */
+  getESMContacts(): any[] {
+    return (this.esm as any).getContacts?.() || [];
+  }
+
+  /**
+   * Set ESM passive mode
+   */
+  setESMMode(passive: boolean): void {
+    // ESM is always passive, but this could control different receiver modes
+    (this.esm as any).setPassiveMode?.(passive);
+  }
+
+  // =============================================================================
+  // Autopilot and Navigation Computer Methods
+  // =============================================================================
+
+  /**
+   * Plot intercept course to target
+   */
+  plotInterceptCourse(targetPosition: any, targetVelocity: any): any {
+    return this.navComputer.calculateIntercept(
+      this.physics.getState().position,
+      this.physics.getState().velocity,
+      targetPosition,
+      targetVelocity
+    );
+  }
+
+  /**
+   * Get navigation computer solution
+   */
+  getNavSolution(): any {
+    return this.navComputer.getState().solution;
+  }
+
+  // =============================================================================
+  // Engineering / Coolant Control Methods
+  // =============================================================================
+
+  /**
+   * Open coolant cross-connect valve
+   */
+  openCoolantCrossConnect(): void {
+    this.coolant.openCrossConnect();
+  }
+
+  /**
+   * Close coolant cross-connect valve
+   */
+  closeCoolantCrossConnect(): void {
+    this.coolant.closeCrossConnect();
+  }
+
+  /**
+   * Get coolant cross-connect status
+   */
+  getCoolantCrossConnectStatus(): boolean {
+    return this.coolant.getState().crossConnectOpen;
+  }
+
+  // =============================================================================
+  // Circuit Breaker Control Methods
+  // =============================================================================
+
+  /**
+   * Toggle circuit breaker
+   */
+  toggleCircuitBreaker(breakerId: string, on: boolean): void {
+    this.electrical.setCircuitBreaker(breakerId, on);
+  }
+
+  /**
+   * Get all circuit breaker states
+   */
+  getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
+    return this.electrical.getCircuitBreakers?.() || [];
+  }
 }
 

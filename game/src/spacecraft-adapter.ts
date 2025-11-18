@@ -297,4 +297,70 @@ export class SpacecraftAdapter {
     getFuelTransferStatus(): Array<{ tankId: string; transferringTo: string | undefined; venting: boolean }> {
         return this.spacecraft.getFuelTransferStatus();
     }
+
+    // ========== SENSOR CONTROLS ==========
+
+    setRadarMode(mode: 'search' | 'track' | 'mapping' | 'off'): void {
+        this.spacecraft.setRadarMode(mode);
+    }
+
+    setOpticalMode(mode: 'visual' | 'infrared' | 'combined'): void {
+        this.spacecraft.setOpticalMode(mode);
+    }
+
+    initiateRadarTrack(contactId: string): boolean {
+        return this.spacecraft.initiateRadarTrack(contactId);
+    }
+
+    dropRadarTrack(contactId: string): void {
+        this.spacecraft.dropRadarTrack(contactId);
+    }
+
+    getRadarContacts(): any[] {
+        return this.spacecraft.getRadarContacts();
+    }
+
+    getOpticalContacts(): any[] {
+        return this.spacecraft.getOpticalContacts();
+    }
+
+    getESMContacts(): any[] {
+        return this.spacecraft.getESMContacts();
+    }
+
+    setESMMode(passive: boolean): void {
+        this.spacecraft.setESMMode(passive);
+    }
+
+    // ========== AUTOPILOT/NAV COMPUTER ==========
+
+    plotInterceptCourse(targetPosition: any, targetVelocity: any): any {
+        return this.spacecraft.plotInterceptCourse(targetPosition, targetVelocity);
+    }
+
+    getNavSolution(): any {
+        return this.spacecraft.getNavSolution();
+    }
+
+    // ========== ENGINEERING/COOLANT CONTROLS ==========
+
+    openCoolantCrossConnect(): void {
+        this.spacecraft.openCoolantCrossConnect();
+    }
+
+    closeCoolantCrossConnect(): void {
+        this.spacecraft.closeCoolantCrossConnect();
+    }
+
+    getCoolantCrossConnectStatus(): boolean {
+        return this.spacecraft.getCoolantCrossConnectStatus();
+    }
+
+    toggleCircuitBreaker(breakerId: string, on: boolean): void {
+        this.spacecraft.toggleCircuitBreaker(breakerId, on);
+    }
+
+    getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
+        return this.spacecraft.getCircuitBreakers();
+    }
 }

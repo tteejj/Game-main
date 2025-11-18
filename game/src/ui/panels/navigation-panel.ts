@@ -16,6 +16,9 @@ export class NavigationPanel {
     // State
     private radarRange: number = 10; // km
     private currentMode: NavMode = 'sensors';
+    private radarMode: 'search' | 'track' | 'mapping' | 'off' = 'search';
+    private opticalMode: 'visual' | 'infrared' | 'combined' = 'combined';
+    private selectedContactIndex: number = 0;
 
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;
@@ -55,6 +58,7 @@ export class NavigationPanel {
 
     private handleSensorsInput(key: string): void {
         switch (key) {
+            // Radar controls
             case 'r':
                 this.spacecraft.setRadarActive(true);
                 console.log('Radar toggled');
@@ -68,6 +72,70 @@ export class NavigationPanel {
                 this.radarRange = Math.max(1, this.radarRange - 5);
                 this.spacecraft.setRadarRange(this.radarRange);
                 console.log(`Radar range: ${this.radarRange}km`);
+                break;
+            case 'c':
+                // Cycle radar mode
+                const radarModes: Array<'search' | 'track' | 'mapping' | 'off'> = ['search', 'track', 'mapping', 'off'];
+                const currentIdx = radarModes.indexOf(this.radarMode);
+                this.radarMode = radarModes[(currentIdx + 1) % radarModes.length];
+                this.spacecraft.setRadarMode(this.radarMode);
+                console.log(`Radar mode: ${this.radarMode.toUpperCase()}`);
+                break;
+
+            // Optical sensor controls
+            case 'o':
+                // Cycle optical mode
+                const opticalModes: Array<'visual' | 'infrared' | 'combined'> = ['visual', 'infrared', 'combined'];
+                const optIdx = opticalModes.indexOf(this.opticalMode);
+                this.opticalMode = opticalModes[(optIdx + 1) % opticalModes.length];
+                this.spacecraft.setOpticalMode(this.opticalMode);
+                console.log(`Optical mode: ${this.opticalMode.toUpperCase()}`);
+                break;
+
+            // Contact selection (1-9)
+            case '1': case '2': case '3': case '4': case '5':
+            case '6': case '7': case '8': case '9':
+                this.selectedContactIndex = parseInt(key) - 1;
+                console.log(`Selected contact: ${this.selectedContactIndex + 1}`);
+                break;
+
+            // Track management
+            case 't':
+                const contacts = this.spacecraft.getRadarContacts();
+                if (contacts.length > this.selectedContactIndex) {
+                    const contact = contacts[this.selectedContactIndex];
+                    this.spacecraft.initiateRadarTrack(contact.id);
+                    console.log(`Tracking contact ${contact.id}`);
+                }
+                break;
+            case 'q':
+                const radarContacts = this.spacecraft.getRadarContacts();
+                if (radarContacts.length > this.selectedContactIndex) {
+                    const contact = radarContacts[this.selectedContactIndex];
+                    this.spacecraft.dropRadarTrack(contact.id);
+                    console.log(`Dropped track on ${contact.id}`);
+                }
+                break;
+
+            // Autopilot controls
+            case 'a':
+                const autopilotMode = this.spacecraft.getAutopilotMode();
+                if (autopilotMode === 'off') {
+                    this.spacecraft.setAutopilotMode('attitude_hold');
+                    console.log('Autopilot: ATTITUDE HOLD');
+                } else {
+                    this.spacecraft.setAutopilotMode('off');
+                    console.log('Autopilot: OFF');
+                }
+                break;
+            case 'p':
+                // Plot intercept
+                const allContacts = this.spacecraft.getRadarContacts();
+                if (allContacts.length > this.selectedContactIndex) {
+                    const contact = allContacts[this.selectedContactIndex];
+                    // Would need contact position/velocity from radar data
+                    console.log(`Plot intercept to contact ${contact.id}`);
+                }
                 break;
         }
     }
@@ -199,24 +267,56 @@ export class NavigationPanel {
         ctx.fillStyle = this.palette.primary;
         ctx.fillText('SENSORS', 450, y);
         y += 30;
+
+        // Radar
         ctx.fillStyle = sensorData.radarActive ? this.palette.primary : this.palette.muted;
         ctx.fillText(`RADAR: ${sensorData.radarActive ? 'ACTIVE' : 'OFF'}  (R)`, 470, y);
-        y += 25;
-        ctx.fillStyle = this.palette.secondary;
-        ctx.fillText(`Range: ${this.radarRange}km  (Z/X)`, 470, y);
         y += 20;
-        ctx.fillText(`Gain: ${sensorData.radarGain}%  (C/V)`, 470, y);
-        y += 40;
-        ctx.fillStyle = sensorData.lidarActive ? this.palette.primary : this.palette.muted;
-        ctx.fillText(`LIDAR: ${sensorData.lidarActive ? 'ACTIVE' : 'PASSIVE'}  (L)`, 470, y);
+        ctx.fillStyle = this.palette.secondary;
+        ctx.fillText(`Mode: ${this.radarMode.toUpperCase()}  (C)`, 470, y);
+        y += 18;
+        ctx.fillText(`Range: ${this.radarRange}km  (Z/X)`, 470, y);
+        y += 18;
+        ctx.fillText(`Gain: ${sensorData.radarGain}%`, 470, y);
+
+        // Optical
+        y += 30;
+        ctx.fillStyle = this.palette.primary;
+        ctx.fillText(`OPTICAL: ${this.opticalMode.toUpperCase()}  (O)`, 470, y);
+
+        // Autopilot
+        y += 30;
+        const autopilotMode = this.spacecraft.getAutopilotMode();
+        const apColor = autopilotMode !== 'off' ? this.palette.warning : this.palette.muted;
+        ctx.fillStyle = apColor;
+        ctx.fillText(`AUTOPILOT: ${autopilotMode.toUpperCase()}  (A)`, 470, y);
 
         // Contacts
         y += 50;
         ctx.fillStyle = this.palette.primary;
-        ctx.fillText('CONTACTS', 450, y);
+        ctx.fillText('CONTACTS  (1-9=Select  T=Track)', 450, y);
         y += 25;
-        ctx.fillStyle = this.palette.muted;
-        ctx.fillText('No contacts detected', 470, y);
+
+        const radarContacts = this.spacecraft.getRadarContacts();
+        const opticalContacts = this.spacecraft.getOpticalContacts();
+        const allContacts = [...radarContacts, ...opticalContacts];
+
+        if (allContacts.length > 0) {
+            ctx.font = '12px "Courier New"';
+            allContacts.slice(0, 9).forEach((contact: any, index: number) => {
+                const isSelected = index === this.selectedContactIndex;
+                ctx.fillStyle = isSelected ? this.palette.warning : this.palette.secondary;
+                const prefix = isSelected ? '>' : ' ';
+                const range = contact.range ? `${(contact.range / 1000).toFixed(1)}km` : 'N/A';
+                const bearing = contact.bearing ? `${contact.bearing.toFixed(0)}°` : 'N/A';
+                ctx.fillText(`${prefix}${index + 1}. ${range} ${bearing}`, 470, y);
+                y += 16;
+            });
+            ctx.font = '14px "Courier New"';
+        } else {
+            ctx.fillStyle = this.palette.muted;
+            ctx.fillText('No contacts detected', 470, y);
+        }
     }
 
     private renderLandingMode(): void {
@@ -419,7 +519,7 @@ export class NavigationPanel {
         let hints = '';
         switch (this.currentMode) {
             case 'sensors':
-                hints = 'R=Radar  Z/X=Range  TAB/M=Mode';
+                hints = 'R=Radar C=Mode Z/X=Range O=Optical 1-9=Contact T=Track Q=Drop A=Auto P=Plot TAB/M=SwitchMode';
                 break;
             case 'landing':
                 hints = 'G=Deploy  R=Retract  L=Lights  T=Terrain  S=Safety  TAB/M=Mode';
