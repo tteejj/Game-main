@@ -773,12 +773,7 @@ export class FactionSystem {
     relation.lastInteraction = Date.now() / 1000;
 
     // Record event
-    this.addDiplomaticEvent(faction1, faction2, {
-      type: eventType,
-      date: Date.now() / 1000,
-      impact: change,
-      description
-    });
+    this.addDiplomaticEvent(relation, eventType, change, description);
 
     // Check for war/alliance transitions
     if (relation.standing <= -80 && relation.state !== 'WAR') {
