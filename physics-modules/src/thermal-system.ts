@@ -41,6 +41,10 @@ export class ThermalSystem {
   public thermalConductivity: number; // W/K between compartments
   public ambientSpaceTemp: number; // K
 
+  // Radiator system
+  public radiatorsDeployed: boolean = false;
+  public radiatorHealth: number = 1.0; // 0-1
+
   // Tracking
   public totalHeatGenerated: number = 0; // J
   public events: Array<{ time: number; type: string; data: any }> = [];
@@ -405,7 +409,14 @@ export class ThermalSystem {
         temperature: comp.temperature,
         gasMass: comp.gasMass
       })),
-      totalHeatGenerated: this.totalHeatGenerated
+      totalHeatGenerated: this.totalHeatGenerated,
+      radiatorsDeployed: this.radiatorsDeployed,
+      radiatorHealth: this.radiatorHealth,
+      nodes: this.compartments.map(comp => ({
+        id: comp.id,
+        name: comp.name,
+        temperature: comp.temperature
+      }))
     };
   }
 
@@ -437,5 +448,19 @@ export class ThermalSystem {
    */
   clearEvents(): void {
     this.events = [];
+  }
+
+  /**
+   * Deploy thermal radiators
+   */
+  deployRadiators(): void {
+    this.radiatorsDeployed = true;
+  }
+
+  /**
+   * Retract thermal radiators
+   */
+  retractRadiators(): void {
+    this.radiatorsDeployed = false;
   }
 }

@@ -1143,40 +1143,35 @@ export class Spacecraft {
    * Emergency reactor SCRAM (shutdown)
    */
   scramReactor(): void {
-    // Method not implemented in ElectricalSystem
-    console.warn('scramReactor() not implemented');
+    this.electrical.scramReactor();
   }
 
   /**
    * Set reactor power output (0-1)
    */
-  setReactorPower(_powerFraction: number): void {
-    // Method not implemented in ElectricalSystem
-    console.warn('setReactorPower() not implemented');
+  setReactorPower(powerFraction: number): void {
+    this.electrical.setReactorPower(powerFraction);
   }
 
   /**
    * Set circuit breaker state
    */
-  setCircuitBreaker(_index: number, _state: boolean): void {
-    // Method not implemented in ElectricalSystem
-    console.warn('setCircuitBreaker() not implemented');
+  setCircuitBreaker(breakerId: string, state: boolean): void {
+    this.electrical.setCircuitBreaker(breakerId, state);
   }
 
   /**
    * Deploy thermal radiators
    */
   deployRadiators(): void {
-    // Method not implemented in ThermalSystem
-    console.warn('deployRadiators() not implemented');
+    this.thermal.deployRadiators();
   }
 
   /**
    * Retract thermal radiators
    */
   retractRadiators(): void {
-    // Method not implemented in ThermalSystem
-    console.warn('retractRadiators() not implemented');
+    this.thermal.retractRadiators();
   }
 
   /**
@@ -1189,17 +1184,15 @@ export class Spacecraft {
   /**
    * Set radar active state
    */
-  setRadarActive(_active: boolean): void {
-    // Method not implemented in RadarSystem
-    console.warn('setRadarActive() not implemented');
+  setRadarActive(active: boolean): void {
+    this.radar.setActive(active);
   }
 
   /**
    * Set radar range in meters
    */
-  setRadarRange(_rangeMeters: number): void {
-    // Method not implemented in RadarSystem
-    console.warn('setRadarRange() not implemented');
+  setRadarRange(rangeMeters: number): void {
+    this.radar.setRange(rangeMeters);
   }
 
   /**
@@ -1242,17 +1235,15 @@ export class Spacecraft {
   /**
    * Toggle O2 generator
    */
-  toggleO2Generator(_on: boolean): void {
-    // Property o2GeneratorActive not implemented in LifeSupportSystem
-    console.warn('toggleO2Generator() not implemented');
+  toggleO2Generator(on: boolean): void {
+    this.lifeSupport.o2GeneratorActive = on;
   }
 
   /**
    * Toggle CO2 scrubber
    */
-  toggleCO2Scrubber(_on: boolean): void {
-    // Property co2ScrubberActive not implemented in LifeSupportSystem
-    console.warn('toggleCO2Scrubber() not implemented');
+  toggleCO2Scrubber(on: boolean): void {
+    this.lifeSupport.co2ScrubberActive = on;
   }
 
   /**
@@ -1397,8 +1388,8 @@ export class Spacecraft {
         sealIntegrity: p.sealIntegrity,
         alignmentError: p.alignmentError
       })),
-      targetData: null, // Property not available in DockingSystem state
-      approachRate: 0 // Property not available in DockingSystem state
+      targetData: state.targetData,
+      approachRate: state.approachRate
     };
   }
 
@@ -1419,11 +1410,11 @@ export class Spacecraft {
         temperature: loop.temperature,
         flowRate: loop.flowRateLPerMin,
         coolantMass: loop.coolantMassKg,
-        maxCapacity: loop.coolantMassKg / (loop.percentFull || 1), // Calculate from current mass and percent
+        maxCapacity: loop.coolantMassKg * 100 / (loop.percentFull || 100), // Calculate from current mass and percent
         radiatorTemp: loop.radiatorTemperature,
         frozen: loop.frozen,
         boiling: loop.boiling,
-        leakRate: 0 // Property not available in CoolantLoop state
+        leakRate: loop.leaking ? 0.1 : 0 // Estimate leak rate based on leaking flag
       })),
       crossConnectOpen: state.crossConnectOpen
     };
@@ -1435,9 +1426,9 @@ export class Spacecraft {
   getThermalTelemetry() {
     const state = this.thermal.getState();
     return {
-      radiatorsDeployed: true, // Property not available, assume deployed
-      radiatorHealth: 1.0, // Property not available, assume healthy
-      nodes: [] // Property not available in ThermalSystem state
+      radiatorsDeployed: state.radiatorsDeployed,
+      radiatorHealth: state.radiatorHealth,
+      nodes: state.nodes
     };
   }
 
@@ -1448,10 +1439,8 @@ export class Spacecraft {
   /**
    * Toggle a bulkhead door between two compartments
    */
-  toggleBulkheadDoor(_comp1Id: string, _comp2Id: string): boolean {
-    // Method not implemented in LifeSupportSystem
-    console.warn('toggleBulkheadDoor() not implemented');
-    return false;
+  toggleBulkheadDoor(comp1Id: string, comp2Id: string): boolean {
+    return this.lifeSupport.toggleBulkheadDoor(comp1Id, comp2Id);
   }
 
   /**
@@ -1464,26 +1453,43 @@ export class Spacecraft {
   /**
    * Vent a compartment to space (emergency depressurization)
    */
-  ventCompartment(_compartmentId: string): void {
-    // Method not implemented in LifeSupportSystem
-    console.warn('ventCompartment() not implemented');
+  ventCompartment(compartmentId: string): void {
+    this.lifeSupport.ventCompartment(compartmentId);
   }
 
   /**
    * Suppress fire in a compartment
    */
-  suppressFire(_compartmentId: string): boolean {
-    // Method not implemented in LifeSupportSystem
-    console.warn('suppressFire() not implemented');
-    return false;
+  suppressFire(compartmentId: string): boolean {
+    return this.lifeSupport.suppressFire(compartmentId);
   }
 
   /**
    * Get door status for all compartment connections
    */
   getDoorStatus(): Array<{ comp1: string; comp2: string; open: boolean }> {
-    // Property connections not available in LifeSupportSystem state
-    return [];
+    const state = this.lifeSupport.getState();
+    const doors: Array<{ comp1: string; comp2: string; open: boolean }> = [];
+
+    // Build door list from compartment connections
+    for (const comp of state.compartments) {
+      for (const door of comp.doors) {
+        // Only add each door once (avoid duplicates)
+        const existingDoor = doors.find(d =>
+          (d.comp1 === comp.id && d.comp2 === door.to) ||
+          (d.comp2 === comp.id && d.comp1 === door.to)
+        );
+        if (!existingDoor) {
+          doors.push({
+            comp1: comp.id,
+            comp2: door.to,
+            open: door.open
+          });
+        }
+      }
+    }
+
+    return doors;
   }
 
   /**
@@ -1604,18 +1610,20 @@ export class Spacecraft {
   /**
    * Plot intercept course to target
    */
-  plotInterceptCourse(_targetPosition: any, _targetVelocity: any): any {
-    // Method calculateIntercept not implemented in NavigationComputer
-    console.warn('plotInterceptCourse() not implemented');
-    return null;
+  plotInterceptCourse(targetPosition: any, targetVelocity: any): any {
+    return this.navComputer.calculateIntercept(
+      this.physics.getState().position,
+      this.physics.getState().velocity,
+      targetPosition,
+      targetVelocity
+    );
   }
 
   /**
    * Get navigation computer solution
    */
   getNavSolution(): any {
-    // Property solution not available in NavigationComputer state
-    return null;
+    return this.navComputer.getState().solution;
   }
 
   // =============================================================================
@@ -1650,17 +1658,15 @@ export class Spacecraft {
   /**
    * Toggle circuit breaker
    */
-  toggleCircuitBreaker(_breakerId: string, _on: boolean): void {
-    // Method setCircuitBreaker not implemented in ElectricalSystem
-    console.warn('toggleCircuitBreaker() not implemented');
+  toggleCircuitBreaker(breakerId: string, on: boolean): void {
+    this.electrical.setCircuitBreaker(breakerId, on);
   }
 
   /**
    * Get all circuit breaker states
    */
   getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
-    // Method getCircuitBreakers not implemented in ElectricalSystem
-    return [];
+    return this.electrical.getCircuitBreakers();
   }
 }
 

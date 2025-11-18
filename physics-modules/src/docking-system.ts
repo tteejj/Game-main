@@ -409,7 +409,9 @@ export class DockingSystem {
       dockingInProgress: this.dockingInProgress,
       latchProgress: this.latchProgress,
       powerDraw: this.currentPowerDraw,
-      alignmentGuidance: this.getAlignmentGuidance()
+      alignmentGuidance: this.getAlignmentGuidance(),
+      targetData: this.targetData,
+      approachRate: this.approachRate
     };
   }
 
