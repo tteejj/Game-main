@@ -616,7 +616,7 @@ export class UniverseStateManager {
       if (body instanceof Planet && body.physical.atmospherePressure) {
         const altitude = distance - body.physical.radius;
 
-        // Assume atmospheric height is 10x the radius (atmosphericHeight property doesn't exist)
+        // Assume atmospheric height is 10% of radius (atmosphericHeight property doesn't exist)
         const atmosphericHeight = (body.physical as any).atmosphericHeight || body.physical.radius * 0.1;
         if (altitude < atmosphericHeight) {
           // In atmosphere!
