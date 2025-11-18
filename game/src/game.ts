@@ -20,6 +20,9 @@ import { EconomicModel } from '../../universe-system/src/economy/economic-model'
 import { CommunicationsManager } from '../../universe-system/src/communications/communications-manager';
 import { RelayNetwork, NetworkNode } from '../../universe-system/src/communications/relay-network';
 import { GameWorld } from '../../physics-modules/src/game-world';
+import { Camera, CameraMode } from './camera';
+import { SpaceRenderer } from './renderer';
+import { HUDRenderer } from './hud';
 
 export class Game {
     private ctx: CanvasRenderingContext2D;
@@ -41,6 +44,18 @@ export class Game {
     public communications: CommunicationsManager;
     private commNetwork: RelayNetwork;
     private markets: Map<string, any> = new Map();
+
+    // Rendering systems
+    public camera: Camera;
+    private renderer: SpaceRenderer;
+    private hud: HUDRenderer;
+
+    // Targeting
+    private targetedObject: string | null = null;
+
+    // Simple mission tracking
+    private currentMissionObjective: string | null = null;
+    private currentMissionTarget: Vector3 | null = null;
 
     // Performance tracking
     private frameCount: number = 0;
@@ -102,6 +117,19 @@ export class Game {
         this.communications = new CommunicationsManager(this.commNetwork);
         this.setupCommunications();
         console.log('✅ Communications network initialized');
+
+        // Initialize camera and rendering systems
+        this.camera = new Camera(canvas.width, canvas.height);
+        this.camera.setMode(CameraMode.FOLLOW_SHIP);
+        this.camera.setTarget(this.spacecraft.getPosition());
+        this.camera.adjustZoom(0.5); // Start zoomed out
+        this.renderer = new SpaceRenderer(canvas, this.camera);
+        this.hud = new HUDRenderer(canvas, this.camera);
+        console.log('✅ Rendering systems initialized');
+
+        // Generate initial mission
+        this.generateMission();
+        console.log('✅ Mission objectives generated');
 
         console.log('🚀 All systems ready!');
     }
@@ -254,6 +282,30 @@ export class Game {
     }
 
     /**
+     * Generate a new mission
+     */
+    private generateMission(): void {
+        const missionTypes = ['RENDEZVOUS', 'ORBIT', 'EXPLORATION', 'SURVEY'];
+        const type = missionTypes[Math.floor(Math.random() * missionTypes.length)];
+
+        if (type === 'RENDEZVOUS' && this.starSystem.stations.length > 0) {
+            const station = this.starSystem.stations[Math.floor(Math.random() * this.starSystem.stations.length)];
+            this.currentMissionTarget = station.position;
+            this.currentMissionObjective = `Dock with ${station.name}`;
+        } else if (type === 'ORBIT' && this.starSystem.planets.length > 0) {
+            const planet = this.starSystem.planets[Math.floor(Math.random() * this.starSystem.planets.length)];
+            this.currentMissionTarget = planet.position;
+            this.currentMissionObjective = `Establish orbit around ${planet.name}`;
+        } else if (type === 'EXPLORATION') {
+            this.currentMissionObjective = `Explore the system and scan anomalies`;
+            this.currentMissionTarget = null;
+        } else {
+            this.currentMissionObjective = `Survey nearby celestial bodies`;
+            this.currentMissionTarget = null;
+        }
+    }
+
+    /**
      * Start the game loop
      */
     start(): void {
@@ -349,6 +401,13 @@ export class Game {
 
         // Update sensors and contacts
         this.updateSensors();
+
+        // Update camera
+        const shipPos = this.spacecraft.getPosition();
+        const shipState = this.spacecraft.getState();
+        const shipVel = shipState.velocity;
+        this.camera.update(deltaTime, shipPos, shipVel);
+        this.camera.setTarget(shipPos);
     }
 
     /**
@@ -565,43 +624,94 @@ export class Game {
      * Render the current frame
      */
     private render(): void {
-        // Clear canvas
-        this.ctx.fillStyle = '#000000';
-        this.ctx.fillRect(0, 0, 1280, 720);
+        const shipState = this.spacecraft.getState();
+        const shipPos = this.spacecraft.getPosition();
 
-        // Simple stats overlay (bottom-left corner)
-        this.renderStats();
+        // Render 3D space
+        this.renderer.render(
+            this.starSystem,
+            this.gameWorld,
+            this.trafficManager.getAllVessels(),
+            {
+                position: shipPos,
+                velocity: shipState.velocity
+            }
+        );
+
+        // Render HUD overlay
+        const targetData = this.getTargetData();
+
+        // Calculate mission progress if we have a target
+        let missionProgress: number | undefined = undefined;
+        if (this.currentMissionTarget) {
+            const dx = this.currentMissionTarget.x - shipPos.x;
+            const dy = this.currentMissionTarget.y - shipPos.y;
+            const dz = this.currentMissionTarget.z - shipPos.z;
+            const distanceToTarget = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const maxDistance = 1e9; // 1 million km
+            missionProgress = Math.max(0, Math.min(1, 1 - (distanceToTarget / maxDistance)));
+        }
+
+        this.hud.render({
+            position: shipPos,
+            velocity: shipState.velocity,
+            fuel: (shipState.fuel / shipState.fuelCapacity) * 100,
+            power: (shipState.power / shipState.powerCapacity) * 100,
+            health: shipState.hullIntegrity,
+            targetName: targetData?.name,
+            targetDistance: targetData?.distance,
+            targetVelocity: targetData?.velocity,
+            fps: this.fps,
+            gameTime: this.gameTime,
+            timeAcceleration: this.timeAcceleration,
+            missionObjective: this.currentMissionObjective || undefined,
+            missionProgress,
+            npcCount: this.trafficManager.getAllVessels().length,
+            stationCount: this.starSystem.stations.length
+        });
 
         // UI panels will be rendered on top by UIManager
     }
 
     /**
-     * Render game stats
+     * Get data about currently targeted object
      */
-    private renderStats(): void {
-        const ctx = this.ctx;
-        ctx.font = '12px "Courier New"';
-        ctx.fillStyle = '#00ff00';
-
-        let y = this.ctx.canvas.height - 120;
-        const x = 10;
-
-        ctx.fillText(`FPS: ${this.fps}`, x, y);
-        y += 15;
-        ctx.fillText(`Time: ${this.gameTime.toFixed(1)}s (${this.timeAcceleration}x)`, x, y);
-        y += 15;
-        ctx.fillText(`NPCs: ${this.trafficManager.getAllVessels().length}`, x, y);
-        y += 15;
-        ctx.fillText(`Stations: ${this.starSystem.stations.length}`, x, y);
-        y += 15;
-        ctx.fillText(`Satellites: ${this.gameWorld.satellites.getState().satellites.length}`, x, y);
-        y += 15;
-        ctx.fillText(`Markets: ${this.markets.size}`, x, y);
-        y += 15;
+    private getTargetData(): { name: string, distance: number, velocity: Vector3 } | null {
+        if (!this.targetedObject) return null;
 
         const shipPos = this.spacecraft.getPosition();
-        const dist = Math.sqrt(shipPos.x ** 2 + shipPos.y ** 2 + shipPos.z ** 2);
-        ctx.fillText(`Range: ${(dist / 1000).toFixed(0)} km`, x, y);
+
+        // Check if target is an NPC
+        const npc = this.trafficManager.getAllVessels().find(v => v.id === this.targetedObject);
+        if (npc) {
+            const dx = npc.position.x - shipPos.x;
+            const dy = npc.position.y - shipPos.y;
+            const dz = npc.position.z - shipPos.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            return {
+                name: npc.name,
+                distance,
+                velocity: { x: npc.velocity.x, y: npc.velocity.y, z: npc.velocity.z }
+            };
+        }
+
+        // Check if target is a celestial body
+        const body = this.starSystem.getAllBodies().find(b => b.id === this.targetedObject);
+        if (body) {
+            const dx = body.position.x - shipPos.x;
+            const dy = body.position.y - shipPos.y;
+            const dz = body.position.z - shipPos.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            return {
+                name: body.name,
+                distance,
+                velocity: { x: 0, y: 0, z: 0 } // Celestial bodies move slowly relative to frame
+            };
+        }
+
+        return null;
     }
 
     /**
@@ -628,5 +738,135 @@ export class Game {
                 relays: this.commNetwork.getNodeCount()
             }
         };
+    }
+
+    // ========== PUBLIC CONTROL METHODS ==========
+
+    /**
+     * Cycle camera mode
+     */
+    cycleCameraMode(): void {
+        const modes = [CameraMode.FOLLOW_SHIP, CameraMode.CHASE_CAM, CameraMode.FREE_CAM, CameraMode.ORBIT_TARGET];
+        const currentIndex = modes.indexOf(this.camera.mode);
+        const nextIndex = (currentIndex + 1) % modes.length;
+        this.camera.setMode(modes[nextIndex]);
+        console.log(`📷 Camera mode: ${modes[nextIndex]}`);
+    }
+
+    /**
+     * Adjust camera zoom
+     */
+    zoomCamera(delta: number): void {
+        this.camera.adjustZoom(delta);
+    }
+
+    /**
+     * Cycle through nearby targets
+     */
+    cycleTarget(): void {
+        const shipPos = this.spacecraft.getPosition();
+        const allObjects: Array<{ id: string, name: string, position: Vector3 }> = [];
+
+        // Add NPCs
+        for (const npc of this.trafficManager.getAllVessels()) {
+            allObjects.push({
+                id: npc.id,
+                name: npc.name,
+                position: { x: npc.position.x, y: npc.position.y, z: npc.position.z }
+            });
+        }
+
+        // Add celestial bodies and stations
+        for (const body of this.starSystem.getAllBodies()) {
+            allObjects.push({
+                id: body.id,
+                name: body.name,
+                position: body.position
+            });
+        }
+
+        // Sort by distance
+        allObjects.sort((a, b) => {
+            const distA = Math.sqrt(
+                (a.position.x - shipPos.x) ** 2 +
+                (a.position.y - shipPos.y) ** 2 +
+                (a.position.z - shipPos.z) ** 2
+            );
+            const distB = Math.sqrt(
+                (b.position.x - shipPos.x) ** 2 +
+                (b.position.y - shipPos.y) ** 2 +
+                (b.position.z - shipPos.z) ** 2
+            );
+            return distA - distB;
+        });
+
+        // Find current target index
+        let currentIndex = -1;
+        if (this.targetedObject) {
+            currentIndex = allObjects.findIndex(obj => obj.id === this.targetedObject);
+        }
+
+        // Cycle to next
+        if (allObjects.length > 0) {
+            const nextIndex = (currentIndex + 1) % allObjects.length;
+            this.targetedObject = allObjects[nextIndex].id;
+            this.renderer.setSelectedObject(this.targetedObject);
+            console.log(`🎯 Target: ${allObjects[nextIndex].name}`);
+        }
+    }
+
+    /**
+     * Clear current target
+     */
+    clearTarget(): void {
+        this.targetedObject = null;
+        this.renderer.setSelectedObject(null);
+        console.log('🎯 Target cleared');
+    }
+
+    /**
+     * Toggle rendering options
+     */
+    toggleOrbits(): void {
+        this.renderer.toggleOrbits();
+        console.log('🔄 Toggled orbit display');
+    }
+
+    toggleLabels(): void {
+        this.renderer.toggleLabels();
+        console.log('🏷️  Toggled labels');
+    }
+
+    toggleVelocityVectors(): void {
+        this.renderer.toggleVelocityVectors();
+        console.log('➡️  Toggled velocity vectors');
+    }
+
+    toggleGrid(): void {
+        this.renderer.toggleGrid();
+        console.log('📐 Toggled reference grid');
+    }
+
+    toggleHUD(): void {
+        this.hud.toggleHUD();
+        console.log('📊 Toggled HUD');
+    }
+
+    /**
+     * Fire weapons at target
+     */
+    fireWeapons(): void {
+        if (!this.targetedObject) {
+            console.log('⚠️  No target selected');
+            return;
+        }
+
+        const targetData = this.getTargetData();
+        if (!targetData) return;
+
+        console.log(`🔫 Firing weapons at ${targetData.name} (${(targetData.distance / 1000).toFixed(1)} km)`);
+
+        // TODO: Implement actual weapon firing logic
+        // For now, just log
     }
 }
