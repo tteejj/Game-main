@@ -2,377 +2,248 @@
 
 This document describes the complete ship mechanics system and how all components integrate together.
 
-## Overview
+## ⭐ QUICK START - Use CompleteShip
 
-The ship mechanics system provides a complete, realistic spacecraft simulation with:
+**The ONE TRUE ship implementation is `CompleteShip` in `complete-ship.ts`**
 
-- **Physics Integration**: Ships exist as first-class celestial bodies in the world
-- **Combat Systems**: Projectile weapons, lasers, and guided missiles with damage modeling
-- **Hull Damage**: Armor penetration, breaches, and structural integrity
-- **Subsystems**: Power, thermal, life support, fuel, and more (via Spacecraft class)
-- **Landing Systems**: Realistic landing gear with suspension and tip-over detection
-- **World Integration**: Ships interact with gravity, collisions, and other bodies
+All other ship classes are either deprecated or low-level components. Use CompleteShip for everything.
 
-## Architecture
+See **`complete-ship-example.ts`** for a full working example.
 
-### Core Components
+## What You Get
 
-1. **IntegratedShip** (`integrated-ship.ts`)
-   - Bridges spacecraft physics with world simulation
-   - Handles gravity, collisions, and hull damage
-   - Makes ships detectable by sensors and targetable by weapons
+- ✅ Complete physics simulation (gravity, collisions, orbital mechanics)
+- ✅ All subsystems (power, thermal, life support, damage control)
+- ✅ Weapons (railguns, lasers, missiles) with auto-targeting
+- ✅ Combat computer with fire solutions
+- ✅ Hull damage and armor penetration
+- ✅ Crew simulation with oxygen tracking
+- ✅ Full event system
 
-2. **WeaponSystem** (`weapons.ts`)
-   - Manages all weapons on a ship
-   - Implements projectile physics, hitscan lasers, and guided missiles
-   - Integrates with hull damage system for realistic combat
-
-3. **UnifiedShipSystem** (`unified-ship-system.ts`)
-   - **NEW**: Single, cohesive interface to all ship functionality
-   - Combines IntegratedShip + WeaponSystem + World integration
-   - Recommended entry point for using ship mechanics
-
-4. **ShipCombatComputer** (`ship-combat.ts`)
-   - **NEW**: Targeting and fire control solutions
-   - Calculates intercept points for moving targets
-   - Provides combat AI helpers
-
-## Quick Start
-
-### Creating a Ship
+## Quick Example
 
 ```typescript
 import { World } from './world';
-import { CompleteSimulationSystem, UnifiedShipConfig } from './unified-ship-system';
-import { WeaponType } from './weapons';
-import { MaterialType } from './hull-damage';
+import { CompleteSimulation } from './complete-ship';
+import { createFrigate } from './complete-ship-example';
 
-// Create world and simulation
+// Create simulation
 const world = new World();
-const simulation = new CompleteSimulationSystem(world);
+const simulation = new CompleteSimulation(world);
 
-// Configure ship
-const config: UnifiedShipConfig = {
-  mass: 50000,  // 50 tons
-  radius: 15,   // 15m
-  position: { x: 0, y: 0, z: 1000 },
-  velocity: { x: 100, y: 0, z: 0 },
-
-  // Hull configuration
-  hullConfig: {
-    compartments: [/* ... */],
-    armorLayers: [
-      {
-        id: 'armor',
-        material: MaterialType.TITANIUM,
-        thickness: 0.05,  // 5cm
-        hardness: 970,
-        density: 4500,
-        integrity: 1.0,
-        ablationDepth: 0
-      }
-    ]
-  },
-
-  // Weapons
-  weapons: [
-    {
-      id: 'railgun',
-      type: WeaponType.RAILGUN,
-      mountPoint: { x: 5, y: 0, z: 0 },
-      aimDirection: { x: 1, y: 0, z: 0 },
-      damage: 5000000,      // 5 MJ
-      projectileSpeed: 3000, // 3 km/s
-      projectileMass: 2,     // 2 kg
-      range: 50000,          // 50 km
-      rateOfFire: 10,
-      powerDraw: 10000,
-      heatGeneration: 2000000,
-      ammoCapacity: 100,
-      ammoRemaining: 100,
-      cooldown: 0,
-      compartmentId: 'weapons'
-    }
-  ]
-};
-
-// Add ship to simulation
-const ship = simulation.addShip(config);
-```
-
-### Running Simulation
-
-```typescript
-const dt = 0.1;  // 100ms timestep
-
-// Main loop
-setInterval(() => {
-  simulation.update(dt);
-}, dt * 1000);
-```
-
-### Combat
-
-```typescript
-import { ShipCombatComputer } from './ship-combat';
-
-const ship1 = simulation.addShip(config1);
-const ship2 = simulation.addShip(config2);
-
-// Create combat computer
-const combatComputer = new ShipCombatComputer(ship1);
-
-// Calculate fire solution
-const solution = combatComputer.calculateProjectileFireSolution(
-  ship2,
-  'railgun',
-  3000  // projectile speed
+// Add ships
+const ship1 = simulation.addShip(
+  createFrigate({ x: 0, y: 0, z: 1000 }, { x: 100, y: 0, z: 0 })
+);
+const ship2 = simulation.addShip(
+  createFrigate({ x: 10000, y: 0, z: 1000 }, { x: -50, y: 0, z: 0 })
 );
 
-if (solution.canFire) {
-  // Fire weapon
-  const target = ship2.getWorldBody();
-  ship1.fireWeapon('railgun', solution.aimDirection, target);
-}
-
-// Or use auto-engage
-combatComputer.autoEngage(ship2);
-```
-
-## Weapon Systems
-
-### Weapon Types
-
-#### 1. Railgun/Coilgun (Kinetic Projectiles)
-
-```typescript
-{
-  type: WeaponType.RAILGUN,
-  damage: 5000000,         // Joules
-  projectileSpeed: 3000,   // m/s
-  projectileMass: 2,       // kg
-  range: 50000,            // meters
-  rateOfFire: 10          // rounds/min
-}
-```
-
-**Physics:**
-- Ballistic trajectory affected by gravity
-- Penetration calculated using DeMarre formula
-- Creates spalling damage on armor impact
-- Recoil applied to firing ship
-
-#### 2. Laser (Hitscan)
-
-```typescript
-{
-  type: WeaponType.LASER,
-  damage: 1000000,    // Joules per pulse
-  range: 30000,       // meters
-  rateOfFire: 60      // Hz
-}
-```
-
-**Physics:**
-- Instant hit (speed of light)
-- Thermal ablation of armor
-- No ballistic drop
-- High power consumption
-
-#### 3. Guided Missile
-
-```typescript
-{
-  type: WeaponType.MISSILE,
-  damage: 10000000,   // Joules (warhead)
-  range: 100000,      // meters
-  rateOfFire: 1       // per minute
-}
-```
-
-**Physics:**
-- Proportional navigation guidance
-- Self-propelled with fuel and thrust
-- Proximity fuse detonation
-- Combined kinetic + explosive damage
-
-### Damage Model
-
-Ships have a layered armor system with realistic penetration physics:
-
-#### Kinetic Damage
-- Projectile mass, velocity, and diameter
-- Impact angle (oblique impacts less effective)
-- Armor hardness and density
-- Penetration depth calculated
-- Spalling damage to interior
-
-#### Thermal Damage
-- Energy absorption and ablation
-- Material-specific melting points
-- Beam area and duration
-- Armor burn-through
-
-#### Explosive Damage
-- Blast radius with falloff
-- Area effect on armor
-- Structural damage
-- Multiple compartment impacts
-
-## Hull Integrity System
-
-### Compartments
-
-Ships are divided into compartments with:
-- Pressure and atmosphere tracking
-- Breach mechanics (holes causing depressurization)
-- Structural integrity (0-1)
-- System locations
-
-### Armor Layers
-
-Multiple armor layers with:
-- Material types (Steel, Titanium, Aluminum, Composite, Ceramic)
-- Thickness and hardness
-- Integrity tracking
-- Ablation depth
-
-### Breaches
-
-When armor is penetrated:
-- Breach created with area (m²)
-- Atmospheric pressure loss
-- Can be sealed by crew (future feature)
-- Affects compartment integrity
-
-## Landing Gear
-
-**NEW**: Enhanced tip-over detection using spacecraft attitude
-
-```typescript
-import { LandingGear } from './landing-gear';
-
-const landingGear = new LandingGear({
-  numLegs: 4,
-  legLength: 2.0,
-  springConstant: 50000,
-  damperConstant: 5000
-});
-
-// Deploy gear
-landingGear.deploy();
-
-// Get state with attitude
-const state = landingGear.getState(shipOrientation);
-
-console.log(`Tip angle: ${state.tipAngle}°`);
-console.log(`Stable: ${state.isStable}`);
-console.log(`Legs in contact: ${state.numLegsInContact}`);
-```
-
-**Features:**
-- Realistic spring-damper suspension
-- Ground contact detection
-- **NEW**: Attitude-based tip angle calculation
-- Stability analysis (requires 3+ legs, <45° tip)
-- Hard landing damage model
-
-## Integration Examples
-
-See `ship-integration-example.ts` for complete examples:
-
-1. **Combat Simulation**: Two ships in battle with weapons and damage
-2. **Weapon Damage Demo**: Testing different damage types on armor
-3. **Combat AI**: Automatic targeting and engagement
-
-## System Updates
-
-All ship systems update in a coordinated manner:
-
-```typescript
+// Run simulation
+const dt = 0.1;
 simulation.update(dt);
+
+// Combat
+ship1.combatComputer.autoEngage(ship2 as any);
+
+// Check status
+const status = ship1.getStatus();
+console.log(`Hull: ${(status.ship.hullIntegrity * 100).toFixed(1)}%`);
+console.log(`Power: ${status.power.generation}kW`);
+console.log(`Crew: ${status.lifeSupport.crewHealthy}/${status.lifeSupport.crewTotal}`);
 ```
 
-This updates (in order):
-1. World physics (orbits, n-body gravity)
-2. Ship physics (thrust, rotation, collisions)
-3. Ship subsystems (power, thermal, life support)
-4. Weapons (cooldowns)
-5. Projectiles and missiles (ballistics, guidance)
+## Architecture
 
-## Performance Considerations
+### ⭐ Use These Classes
 
-- Use `CompleteSimulationSystem` for managing multiple ships
-- Projectiles and missiles auto-cleanup when expired
-- Hull damage calculations are optimized for gameplay balance
-- Consider spatial partitioning for large numbers of ships
+**CompleteShip** (`complete-ship.ts`)
+- The ONE TRUE ship class
+- Has ALL features
+- Use this for everything
 
-## Future Enhancements
+**CompleteSimulation** (`complete-ship.ts`)
+- Manages world and all ships
+- Auto-tracks projectiles and missiles
+- Centralized collision detection
 
-Potential additions:
-- Electronic warfare and countermeasures
-- Point defense systems
-- Shield systems
-- Crew-based damage control
-- Docking and resource transfer
-- Advanced flight control (SAS, autopilot)
+### Don't Use Directly (Internal Components)
 
-## File Reference
+- `IntegratedShip` - Used internally by CompleteShip
+- `WeaponSystem` - Used internally by CompleteShip
+- `HullStructure` - Accessed via `ship.hull`
+- Power/Thermal/LifeSupport - Accessed via `ship.power`, `ship.thermal`, etc.
 
-| File | Purpose |
-|------|---------|
-| `integrated-ship.ts` | World physics integration |
-| `weapons.ts` | Weapon systems and projectiles |
-| `hull-damage.ts` | Armor and damage modeling |
-| `landing-gear.ts` | Landing gear mechanics |
-| `unified-ship-system.ts` | **Main integration layer** |
-| `ship-combat.ts` | Combat computers and AI |
-| `ship-integration-example.ts` | Usage examples |
+### ⚠️ Deprecated (Being Removed)
 
-## API Summary
+- `UnifiedShip` → Use `CompleteShip`
+- `UnifiedShipSystem` → Use `CompleteShip`
+- `CompleteSimulationSystem` → Use `CompleteSimulation`
 
-### UnifiedShipSystem
+## Complete API
+
+### CompleteShip
 
 ```typescript
-class UnifiedShipSystem {
+class CompleteShip {
+  // Identity
+  readonly id: string
+  readonly name: string
+  readonly class: string
+
+  // Update
   update(dt: number): void
+
+  // Physics
   applyForce(force: Vector3): void
   applyImpulse(impulse: Vector3): void
-  fireWeapon(weaponId: string, aimDirection: Vector3, target?: CelestialBody)
-  addWeapon(weapon: Weapon): void
   getPosition(): Vector3
   getVelocity(): Vector3
   getHullIntegrity(): number
+
+  // Weapons
+  fireWeapon(weaponId: string, aimDirection: Vector3, target?: CelestialBody)
   getWeapons(): Weapon[]
+
+  // Status
+  getStatus(): CompleteShipStatus
+
+  // Subsystems (direct access)
+  hull: HullStructure
+  power: PowerBudgetSystem
+  thermal: ThermalBudgetSystem
+  lifeSupport: LifeSupportSystem
+  systemDamage: SystemDamageManager
+  damageControl: DamageControlSystem
+  combatComputer: ShipCombatComputer
+
+  // Events
+  on(event: string, callback: Function): void
+  emit(event: string, ...args: any[]): void
 }
 ```
 
-### ShipCombatComputer
+### CompleteSimulation
 
 ```typescript
-class ShipCombatComputer {
-  calculateProjectileFireSolution(target: UnifiedShipSystem, weaponId: string, speed: number): FireSolution
-  calculateLaserFireSolution(target: UnifiedShipSystem, weaponId: string): FireSolution
-  calculateMissileFireSolution(target: UnifiedShipSystem, weaponId: string): FireSolution
-  getTargetInfo(target: UnifiedShipSystem): TargetInfo
-  autoEngage(target: UnifiedShipSystem): boolean
-  calculateEvasiveManeuver(threats: UnifiedShipSystem[]): Vector3
-}
-```
-
-### CompleteSimulationSystem
-
-```typescript
-class CompleteSimulationSystem {
-  addShip(config: UnifiedShipConfig): UnifiedShipSystem
+class CompleteSimulation {
+  addShip(config: CompleteShipConfig): CompleteShip
   removeShip(shipId: string): void
   update(dt: number): void
-  getShip(id: string): UnifiedShipSystem | undefined
-  getAllShips(): UnifiedShipSystem[]
-  getCombatManager(): CombatManager
+  
+  getShip(id: string): CompleteShip | undefined
+  getAllShips(): CompleteShip[]
+  getAllProjectiles(): Projectile[]
+  getAllMissiles(): Missile[]
+  
+  getSimulationTime(): number
+  getWorld(): World
 }
+```
+
+### Combat Computer
+
+```typescript
+ship.combatComputer.autoEngage(target)
+ship.combatComputer.calculateProjectileFireSolution(target, weaponId, speed)
+ship.combatComputer.calculateLaserFireSolution(target, weaponId)
+ship.combatComputer.calculateEvasiveManeuver(threats)
+```
+
+## Weapon Types
+
+### Railgun (Kinetic)
+- High-velocity projectiles
+- Ballistic trajectory (affected by gravity)
+- Armor penetration calculated
+- Recoil applied to ship
+
+### Laser (Hitscan)
+- Instant hit (speed of light)
+- Thermal ablation damage
+- High power consumption
+- No ballistic drop
+
+### Missile (Guided)
+- Self-propelled with fuel
+- Proportional navigation guidance
+- Proximity fuse detonation
+- Combined kinetic + explosive damage
+
+## Hull Damage
+
+Ships have layered armor with realistic damage:
+
+- **Kinetic** - Projectile mass/velocity/angle → Penetration
+- **Thermal** - Energy absorption → Ablation
+- **Explosive** - Blast radius → Area damage
+
+### Compartments
+- Pressure tracking
+- Breach mechanics
+- Crew locations
+- System locations
+
+### Armor
+- Multiple layers
+- Material types (Steel, Titanium, Composite, Ceramic)
+- Hardness and thickness
+- Integrity tracking
+
+## Events
+
+```typescript
+ship.on('collision', (event) => { /* ... */ })
+ship.on('damage', (event) => { /* ... */ })
+ship.on('weaponFired', (result) => { /* ... */ })
+ship.on('laserFired', (event) => { /* ... */ })
+```
+
+## Files
+
+| File | Purpose | Use It? |
+|------|---------|---------|
+| `complete-ship.ts` | ⭐ Main ship class | **YES** |
+| `complete-ship-example.ts` | Working example | **YES** |
+| `integrated-ship.ts` | Physics component | No (internal) |
+| `weapons.ts` | Weapon component | No (internal) |
+| `ship-combat.ts` | Combat computer | No (use `ship.combatComputer`) |
+| `hull-damage.ts` | Hull system | No (use `ship.hull`) |
+| `power-budget.ts` | Power system | No (use `ship.power`) |
+| `thermal-budget.ts` | Thermal system | No (use `ship.thermal`) |
+| `life-support.ts` | Life support | No (use `ship.lifeSupport`) |
+| `system-damage.ts` | System damage | No (use `ship.systemDamage`) |
+| `damage-control.ts` | Repair crews | No (use `ship.damageControl`) |
+| `ship-configuration.ts` | Templates | Use `createFrigate()` helper |
+| `unified-ship.ts` | ⚠️ Deprecated | **NO** |
+| `unified-ship-system.ts` | ⚠️ Deprecated | **NO** |
+
+## Migration
+
+### From UnifiedShipSystem
+
+```typescript
+// OLD
+import { CompleteSimulationSystem } from './unified-ship-system';
+const sim = new CompleteSimulationSystem(world);
+
+// NEW
+import { CompleteSimulation } from './complete-ship';
+const sim = new CompleteSimulation(world);
+// Same API!
+```
+
+### From UnifiedShip
+
+```typescript
+// OLD
+import { UnifiedShip } from './unified-ship';
+
+// NEW
+import { CompleteShip } from './complete-ship';
+// More features!
 ```
 
 ---
 
-**For questions or issues, refer to the example file or individual module documentation.**
+**See `complete-ship-example.ts` for complete working code**
