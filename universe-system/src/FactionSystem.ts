@@ -5,6 +5,7 @@
 
 import { Vector3 } from './CelestialBody';
 import { SpaceStation } from './StationGenerator';
+import { FactionEconomicNeeds } from './faction-dynamics/FactionEconomicNeeds';
 
 export interface Faction {
   id: string;
@@ -150,6 +151,7 @@ export class FactionSystem {
   private relations: Map<string, DiplomaticRelation> = new Map();
   private reputations: Map<string, Reputation> = new Map();
   private conflicts: Map<string, Conflict> = new Map();
+  private economicNeeds: FactionEconomicNeeds = new FactionEconomicNeeds();
 
   constructor() {
     this.initializeDefaultFactions();
@@ -354,6 +356,11 @@ export class FactionSystem {
    * Update relations based on events
    */
   update(deltaTime: number): void {
+    // Update faction economies
+    for (const faction of this.factions.values()) {
+      this.economicNeeds.update(faction.id, deltaTime);
+    }
+
     // Natural drift toward neutral over time
     for (const relation of this.relations.values()) {
       if (relation.state !== 'WAR' && relation.state !== 'ALLIED') {
@@ -838,5 +845,41 @@ export class FactionSystem {
       }
     }
     return relationships;
+  }
+
+  // ====================================================================
+  // ECONOMIC NEEDS API
+  // ====================================================================
+
+  /**
+   * Get economic actions faction should take
+   */
+  getFactionEconomicActions(factionId: string) {
+    return this.economicNeeds.evaluateEconomicActions(factionId);
+  }
+
+  /**
+   * Get faction's economic state
+   */
+  getFactionEconomy(factionId: string) {
+    return this.economicNeeds.getFactionEconomy(factionId);
+  }
+
+  /**
+   * Check if faction would go to war for a resource
+   */
+  wouldFactionFightForResource(
+    factionId: string,
+    commodity: string,
+    targetFaction: string
+  ): boolean {
+    return this.economicNeeds.wouldGoToWarForResource(factionId, commodity, targetFaction);
+  }
+
+  /**
+   * Disrupt a supply chain (piracy, war, accidents)
+   */
+  disruptSupplyChain(chainId: string, cause: string, duration: number, impact: number): void {
+    this.economicNeeds.disruptSupplyChain(chainId, cause, duration, impact);
   }
 }

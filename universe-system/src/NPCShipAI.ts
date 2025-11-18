@@ -265,7 +265,7 @@ export class NPCShipAI {
     // State machine
     switch (ship.state) {
       case 'IDLE':
-        this.handleIdleState(ship, stations);
+        this.handleIdleState(ship, stations, factionSystem);
         break;
 
       case 'TRAVELING':
@@ -450,11 +450,15 @@ export class NPCShipAI {
   /**
    * Handle IDLE state - decide what to do
    */
-  private handleIdleState(ship: NPCShip, stations: Map<string, SpaceStation>): void {
+  private handleIdleState(
+    ship: NPCShip,
+    stations: Map<string, SpaceStation>,
+    factionSystem?: FactionSystem
+  ): void {
     switch (ship.type) {
       case 'TRADER':
-        // Find profitable trade route
-        const bestRoute = this.findBestTradeRoute(ship, stations);
+        // Find profitable trade route (considers faction economic needs)
+        const bestRoute = this.findBestTradeRoute(ship, stations, factionSystem);
         if (bestRoute) {
           ship.route = bestRoute;
           ship.currentTarget = bestRoute.fromStation;
@@ -1029,10 +1033,11 @@ export class NPCShipAI {
    */
   private findBestTradeRoute(
     ship: NPCShip,
-    stations: Map<string, SpaceStation>
+    stations: Map<string, SpaceStation>,
+    factionSystem?: FactionSystem
   ): TradeRoute | null {
-    // Check memory first
-    if (ship.memory.profitableRoutes.length > 0) {
+    // Check memory first (but deprioritize if faction needs exist)
+    if (ship.memory.profitableRoutes.length > 0 && !factionSystem) {
       const route = ship.memory.profitableRoutes[0];
       // Verify stations still exist
       if (stations.has(route.fromStation) && stations.has(route.toStation)) {
@@ -1040,10 +1045,32 @@ export class NPCShipAI {
       }
     }
 
-    // Find new route
+    // Find new route considering faction economic needs
     const stationList = Array.from(stations.values());
     let bestRoute: TradeRoute | null = null;
-    let bestProfit = 0;
+    let bestScore = 0;
+
+    // If faction system available, get economic actions for ship's faction
+    let criticalCommodities: string[] = [];
+    let urgentDemand: Map<string, number> = new Map(); // commodity -> priority
+
+    if (factionSystem && ship.faction) {
+      try {
+        const economy = factionSystem.getFactionEconomy(ship.faction);
+        const actions = factionSystem.getFactionEconomicActions(ship.faction);
+
+        // Identify critical resources
+        for (const [commodity, need] of economy.criticalResources) {
+          if (need.inCrisis || need.daysRemaining < 30) {
+            criticalCommodities.push(commodity);
+            const priority = need.inCrisis ? 100 : (100 - need.daysRemaining);
+            urgentDemand.set(commodity.toLowerCase(), priority);
+          }
+        }
+      } catch (e) {
+        // Faction economy not initialized yet, continue with normal trade
+      }
+    }
 
     for (let i = 0; i < stationList.length; i++) {
       for (let j = 0; j < stationList.length; j++) {
@@ -1052,26 +1079,50 @@ export class NPCShipAI {
         const from = stationList[i];
         const to = stationList[j];
 
-        // Simplified profit calculation
-        // In real implementation, would check actual market prices
-        const distance = this.distance(from.position, to.position);
-        const profit = 1000 - distance / 1e6; // Arbitrary profit model
+        // Consider multiple commodities
+        const commodities = ['fuel', 'food', 'water', 'iron', 'electronics', 'medicine'];
 
-        if (profit > bestProfit) {
-          bestProfit = profit;
-          bestRoute = {
-            fromStation: from.id,
-            toStation: to.id,
-            commodity: 'fuel', // Simplified
-            profit,
-            lastCheck: Date.now()
-          };
+        for (const commodity of commodities) {
+          const distance = this.distance(from.position, to.position);
+
+          // Base profit (distance-based)
+          let score = Math.max(0, 1000 - distance / 1e6);
+
+          // Massive bonus for critical faction needs
+          const urgency = urgentDemand.get(commodity) || 0;
+          if (urgency > 0) {
+            score += urgency * 50; // Up to 5000x multiplier for crisis goods
+          }
+
+          // Bonus for trading with friendly factions
+          if (factionSystem && from.faction && to.faction) {
+            const standing = factionSystem.getFactionStanding(from.faction, to.faction);
+            if (standing > 0) {
+              score += standing; // Up to +100 for allied factions
+            }
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestRoute = {
+              fromStation: from.id,
+              toStation: to.id,
+              commodity,
+              profit: score,
+              lastCheck: Date.now() / 1000
+            };
+          }
         }
       }
     }
 
-    if (bestRoute) {
+    if (bestRoute && bestScore > 0) {
       ship.memory.profitableRoutes.push(bestRoute);
+
+      // Limit memory to 5 routes
+      if (ship.memory.profitableRoutes.length > 5) {
+        ship.memory.profitableRoutes.shift();
+      }
     }
 
     return bestRoute;
