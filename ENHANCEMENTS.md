@@ -604,6 +604,161 @@ All enhancements have been tested and verified:
 
 ---
 
+## 5. Autopilot UI Integration
+
+### Location
+`game/src/spacecraft-adapter.ts`, `game/src/ui/panels/navigation-panel.ts`
+
+### Features
+
+#### Spacecraft Adapter Enhancements
+Added complete autopilot control methods:
+
+```typescript
+// Set docking target
+spacecraft.setDockingTarget({ x: 1000, y: 0, z: 0 });
+
+// Set orbital insertion altitude
+spacecraft.setTargetOrbitAltitude(100000); // 100km
+
+// Get autopilot phase information
+const phases = spacecraft.getAutopilotPhases();
+console.log(phases.landing);    // Current landing phase
+console.log(phases.docking);    // Current docking phase
+console.log(phases.orbitalInsertion); // Current orbital insertion phase
+```
+
+#### Navigation Panel Integration
+
+**Keyboard Controls**:
+- `A` - Cycle through all 8 autopilot modes:
+  - off → altitude_hold → vertical_speed_hold → suicide_burn → hover → landing → docking → orbital_insertion → (repeat)
+- `D` - Set docking target (uses selected radar contact)
+- `I` - Set orbital insertion altitude (100km default)
+
+**Visual Display**:
+- Real-time autopilot mode shown with color coding
+- Active phase displayed for advanced modes:
+  - **Landing**: Shows current phase (DESCENT, DECELERATION, FINAL, TOUCHDOWN)
+  - **Docking**: Shows approach phase (APPROACH, ALIGNMENT, FINAL, CAPTURE)
+  - **Orbital Insertion**: Shows burn phase (COASTING, BURN, CIRCULARIZING, COMPLETE)
+- Quick reference for additional controls (D=DockTgt, I=OrbAlt)
+
+**Example Display**:
+```
+AUTOPILOT: LANDING  (A)
+  Phase: DECELERATION
+D=DockTgt I=OrbAlt
+```
+
+---
+
+## 6. Enhanced HUD Overlay
+
+### Location
+`game/src/ui/enhanced-hud.ts`
+
+### Features
+
+Professional heads-up display providing critical information across all screens:
+
+#### Top Status Bar
+Always-visible status for critical systems:
+- **Power**: Battery percentage (color-coded: green > 50%, yellow 20-50%, red < 20%)
+- **Fuel**: Total fuel percentage across all tanks
+- **Reactor**: Current status (ONLINE, STARTING, OFFLINE, SCRAMMED)
+
+#### System Health Indicators (Top Right)
+Displays health bars for 5 core systems:
+- Reactor
+- Main Engine
+- Life Support
+- Sensors
+- Weapons
+
+Each shows:
+- Health percentage
+- Color-coded bar (green/yellow/red)
+- Operational status
+
+#### Automatic Alert System (Top Left)
+Intelligent warning system that monitors:
+- **Low Battery**: Warns below 30%, critical below 10%
+- **Low Fuel**: Warns below 20%, critical below 5%
+- **Reactor Overheat**: Critical alert above 800K
+- **Reactor Offline**: Warning when reactor not operational
+
+Alerts displayed with:
+- Severity indicators (⚠ CRITICAL, ⚠ WARNING, ℹ INFO)
+- Color coding by severity
+- Dark red background for visibility
+- Automatic clearing when condition resolved
+
+#### Combat Status Display (Bottom Right)
+Shown only when weapons safety is OFF:
+- Combat mode indicator (⚔ COMBAT MODE)
+- Weapons status (HOT)
+- Point defense status
+- Target count
+- Threat assessment (number of hostiles)
+- Color-coded by threat level
+
+#### Autopilot Status Display (Bottom Left)
+Shown only when autopilot is active:
+- Current autopilot mode
+- Active phase
+- Phase-specific information:
+  - **Landing**: Altitude and vertical speed
+  - **Docking**: Approach progress
+  - **Orbital Insertion**: Burn status
+
+#### Performance Metrics (Bottom Center)
+Real-time FPS counter:
+- Green: > 50 FPS
+- Yellow: 30-50 FPS
+- Red: < 30 FPS
+
+### Configuration
+
+```typescript
+import { EnhancedHUD } from './ui/enhanced-hud';
+
+const hud = new EnhancedHUD(ctx, palette, spacecraft, canvas, {
+    showWarnings: true,
+    showSystemHealth: true,
+    showCombatStatus: true,
+    showAutopilot: true,
+    showPerformance: true,
+    alertThresholds: {
+        hullIntegrity: 50,
+        fuelRemaining: 20,
+        powerReserve: 30,
+        temperature: 800
+    }
+});
+
+// Render in game loop
+hud.render();
+
+// Configure dynamically
+hud.setConfig({
+    showPerformance: false,
+    alertThresholds: {
+        fuelRemaining: 10
+    }
+});
+```
+
+### Benefits
+- **Situational Awareness**: Critical info always visible
+- **Early Warning**: Automatic alerts prevent surprises
+- **Combat Ready**: Instant threat assessment
+- **Performance Monitoring**: Real-time FPS tracking
+- **Minimal Obstruction**: Semi-transparent overlays
+- **Context Sensitive**: Only shows relevant information
+
+---
+
 ## Future Enhancements
 
 ### Autopilot
@@ -630,16 +785,31 @@ All enhancements have been tested and verified:
 
 ## Conclusion
 
-All requested enhancements have been successfully implemented:
+All requested enhancements plus additional improvements have been successfully implemented:
 
 1. ✅ **Three new autopilot modes** for automated landing, docking, and orbital insertion
 2. ✅ **Enhanced weapons UI** with detailed ammunition, cooldowns, and hit probability
 3. ✅ **Comprehensive damage visualization** showing hull, compartments, systems, and repairs
 4. ✅ **Performance optimization modules** for spatial partitioning, object pooling, and LOD
+5. ✅ **Autopilot UI integration** with full keyboard controls and phase tracking
+6. ✅ **Enhanced HUD overlay** with critical alerts and system monitoring
 
-The ship systems are now production-ready with professional-grade features and performance optimizations!
+The ship systems are now production-ready with professional-grade features, complete UI integration, and performance optimizations!
+
+### Summary of Commits
+
+**Commit 1** (6e0d853): Ship system enhancements - autopilot, weapons UI, damage viz, performance
+- New autopilot modes
+- Enhanced weapons UI
+- Damage visualization
+- Performance optimizations
+
+**Commit 2** (8921ff6): Autopilot UI integration and enhanced HUD overlay
+- Autopilot controls in navigation panel
+- Enhanced HUD with alerts and monitoring
+- Performance optimizations export
 
 ---
 
 **Last Updated**: 2025-11-18
-**Version**: 1.1.0
+**Version**: 1.2.0
