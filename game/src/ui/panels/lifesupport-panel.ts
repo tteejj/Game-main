@@ -9,6 +9,7 @@ import { SpacecraftAdapter } from '../../spacecraft-adapter';
 export class LifeSupportPanel {
     private ctx: CanvasRenderingContext2D;
     private palette: any;
+    private spacecraft: SpacecraftAdapter;
 
     // State
     private selectedCompartment: number = 5; // Center compartment
@@ -19,9 +20,10 @@ export class LifeSupportPanel {
     private pressure: number = 101;
     private temperature: number = 293;
 
-    constructor(ctx: CanvasRenderingContext2D, palette: any, _spacecraft: SpacecraftAdapter) {
+    constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;
         this.palette = palette;
+        this.spacecraft = spacecraft;
     }
 
     handleInput(key: string): void {

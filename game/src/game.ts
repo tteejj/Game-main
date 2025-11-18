@@ -14,8 +14,11 @@ import { SpacecraftAdapter } from './spacecraft-adapter';
 import { StarSystem } from '../../universe-system/src/StarSystem';
 import { Vector3 } from '../../universe-system/src/CelestialBody';
 import { TrafficManager } from '../../universe-system/src/npc-traffic/traffic-manager';
+import { NPCShip, ShipType } from '../../universe-system/src/npc-traffic/npc-ship';
+import { Vector3 as Vector3Class } from '../../physics-modules/src/Vector3';
 import { EconomicModel } from '../../universe-system/src/economy/economic-model';
 import { CommunicationsManager } from '../../universe-system/src/communications/communications-manager';
+import { RelayNetwork, NetworkNode } from '../../universe-system/src/communications/relay-network';
 import { GameWorld } from '../../physics-modules/src/game-world';
 
 export class Game {
@@ -33,9 +36,11 @@ export class Game {
     public spacecraft: SpacecraftAdapter;
     public starSystem: StarSystem;
     public gameWorld: GameWorld;
-    public trafficManager: TrafficManager;
+    public trafficManager: TrafficManager<NPCShip>;
     public economy: EconomicModel;
     public communications: CommunicationsManager;
+    private commNetwork: RelayNetwork;
+    private markets: Map<string, any> = new Map();
 
     // Performance tracking
     private frameCount: number = 0;
@@ -83,7 +88,7 @@ export class Game {
         this.placeShipInOrbit();
 
         // Initialize NPC traffic system
-        this.trafficManager = new TrafficManager();
+        this.trafficManager = new TrafficManager<NPCShip>(100000, 100); // 100km cells, max 100 vessels
         this.spawnInitialTraffic();
         console.log('✅ NPC Traffic system initialized');
 
@@ -92,8 +97,9 @@ export class Game {
         this.setupEconomy();
         console.log('✅ Economy system initialized');
 
-        // Initialize communications
-        this.communications = new CommunicationsManager();
+        // Initialize communications network
+        this.commNetwork = new RelayNetwork();
+        this.communications = new CommunicationsManager(this.commNetwork);
         this.setupCommunications();
         console.log('✅ Communications network initialized');
 
@@ -144,33 +150,35 @@ export class Game {
 
         // Add traffic between stations and planets
         const numShips = 5 + Math.floor(Math.random() * 5); // 5-10 ships
+        const shipTypes: ShipType[] = ['FREIGHTER', 'TRANSPORT', 'PATROL', 'CARGO'];
 
         for (let i = 0; i < numShips; i++) {
             // Random position in system
             const angle = Math.random() * Math.PI * 2;
             const distance = 1e8 + Math.random() * 5e8; // 100M to 600M meters from center
 
-            const position: Vector3 = {
-                x: Math.cos(angle) * distance,
-                y: Math.sin(angle) * distance,
-                z: (Math.random() - 0.5) * distance * 0.1
-            };
+            const position = new Vector3Class(
+                Math.cos(angle) * distance,
+                Math.sin(angle) * distance,
+                (Math.random() - 0.5) * distance * 0.1
+            );
 
-            const velocity: Vector3 = {
-                x: (Math.random() - 0.5) * 1000,
-                y: (Math.random() - 0.5) * 1000,
-                z: (Math.random() - 0.5) * 100
-            };
+            const velocity = new Vector3Class(
+                (Math.random() - 0.5) * 1000,
+                (Math.random() - 0.5) * 1000,
+                (Math.random() - 0.5) * 100
+            );
 
-            this.trafficManager.addShip({
-                id: `npc_${i}`,
+            const shipType = shipTypes[Math.floor(Math.random() * shipTypes.length)];
+            const ship = new NPCShip(
+                `npc_${i}`,
+                `Traffic-${i}`,
+                shipType,
                 position,
-                velocity,
-                mass: 50000 + Math.random() * 200000,
-                destination: this.starSystem.stations[Math.floor(Math.random() * this.starSystem.stations.length)].position,
-                maxThrust: 100000,
-                maxTurnRate: 0.1
-            });
+                velocity
+            );
+
+            this.trafficManager.addVessel(ship);
         }
 
         console.log(`   └─ Spawned ${numShips} NPC ships`);
@@ -180,15 +188,20 @@ export class Game {
      * Setup economy for all stations
      */
     private setupEconomy(): void {
+        // Store markets locally since EconomicModel is only a pricing calculator
         for (const station of this.starSystem.stations) {
-            this.economy.addMarket(station.id, {
+            const market = {
+                id: station.id,
+                stationId: station.id,
                 location: station.position,
                 type: station.type === 'TRADE_HUB' ? 'trade_hub' :
                       station.type === 'MINING_OUTPOST' ? 'mining' :
                       station.type === 'REFINERY' ? 'refinery' : 'station',
                 techLevel: station.techLevel,
-                population: 1000 + Math.random() * 50000
-            });
+                population: 1000 + Math.random() * 50000,
+                commodities: new Map() // Empty for now, can be populated later
+            };
+            this.markets.set(station.id, market);
         }
         console.log(`   └─ Setup ${this.starSystem.stations.length} markets`);
     }
@@ -199,25 +212,35 @@ export class Game {
     private setupCommunications(): void {
         // Add stations as communication relays
         for (const station of this.starSystem.stations) {
-            this.communications.addRelay({
+            const node: NetworkNode = {
                 id: station.id,
-                position: station.position,
-                power: 1000000, // 1MW transmission power
-                range: 1e9, // 1 million km range
-                frequency: 2.4e9 // 2.4 GHz
-            });
+                position: new Vector3Class(station.position.x, station.position.y, station.position.z),
+                transmitPower: 1000000, // 1MW transmission power
+                antenna: {
+                    gain: 20, // 20 dBi gain
+                    frequency: 2.4e9 // 2.4 GHz
+                },
+                maxConnections: 50,
+                isRelay: true
+            };
+            this.commNetwork.addNode(node);
         }
 
         // Add satellites from gameWorld as relays
         const satellites = this.gameWorld.getOperationalSatellites();
         for (const sat of satellites) {
-            this.communications.addRelay({
+            const node: NetworkNode = {
                 id: sat.id,
-                position: sat.position,
-                power: 100000, // 100kW
-                range: 5e8, // 500k km
-                frequency: 2.4e9
-            });
+                position: new Vector3Class(sat.position.x, sat.position.y, sat.position.z),
+                transmitPower: 100000, // 100kW
+                antenna: {
+                    gain: 15, // 15 dBi gain
+                    frequency: 2.4e9 // 2.4 GHz
+                },
+                maxConnections: 20,
+                isRelay: true
+            };
+            this.commNetwork.addNode(node);
         }
 
         console.log(`   └─ Setup ${this.starSystem.stations.length + satellites.length} communication relays`);
@@ -309,8 +332,7 @@ export class Game {
         // Update NPC traffic (navigation, collision avoidance)
         this.updateTraffic(deltaTime);
 
-        // Update economy (price fluctuations, supply/demand)
-        this.economy.update(deltaTime);
+        // Economy is passive (pricing calculator), no update needed
 
         // Update communications network
         this.updateCommunications(deltaTime);
@@ -364,14 +386,10 @@ export class Game {
         const shipVel = this.spacecraft.getVelocity();
 
         // Update NPC ships
-        this.trafficManager.update(deltaTime, {
-            playerPosition: shipPos,
-            playerVelocity: shipVel,
-            hazards: this.starSystem.hazards.getActiveHazards()
-        });
+        this.trafficManager.update(deltaTime);
 
         // Update NPC destinations (trade routes, etc)
-        const ships = this.trafficManager.getAllShips();
+        const ships = this.trafficManager.getAllVessels();
         for (const ship of ships) {
             // Simple logic: if ship is near destination, pick new one
             const dx = ship.position.x - ship.destination.x;
@@ -397,8 +415,14 @@ export class Game {
         // Update relay positions from satellites
         const satellites = this.gameWorld.getOperationalSatellites();
         for (const sat of satellites) {
-            this.communications.updateRelayPosition(sat.id, sat.position);
+            const node = this.commNetwork.getNode(sat.id);
+            if (node) {
+                node.position = new Vector3Class(sat.position.x, sat.position.y, sat.position.z);
+            }
         }
+
+        // Periodically rebuild network topology to account for moving satellites
+        this.commNetwork.updateTopology();
 
         this.communications.update(deltaTime);
     }
@@ -411,7 +435,7 @@ export class Game {
         const sensorState = this.spacecraft.getSensorTelemetry();
 
         // Get contacts from NPC traffic
-        const npcShips = this.trafficManager.getAllShips();
+        const npcShips = this.trafficManager.getAllVessels();
 
         // Convert NPCs to radar contacts
         const radarContacts: any[] = [];
@@ -500,7 +524,7 @@ export class Game {
         }
 
         // Check collisions with NPCs
-        const npcShips = this.trafficManager.getAllShips();
+        const npcShips = this.trafficManager.getAllVessels();
         for (const npc of npcShips) {
             const dx = npc.position.x - shipPos.x;
             const dy = npc.position.y - shipPos.y;
@@ -556,13 +580,13 @@ export class Game {
         y += 15;
         ctx.fillText(`Time: ${this.gameTime.toFixed(1)}s (${this.timeAcceleration}x)`, x, y);
         y += 15;
-        ctx.fillText(`NPCs: ${this.trafficManager.getAllShips().length}`, x, y);
+        ctx.fillText(`NPCs: ${this.trafficManager.getAllVessels().length}`, x, y);
         y += 15;
         ctx.fillText(`Stations: ${this.starSystem.stations.length}`, x, y);
         y += 15;
         ctx.fillText(`Satellites: ${this.gameWorld.satellites.getState().satellites.length}`, x, y);
         y += 15;
-        ctx.fillText(`Markets: ${this.economy.getAllMarkets().length}`, x, y);
+        ctx.fillText(`Markets: ${this.markets.size}`, x, y);
         y += 15;
 
         const shipPos = this.spacecraft.getPosition();
@@ -585,13 +609,13 @@ export class Game {
                 stations: this.starSystem.stations.length
             },
             traffic: {
-                ships: this.trafficManager.getAllShips().length
+                ships: this.trafficManager.getAllVessels().length
             },
             economy: {
-                markets: this.economy.getAllMarkets().length
+                markets: this.markets.size
             },
             communications: {
-                relays: this.communications.getRelayCount()
+                relays: this.commNetwork.getNodeCount()
             }
         };
     }
