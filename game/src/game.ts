@@ -125,12 +125,19 @@ export class Game {
                 z: planet.position.z
             };
 
-            this.spacecraft.setPosition(startPos);
-            // Note: Spacecraft adapter doesn't expose setVelocity, so ship will need to boost to orbital speed
+            // Set velocity perpendicular to radius for circular orbit
+            const orbitalVel: Vector3 = {
+                x: 0,
+                y: orbitalSpeed,
+                z: 0
+            };
 
-            console.log(`✅ Ship placed near ${planet.name}`);
+            this.spacecraft.setPosition(startPos);
+            this.spacecraft.setVelocity(orbitalVel);
+
+            console.log(`✅ Ship placed in orbit around ${planet.name}`);
             console.log(`   └─ Altitude: ${(orbitHeight / 1000).toFixed(0)} km`);
-            console.log(`   └─ Required orbital speed: ${(orbitalSpeed / 1000).toFixed(2)} km/s`);
+            console.log(`   └─ Orbital speed: ${(orbitalSpeed / 1000).toFixed(2)} km/s`);
         }
     }
 
@@ -349,6 +356,9 @@ export class Game {
 
         // Update sensors and contacts
         this.updateSensors();
+
+        // Update terrain data
+        this.updateTerrain();
     }
 
     /**
@@ -502,8 +512,39 @@ export class Game {
             }
         }
 
-        // Store contacts in spacecraft sensor system
-        // (Note: This would require extending spacecraft-adapter to accept sensor data)
+        // Inject contacts into spacecraft sensor system
+        this.spacecraft.injectRadarContacts(radarContacts);
+        this.spacecraft.injectOpticalContacts(opticalContacts);
+    }
+
+    /**
+     * Update terrain data for landing gear
+     */
+    private updateTerrain(): void {
+        const shipPos = this.spacecraft.getPosition();
+
+        // Get terrain altitude from game world
+        const terrainAlt = this.gameWorld.terrain.getHeight(shipPos.x, shipPos.y);
+
+        // Calculate ship altitude above terrain
+        const shipAltitudeAboveTerrain = Math.sqrt(
+            shipPos.x ** 2 + shipPos.y ** 2 + shipPos.z ** 2
+        ) - terrainAlt;
+
+        // Calculate terrain slope (simplified)
+        const sampleDistance = 10; // 10 meters
+        const height1 = this.gameWorld.terrain.getHeight(shipPos.x + sampleDistance, shipPos.y);
+        const height2 = this.gameWorld.terrain.getHeight(shipPos.x, shipPos.y + sampleDistance);
+        const slope = Math.sqrt(
+            ((height1 - terrainAlt) / sampleDistance) ** 2 +
+            ((height2 - terrainAlt) / sampleDistance) ** 2
+        ) * (180 / Math.PI);
+
+        // Determine surface type (simplified)
+        const surfaceType = terrainAlt > 1000 ? 'highland' : 'mare';
+
+        // Inject terrain data into spacecraft
+        this.spacecraft.injectTerrainData(shipAltitudeAboveTerrain, slope, surfaceType);
     }
 
     /**
