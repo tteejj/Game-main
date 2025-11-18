@@ -586,6 +586,12 @@ export class NPCShipAI {
     if (this.magnitude(ship.velocity) < 1) {
       ship.state = 'DOCKED';
       ship.memory.visitedStations.add(ship.currentTarget!);
+
+      // Update goal progress: completed docking action
+      if (ship.currentGoalAction && ship.currentGoalAction.type === 'DOCK_AT') {
+        ship.currentGoalAction.status = 'COMPLETED';
+        this.updateGoalProgress(ship, 'docked_at_station');
+      }
     }
   }
 
@@ -734,6 +740,12 @@ export class NPCShipAI {
       ship.cargo = [];
       ship.state = 'DOCKED';
       ship.route = undefined;
+
+      // Update goal progress: completed a trade
+      if (ship.currentGoalAction && ship.currentGoalAction.type === 'TRADE_WITH') {
+        ship.currentGoalAction.status = 'COMPLETED';
+      }
+      this.updateGoalProgress(ship, 'completed_trade', { profit });
     }
   }
 
@@ -1394,6 +1406,102 @@ export class NPCShipAI {
     if (consolidated > 0) {
       // Consolidation reduces stress
       ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - consolidated * 0.5);
+    }
+  }
+
+  /**
+   * Update goal progress based on completed actions
+   */
+  private updateGoalProgress(ship: NPCShip, event: string, data?: Record<string, unknown>): void {
+    const currentGoal = ship.goalSystem.getCurrentGoal();
+    if (!currentGoal) return;
+
+    // Track progress based on event type
+    let progressMade = false;
+
+    switch (event) {
+      case 'docked_at_station':
+        // For trading goals, docking is a step toward trading
+        if (currentGoal.type === 'ACCUMULATE_WEALTH' || currentGoal.type === 'BUILD_TRADE_EMPIRE') {
+          const subgoal = currentGoal.subgoals[currentGoal.currentSubgoal];
+          if (subgoal && subgoal.description.includes('trade route')) {
+            subgoal.progress = Math.min(1, subgoal.progress + 0.2);
+            progressMade = true;
+          }
+        }
+        break;
+
+      case 'completed_trade':
+        // Trading goals - count trades
+        if (currentGoal.type === 'ACCUMULATE_WEALTH' || currentGoal.type === 'BUILD_TRADE_EMPIRE') {
+          const tradeCount = ship.memory.profitableRoutes.length;
+          const targetTrades = 10; // From "Complete 10 profitable trades" subgoal
+
+          // Update subgoal progress
+          const subgoal = currentGoal.subgoals.find(sg => sg.description.includes('profitable trades'));
+          if (subgoal) {
+            subgoal.progress = Math.min(1, tradeCount / targetTrades);
+            if (subgoal.progress >= 1) {
+              subgoal.completed = true;
+            }
+            progressMade = true;
+          }
+
+          // Update overall goal progress
+          currentGoal.progress = currentGoal.subgoals
+            .filter(sg => !sg.optional)
+            .reduce((sum, sg) => sum + sg.progress, 0) /
+            currentGoal.subgoals.filter(sg => !sg.optional).length;
+
+          // Check if goal is complete
+          if (currentGoal.progress >= 1) {
+            ship.goalSystem.completeGoal(currentGoal.id);
+
+            // Update satisfaction based on achievement
+            ship.emotionalState.satisfaction += currentGoal.expectedReward.satisfaction || 0;
+            ship.emotionalState.satisfaction = Math.min(10, ship.emotionalState.satisfaction);
+          }
+        }
+        break;
+
+      case 'region_explored':
+        // Exploration goals
+        if (currentGoal.type === 'EXPLORE_UNKNOWN') {
+          const subgoal = currentGoal.subgoals[currentGoal.currentSubgoal];
+          if (subgoal) {
+            subgoal.progress = Math.min(1, subgoal.progress + 0.2); // Each region = 20% of 5 regions
+            if (subgoal.progress >= 1) {
+              subgoal.completed = true;
+              currentGoal.currentSubgoal++;
+            }
+            progressMade = true;
+          }
+
+          currentGoal.progress = currentGoal.subgoals
+            .filter(sg => !sg.optional)
+            .reduce((sum, sg) => sum + (sg.completed ? 1 : sg.progress), 0) /
+            currentGoal.subgoals.filter(sg => !sg.optional).length;
+        }
+        break;
+
+      case 'combat_won':
+        // Pirate goals - raid count
+        if (currentGoal.type === 'ACCUMULATE_WEALTH' && currentGoal.category === 'ECONOMIC') {
+          const subgoal = currentGoal.subgoals.find(sg => sg.description.includes('raid'));
+          if (subgoal) {
+            subgoal.progress = Math.min(1, subgoal.progress + 0.2); // Each raid = 20% of 5 raids
+            if (subgoal.progress >= 1) {
+              subgoal.completed = true;
+            }
+            progressMade = true;
+          }
+        }
+        break;
+    }
+
+    // Reduce stress slightly when making progress toward goals
+    if (progressMade && currentGoal.motivation.emotionalDrive > 5) {
+      ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - 0.5);
     }
   }
 
