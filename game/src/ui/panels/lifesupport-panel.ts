@@ -9,15 +9,19 @@ import { SpacecraftAdapter } from '../../spacecraft-adapter';
 export class LifeSupportPanel {
     private ctx: CanvasRenderingContext2D;
     private palette: any;
-    private spacecraft: SpacecraftAdapter;
 
     // State
     private selectedCompartment: number = 5; // Center compartment
+    private o2GeneratorOn: boolean = true;
+    private co2ScrubberOn: boolean = true;
+    private o2Percent: number = 21;
+    private co2Percent: number = 0.4;
+    private pressure: number = 101;
+    private temperature: number = 293;
 
-    constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
+    constructor(ctx: CanvasRenderingContext2D, palette: any, _spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;
         this.palette = palette;
-        this.spacecraft = spacecraft;
     }
 
     handleInput(key: string): void {

@@ -123,8 +123,6 @@ export class HelmPanel {
      */
     render(): void {
         const ctx = this.ctx;
-        const width = ctx.canvas.width;
-        const height = ctx.canvas.height;
 
         // Get live spacecraft data
         const engineState = this.spacecraft.getMainEngineState();

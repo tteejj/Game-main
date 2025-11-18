@@ -19,6 +19,7 @@ export class NavigationPanel {
     private radarMode: 'search' | 'track' | 'mapping' | 'off' = 'search';
     private opticalMode: 'visual' | 'infrared' | 'combined' = 'combined';
     private selectedContactIndex: number = 0;
+    private radarActive: boolean = false;
 
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;
@@ -60,8 +61,9 @@ export class NavigationPanel {
         switch (key) {
             // Radar controls
             case 'r':
-                this.spacecraft.setRadarActive(true);
-                console.log('Radar toggled');
+                this.radarActive = !this.radarActive;
+                this.spacecraft.setRadarActive(this.radarActive);
+                console.log(`Radar: ${this.radarActive ? 'ACTIVE' : 'OFF'}`);
                 break;
             case 'z':
                 this.radarRange = Math.min(100, this.radarRange + 5);
