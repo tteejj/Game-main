@@ -420,8 +420,9 @@ export class IntegratedShip {
 
   /**
    * Emit event
+   * Public to allow subsystems (e.g., weapons) to emit events
    */
-  private emit(event: string, ...args: any[]): void {
+  public emit(event: string, ...args: any[]): void {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
       for (const callback of listeners) {

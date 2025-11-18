@@ -555,7 +555,26 @@ export class Spacecraft {
 
     // 11. Get thrust and torque vectors
     const mainEngineThrust = this.mainEngine.getThrustVector();
-    const mainEngineTorque = { x: 0, y: 0, z: 0 };  // Gimbal torque (simplified for now)
+
+    // 11.1. Calculate gimbal torque: τ = r × F
+    // Engine position relative to current CoM
+    const enginePos = { x: 0, y: -3, z: -22 };  // Main engine mount point
+    const comPos = this.comSystem.getCoM();
+    const momentArm = {
+      x: enginePos.x - comPos.x,
+      y: enginePos.y - comPos.y,
+      z: enginePos.z - comPos.z
+    };
+
+    // Cross product: τ = r × F
+    // τx = ry * Fz - rz * Fy
+    // τy = rz * Fx - rx * Fz
+    // τz = rx * Fy - ry * Fx
+    const mainEngineTorque = {
+      x: momentArm.y * mainEngineThrust.z - momentArm.z * mainEngineThrust.y,
+      y: momentArm.z * mainEngineThrust.x - momentArm.x * mainEngineThrust.z,
+      z: momentArm.x * mainEngineThrust.y - momentArm.y * mainEngineThrust.x
+    };
 
     // 11.3. Update RCS with current CoM for proper torque compensation
     // (Critical Fix: RCS CoM Compensation)
