@@ -378,7 +378,8 @@ export class NPCGoalSystem {
       location: { x: 0, y: 0, z: 0 },
       witnesses: [],
       memoryStrength: 1.0,
-      recallCount: 0
+      recallCount: 0,
+      consolidated: false
     });
 
     // Unblock dependent goals
@@ -425,7 +426,8 @@ export class NPCGoalSystem {
       location: { x: 0, y: 0, z: 0 },
       witnesses: [],
       memoryStrength: 1.0,
-      recallCount: 0
+      recallCount: 0,
+      consolidated: false
     });
   }
 
@@ -1068,8 +1070,8 @@ export class NPCGoalSystem {
   private heuristic(state: WorldState, goal: NPCGoal): number {
     let h = 0;
 
-    // Distance to goal location
-    if (goal.type === 'TRAVEL_TO' && state.location) {
+    // Distance-based goals (exploration, escape, etc.)
+    if ((goal.type === 'EXPLORE_UNKNOWN' || goal.type === 'ESCAPE_DANGER') && state.location) {
       const targetLoc = goal.relatedEntities?.[0]; // Simplified
       if (targetLoc) {
         h += 100; // Placeholder distance estimate

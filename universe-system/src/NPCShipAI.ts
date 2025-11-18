@@ -15,6 +15,14 @@ import {
   PersonalityTraits as ExtendedPersonality
 } from './entity-ai/ExtendedNPCMemory';
 import { HistoricalEvent } from './simulation/HistoricalMemorySystem';
+import {
+  NPCGoalSystem,
+  NPCGoal,
+  GoalType,
+  GoalEvaluationContext,
+  PlannedAction,
+  ActionPlan
+} from './entity-ai/NPCGoalSystem';
 
 export type ShipType = 'TRADER' | 'MINER' | 'PIRATE' | 'PATROL' | 'COURIER' | 'EXPLORER' | 'PASSENGER';
 export type ShipState = 'IDLE' | 'TRAVELING' | 'DOCKING' | 'DOCKED' | 'TRADING' | 'MINING' | 'ATTACKING' | 'FLEEING' | 'PATROLLING';
@@ -56,11 +64,13 @@ export interface NPCShip {
   route?: TradeRoute;
   memory: ShipMemory;         // Legacy simple memory (for backward compatibility)
   extendedMemory: ExtendedNPCMemory;  // New sophisticated memory system
+  goalSystem: NPCGoalSystem;  // Goal-based planning and decision making
   emotionalState: {           // Current emotional state
     stress: number;           // 0-10
     satisfaction: number;     // -10 to +10
     fear: number;             // 0-10
   };
+  currentGoalAction?: PlannedAction;  // Action from goal system being executed
 }
 
 export interface ShipPersonality {
@@ -132,6 +142,12 @@ export class NPCShipAI {
       adaptability: type === 'EXPLORER' ? 0.8 : 0.5
     };
 
+    // Create extended memory first (needed for goal system)
+    const extendedMemory = new ExtendedNPCMemory(shipId, 'SHIP', extendedPersonality);
+
+    // Create goal system
+    const goalSystem = new NPCGoalSystem(extendedMemory);
+
     const ship: NPCShip = {
       id: shipId,
       name: this.generateShipName(type, faction),
@@ -153,13 +169,17 @@ export class NPCShipAI {
         totalProfit: 0,
         lastCombatReport: 0
       },
-      extendedMemory: new ExtendedNPCMemory(shipId, 'SHIP', extendedPersonality),
+      extendedMemory,
+      goalSystem,
       emotionalState: {
         stress: 0,
         satisfaction: 0,
         fear: 0
       }
     };
+
+    // Generate initial goals based on ship type
+    this.generateInitialGoals(ship);
 
     this.ships.set(ship.id, ship);
     return ship;
@@ -1202,6 +1222,196 @@ export class NPCShipAI {
     if (consolidated > 0) {
       // Consolidation reduces stress
       ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - consolidated * 0.5);
+    }
+  }
+
+  /**
+   * Generate initial goals based on ship type
+   */
+  private generateInitialGoals(ship: NPCShip): void {
+    const now = Date.now() / 1000;
+    let primaryGoal: NPCGoal | null = null;
+
+    switch (ship.type) {
+      case 'TRADER':
+        primaryGoal = {
+          id: `goal_${ship.id}_wealth`,
+          type: 'ACCUMULATE_WEALTH',
+          category: 'ECONOMIC',
+          name: 'Build Trading Fortune',
+          description: 'Accumulate wealth through profitable trade routes',
+          priority: 80,
+          urgency: 40,
+          progress: 0,
+          subgoals: [
+            { description: 'Find profitable trade route', completed: false, optional: false, progress: 0 },
+            { description: 'Complete 10 profitable trades', completed: false, optional: false, progress: 0 },
+            { description: 'Build reputation with traders', completed: false, optional: true, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'INTRINSIC',
+            reason: 'Desire for financial success',
+            emotionalDrive: ship.personality.greed * 10
+          },
+          expectedReward: {
+            credits: 100000,
+            satisfaction: 8
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['trading', 'wealth', 'career']
+        };
+        break;
+
+      case 'EXPLORER':
+        primaryGoal = {
+          id: `goal_${ship.id}_explore`,
+          type: 'EXPLORE_UNKNOWN',
+          category: 'EXPLORATION',
+          name: 'Map the Unknown',
+          description: 'Discover and map unexplored regions of space',
+          priority: 85,
+          urgency: 30,
+          progress: 0,
+          subgoals: [
+            { description: 'Visit 5 unexplored regions', completed: false, optional: false, progress: 0 },
+            { description: 'Discover points of interest', completed: false, optional: true, progress: 0 },
+            { description: 'Return safely with data', completed: false, optional: false, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'INTRINSIC',
+            reason: 'Curiosity and love of discovery',
+            emotionalDrive: ship.personality.curiosity * 10
+          },
+          expectedReward: {
+            credits: 50000,
+            satisfaction: 9,
+            reputation: new Map([['explorers_guild', 20]])
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['exploration', 'discovery', 'career']
+        };
+        break;
+
+      case 'PIRATE':
+        primaryGoal = {
+          id: `goal_${ship.id}_plunder`,
+          type: 'ACCUMULATE_WEALTH',
+          category: 'ECONOMIC',
+          name: 'Plunder and Profit',
+          description: 'Acquire wealth through raiding and piracy',
+          priority: 90,
+          urgency: 60,
+          progress: 0,
+          subgoals: [
+            { description: 'Find vulnerable targets', completed: false, optional: false, progress: 0 },
+            { description: 'Successfully raid 5 ships', completed: false, optional: false, progress: 0 },
+            { description: 'Avoid capture', completed: false, optional: false, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Need for resources and thrills',
+            emotionalDrive: (ship.personality.aggression + ship.personality.greed) * 5
+          },
+          expectedReward: {
+            credits: 75000,
+            satisfaction: 7
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['piracy', 'wealth', 'combat']
+        };
+        break;
+
+      case 'PATROL':
+        primaryGoal = {
+          id: `goal_${ship.id}_protect`,
+          type: 'RISE_IN_FACTION',
+          category: 'CAREER',
+          name: 'Protect Territory',
+          description: 'Maintain security in assigned patrol zone',
+          priority: 75,
+          urgency: 50,
+          progress: 0,
+          subgoals: [
+            { description: 'Patrol assigned routes', completed: false, optional: false, progress: 0 },
+            { description: 'Respond to threats', completed: false, optional: false, progress: 0 },
+            { description: 'Earn commendations', completed: false, optional: true, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Duty and loyalty to faction',
+            emotionalDrive: ship.personality.loyalty * 10
+          },
+          expectedReward: {
+            credits: 30000,
+            satisfaction: 6,
+            reputation: new Map([[ship.faction, 15]])
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'FACTION',
+          tags: ['patrol', 'duty', 'security']
+        };
+        break;
+
+      default:
+        // Generic survival goal for other types
+        primaryGoal = {
+          id: `goal_${ship.id}_survive`,
+          type: 'ACHIEVE_FINANCIAL_SECURITY',
+          category: 'SURVIVAL',
+          name: 'Survive and Thrive',
+          description: 'Maintain ship operations and build financial security',
+          priority: 70,
+          urgency: 50,
+          progress: 0,
+          subgoals: [
+            { description: 'Maintain fuel and supplies', completed: false, optional: false, progress: 0 },
+            { description: 'Build emergency fund', completed: false, optional: false, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'COMPULSION',
+            reason: 'Need for security and stability',
+            emotionalDrive: ship.personality.caution * 10
+          },
+          expectedReward: {
+            credits: 50000,
+            satisfaction: 5
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['survival', 'financial']
+        };
+    }
+
+    if (primaryGoal) {
+      ship.goalSystem.addGoal(primaryGoal);
     }
   }
 }
