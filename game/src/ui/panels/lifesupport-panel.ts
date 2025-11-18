@@ -13,12 +13,7 @@ export class LifeSupportPanel {
 
     // State
     private selectedCompartment: number = 5; // Center compartment
-    private o2GeneratorOn: boolean = true;
-    private co2ScrubberOn: boolean = true;
-    private o2Percent: number = 21;
-    private co2Percent: number = 0.4;
-    private pressure: number = 101;
-    private temperature: number = 293;
+    // Removed unused state variables - to be re-added when functionality is implemented
 
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;

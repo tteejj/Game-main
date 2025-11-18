@@ -351,7 +351,7 @@ export class NavigationPanel {
         ctx.fillText('GEAR HEALTH', 60, y);
         y += 25;
 
-        gearData.gearHealth.forEach((gear: any, index: number) => {
+        gearData.gearHealth.forEach((gear: any, _index: number) => {
             const healthColor = gear.health > 0.7 ? this.palette.primary :
                                gear.health > 0.3 ? this.palette.warning : this.palette.danger;
             ctx.fillStyle = healthColor;

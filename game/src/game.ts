@@ -125,12 +125,6 @@ export class Game {
                 z: planet.position.z
             };
 
-            const startVel: Vector3 = {
-                x: 0,
-                y: orbitalSpeed * 0.95, // Slightly elliptical
-                z: 0
-            };
-
             this.spacecraft.setPosition(startPos);
             // Note: Spacecraft adapter doesn't expose setVelocity, so ship will need to boost to orbital speed
 
@@ -150,7 +144,7 @@ export class Game {
 
         // Add traffic between stations and planets
         const numShips = 5 + Math.floor(Math.random() * 5); // 5-10 ships
-        const shipTypes: ShipType[] = ['FREIGHTER', 'TRANSPORT', 'PATROL', 'CARGO'];
+        const shipTypes: ShipType[] = [ShipType.CARGO_FREIGHTER, ShipType.CARGO_SHUTTLE, ShipType.PATROL_SHIP, ShipType.MINING_VESSEL];
 
         for (let i = 0; i < numShips; i++) {
             // Random position in system
@@ -194,16 +188,28 @@ export class Game {
                 id: station.id,
                 stationId: station.id,
                 location: station.position,
-                type: station.type === 'TRADE_HUB' ? 'trade_hub' :
-                      station.type === 'MINING_OUTPOST' ? 'mining' :
-                      station.type === 'REFINERY' ? 'refinery' : 'station',
-                techLevel: station.techLevel,
-                population: 1000 + Math.random() * 50000,
+                type: this.getMarketType(station.stationType),
+                techLevel: Math.floor((station.economy?.wealthLevel || 0.5) * 10), // Convert wealthLevel (0-1) to techLevel (0-10)
+                population: station.population,
                 commodities: new Map() // Empty for now, can be populated later
             };
             this.markets.set(station.id, market);
         }
         console.log(`   └─ Setup ${this.starSystem.stations.length} markets`);
+    }
+
+    /**
+     * Convert StationType to market type string
+     */
+    private getMarketType(stationType: any): string {
+        const typeMap: Record<string, string> = {
+            'TRADING_HUB': 'trade_hub',
+            'MINING_PLATFORM': 'mining',
+            'FUEL_DEPOT': 'refinery',
+            'SHIPYARD': 'shipyard',
+            'RESEARCH_FACILITY': 'research'
+        };
+        return typeMap[stationType] || 'station';
     }
 
     /**
@@ -229,9 +235,10 @@ export class Game {
         // Add satellites from gameWorld as relays
         const satellites = this.gameWorld.getOperationalSatellites();
         for (const sat of satellites) {
+            const satPos = sat.orbitalBody.position;
             const node: NetworkNode = {
-                id: sat.id,
-                position: new Vector3Class(sat.position.x, sat.position.y, sat.position.z),
+                id: sat.name,
+                position: new Vector3Class(satPos.x, satPos.y, satPos.z),
                 transmitPower: 100000, // 100kW
                 antenna: {
                     gain: 15, // 15 dBi gain
@@ -382,9 +389,6 @@ export class Game {
      * Update NPC traffic
      */
     private updateTraffic(deltaTime: number): void {
-        const shipPos = this.spacecraft.getPosition();
-        const shipVel = this.spacecraft.getVelocity();
-
         // Update NPC ships
         this.trafficManager.update(deltaTime);
 
@@ -392,17 +396,24 @@ export class Game {
         const ships = this.trafficManager.getAllVessels();
         for (const ship of ships) {
             // Simple logic: if ship is near destination, pick new one
-            const dx = ship.position.x - ship.destination.x;
-            const dy = ship.position.y - ship.destination.y;
-            const dz = ship.position.z - ship.destination.z;
-            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const currentWaypoint = ship.getNavigator().getCurrentWaypoint();
+            if (currentWaypoint) {
+                const destination = currentWaypoint.position;
+                const dx = ship.position.x - destination.x;
+                const dy = ship.position.y - destination.y;
+                const dz = ship.position.z - destination.z; // Fixed typo: was ship.destination.z - ship.destination.z
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-            if (dist < 10000) { // Within 10km
-                // Pick random new destination
-                const stations = this.starSystem.stations;
-                if (stations.length > 0) {
-                    const newDest = stations[Math.floor(Math.random() * stations.length)];
-                    ship.destination = newDest.position;
+                if (dist < 10000) { // Within 10km
+                    // Pick random new destination
+                    const stations = this.starSystem.stations;
+                    if (stations.length > 0) {
+                        const newDest = stations[Math.floor(Math.random() * stations.length)];
+                        ship.setDestination(
+                            new Vector3Class(newDest.position.x, newDest.position.y, newDest.position.z),
+                            newDest.name
+                        );
+                    }
                 }
             }
         }
@@ -415,9 +426,10 @@ export class Game {
         // Update relay positions from satellites
         const satellites = this.gameWorld.getOperationalSatellites();
         for (const sat of satellites) {
-            const node = this.commNetwork.getNode(sat.id);
+            const node = this.commNetwork.getNode(sat.name);
             if (node) {
-                node.position = new Vector3Class(sat.position.x, sat.position.y, sat.position.z);
+                const satPos = sat.orbitalBody.position;
+                node.position = new Vector3Class(satPos.x, satPos.y, satPos.z);
             }
         }
 
@@ -432,7 +444,6 @@ export class Game {
      */
     private updateSensors(): void {
         const shipPos = this.spacecraft.getPosition();
-        const sensorState = this.spacecraft.getSensorTelemetry();
 
         // Get contacts from NPC traffic
         const npcShips = this.trafficManager.getAllVessels();
@@ -440,7 +451,6 @@ export class Game {
         // Convert NPCs to radar contacts
         const radarContacts: any[] = [];
         const opticalContacts: any[] = [];
-        const esmContacts: any[] = [];
 
         for (const npc of npcShips) {
             const dx = npc.position.x - shipPos.x;
