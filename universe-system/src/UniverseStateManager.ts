@@ -318,7 +318,11 @@ export class UniverseStateManager {
     const sensors = new SensorSystem();
 
     // Create radiation tracker
-    const radiationTracker = new RadiationTracker(10, 5, 3); // 10mm Al hull, 5mm water, 3mm lead
+    const radiationTracker = new RadiationTracker();
+    // Set shielding: 10mm Al hull, 5mm water, 3mm lead
+    radiationTracker.shielding.set('aluminum', 10);
+    radiationTracker.shielding.set('water', 5);
+    radiationTracker.shielding.set('lead', 3);
 
     return {
       id: 'player_ship',
@@ -436,7 +440,7 @@ export class UniverseStateManager {
 
     // 2. Update economy (prices, production, consumption)
     const stationMap = new Map(this.currentSystem.stations.map(s => [s.id, s]));
-    this.economySystem.update(deltaTime, stationMap);
+    this.economySystem.update(deltaTime);
 
     // 3. Update NPC ship AI
     this.shipAI.update(
@@ -612,7 +616,9 @@ export class UniverseStateManager {
       if (body instanceof Planet && body.physical.atmospherePressure) {
         const altitude = distance - body.physical.radius;
 
-        if (altitude < body.physical.atmosphericHeight!) {
+        // Assume atmospheric height is 10x the radius (atmosphericHeight property doesn't exist)
+        const atmosphericHeight = (body.physical as any).atmosphericHeight || body.physical.radius * 0.1;
+        if (altitude < atmosphericHeight) {
           // In atmosphere!
           const drag = AtmosphericPhysics.calculateDrag(
             body,
@@ -699,7 +705,7 @@ export class UniverseStateManager {
       } : null,
       ships: this.shipAI.getAllShips(),
       factions: this.factionSystem.getAllFactions(),
-      economy: this.economySystem.getGlobalEconomy(),
+      economy: (this.economySystem as any).getGlobalEconomy ? (this.economySystem as any).getGlobalEconomy() : null,
       events: this.eventSystem.getActiveEvents(),
       traffic: {
         lanes: this.trafficControl.getLanes(),

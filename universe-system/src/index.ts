@@ -144,7 +144,7 @@ export {
   Treaty,
   TreatyType,
   DiplomaticEvent,
-  EventType,
+  EventType as FactionEventType,
   Reputation,
   ReputationRank,
   ReputationAction,
@@ -257,7 +257,7 @@ export {
 // Universe State Manager
 export {
   PlayerShip,
-  UniverseConfig,
+  UniverseConfig as StateManagerUniverseConfig,
   UniverseState,
   UniverseStateManager
 } from './UniverseStateManager';
