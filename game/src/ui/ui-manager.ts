@@ -16,7 +16,6 @@ export class UIManager {
     private ctx: CanvasRenderingContext2D;
     private activeStationIndex: number = 0; // Start with Helm (Station 1)
     private stations: StationPanel[];
-    private spacecraft: SpacecraftAdapter;
 
     // Color palette (green monochrome by default)
     palette = {
@@ -31,7 +30,6 @@ export class UIManager {
 
     constructor(canvas: HTMLCanvasElement, spacecraft: SpacecraftAdapter) {
         this.canvas = canvas;
-        this.spacecraft = spacecraft;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
             throw new Error('Could not get 2D context');
