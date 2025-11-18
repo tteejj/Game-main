@@ -169,6 +169,7 @@ export type ActionType =
 export interface GoalEvaluationContext {
   currentTime: number;
   currentLocation: Vector3;
+  currentState: WorldState;       // Current world state for A* planning
   currentResources: {
     credits: number;
     fuel: number;
@@ -181,6 +182,31 @@ export interface GoalEvaluationContext {
   enemies: string[];
 }
 
+// World state for A* planning
+export interface WorldState {
+  location: Vector3;
+  resources: Record<string, number>;
+  satisfied: string[];            // Satisfied prerequisites
+  [key: string]: any;
+}
+
+// A* planning nodes
+export interface PlanNode {
+  actions: PlannedAction[];
+  state: WorldState;
+  gCost: number;                  // Cost so far
+  hCost: number;                  // Estimated cost to goal
+  fCost: number;                  // Total cost (g + h)
+}
+
+// HTN goal tree
+export interface GoalTreeNode {
+  goal: NPCGoal;
+  subgoals: GoalTreeNode[];
+  parent?: string;                // Parent goal ID
+  status: GoalStatus;
+}
+
 export class NPCGoalSystem {
   private memory: ExtendedNPCMemory;
   private goals: Map<string, NPCGoal> = new Map();
@@ -191,6 +217,9 @@ export class NPCGoalSystem {
   private currentGoal: NPCGoal | null = null;
   private currentPlan: ActionPlan | null = null;
   private currentAction: PlannedAction | null = null;
+
+  // HTN planning
+  private goalTree: Map<string, GoalTreeNode> = new Map();  // Goal ID -> tree node
 
   // Configuration
   private readonly MAX_ACTIVE_GOALS = 5;
@@ -968,6 +997,600 @@ export class NPCGoalSystem {
     const lowest = sorted[0];
 
     this.abandonGoal(lowest.id, 'Resource constraints - too many goals');
+  }
+
+  // ====================================================================
+  // SOPHISTICATED AI PLANNING ALGORITHMS
+  // ====================================================================
+
+  /**
+   * A* pathfinding adapted for goal/action space
+   */
+  private planActionsToGoal(goal: NPCGoal, context: GoalEvaluationContext): ActionPlan | null {
+    const openSet: PlanNode[] = [{
+      actions: [],
+      state: context.currentState,
+      gCost: 0,
+      hCost: this.heuristic(context.currentState, goal),
+      fCost: 0
+    }];
+
+    const closedSet = new Set<string>();
+
+    while (openSet.length > 0) {
+      // Get node with lowest fCost
+      openSet.sort((a, b) => a.fCost - b.fCost);
+      const current = openSet.shift()!;
+
+      // Goal reached?
+      if (this.goalSatisfied(current.state, goal)) {
+        return {
+          goal,
+          steps: current.actions,
+          estimatedDuration: current.gCost,
+          estimatedCost: this.calculateCost(current.actions),
+          riskAssessment: this.calculateMaxRisk(current.actions),
+          successProbability: this.calculateSuccessProbability(current.actions)
+        };
+      }
+
+      const stateKey = this.hashState(current.state);
+      if (closedSet.has(stateKey)) continue;
+      closedSet.add(stateKey);
+
+      // Explore available actions
+      const availableActions = this.getAvailableActions(current.state, context);
+
+      for (const action of availableActions) {
+        const newState = this.applyAction(current.state, action);
+        const newGCost = current.gCost + action.duration;
+        const newHCost = this.heuristic(newState, goal);
+
+        openSet.push({
+          actions: [...current.actions, action],
+          state: newState,
+          gCost: newGCost,
+          hCost: newHCost,
+          fCost: newGCost + newHCost
+        });
+      }
+
+      // Prevent infinite loops
+      if (closedSet.size > 1000) break;
+    }
+
+    return null; // No plan found
+  }
+
+  /**
+   * Heuristic: Estimate remaining cost to goal
+   */
+  private heuristic(state: WorldState, goal: NPCGoal): number {
+    let h = 0;
+
+    // Distance to goal location
+    if (goal.type === 'TRAVEL_TO' && state.location) {
+      const targetLoc = goal.relatedEntities?.[0]; // Simplified
+      if (targetLoc) {
+        h += 100; // Placeholder distance estimate
+      }
+    }
+
+    // Missing resources
+    if (goal.requiredResources) {
+      for (const req of goal.requiredResources) {
+        const resourceKey = req.type.toLowerCase();
+        const have = state.resources[resourceKey] || 0;
+        const need = req.amount;
+        h += Math.max(0, need - have) * 0.1;
+      }
+    }
+
+    // Missing prerequisites
+    if (goal.prerequisites) {
+      h += goal.prerequisites.filter(p => !state.satisfied.includes(p)).length * 5;
+    }
+
+    return h;
+  }
+
+  /**
+   * Check if goal is satisfied in current state
+   */
+  private goalSatisfied(state: WorldState, goal: NPCGoal): boolean {
+    // Check prerequisites
+    if (goal.prerequisites.length > 0) {
+      if (!goal.prerequisites.every(p => state.satisfied.includes(p))) {
+        return false;
+      }
+    }
+
+    // Check resources
+    if (goal.requiredResources) {
+      for (const req of goal.requiredResources) {
+        const resourceKey = req.type.toLowerCase();
+        const have = state.resources[resourceKey] || 0;
+        if (have < req.amount) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Get available actions in current state
+   */
+  private getAvailableActions(state: WorldState, context: GoalEvaluationContext): PlannedAction[] {
+    const actions: PlannedAction[] = [];
+
+    // Travel actions
+    if (state.resources.fuel > 10) {
+      actions.push({
+        id: `travel_${Date.now()}`,
+        type: 'TRAVEL_TO',
+        description: 'Travel to location',
+        priority: 50,
+        duration: 3600,
+        cost: 100,
+        prerequisites: [],
+        requiredCapabilities: ['navigation'],
+        risk: 0.2,
+        status: 'PENDING',
+        attempts: 0
+      });
+    }
+
+    // Trade actions
+    if (state.resources.credits > 100) {
+      actions.push({
+        id: `trade_${Date.now()}`,
+        type: 'TRADE_WITH',
+        description: 'Execute trade',
+        priority: 60,
+        duration: 1800,
+        cost: 500,
+        prerequisites: [],
+        requiredCapabilities: ['trading'],
+        risk: 0.3,
+        status: 'PENDING',
+        attempts: 0
+      });
+    }
+
+    // Refuel action
+    if (state.resources.fuel < 50 && state.resources.credits > 50) {
+      actions.push({
+        id: `refuel_${Date.now()}`,
+        type: 'REFUEL',
+        description: 'Refuel ship',
+        priority: 70,
+        duration: 600,
+        cost: 50,
+        prerequisites: [],
+        requiredCapabilities: [],
+        risk: 0.1,
+        status: 'PENDING',
+        attempts: 0
+      });
+    }
+
+    return actions;
+  }
+
+  /**
+   * Apply action to state (state transition)
+   */
+  private applyAction(state: WorldState, action: PlannedAction): WorldState {
+    const newState = { ...state };
+
+    switch (action.type) {
+      case 'TRAVEL_TO':
+        // Update location (simplified)
+        newState.resources.fuel = (newState.resources.fuel || 0) - 10;
+        break;
+
+      case 'TRADE_WITH':
+        // Gain credits (simplified)
+        newState.resources.credits = (newState.resources.credits || 0) + 200;
+        break;
+
+      case 'REFUEL':
+        newState.resources.fuel = 100;
+        newState.resources.credits = (newState.resources.credits || 0) - action.cost;
+        break;
+    }
+
+    return newState;
+  }
+
+  /**
+   * Hash state for comparison
+   */
+  private hashState(state: WorldState): string {
+    return JSON.stringify({
+      location: state.location,
+      resources: state.resources,
+      satisfied: state.satisfied.sort()
+    });
+  }
+
+  /**
+   * Calculate total cost of actions
+   */
+  private calculateCost(actions: PlannedAction[]): number {
+    return actions.reduce((sum, a) => sum + a.cost, 0);
+  }
+
+  /**
+   * Calculate maximum risk across actions
+   */
+  private calculateMaxRisk(actions: PlannedAction[]): number {
+    return actions.reduce((max, a) => Math.max(max, a.risk), 0);
+  }
+
+  /**
+   * Calculate success probability from actions
+   */
+  private calculateSuccessProbability(actions: PlannedAction[]): number {
+    let probability = 1.0;
+    for (const action of actions) {
+      probability *= (1 - action.risk);
+    }
+    return probability;
+  }
+
+  // ====================================================================
+  // HIERARCHICAL TASK NETWORK (HTN) PLANNING
+  // ====================================================================
+
+  /**
+   * Decompose complex goals into subgoals
+   */
+  private decomposeGoal(goal: NPCGoal): NPCGoal[] {
+    const subgoals: NPCGoal[] = [];
+    const now = Date.now() / 1000;
+
+    switch (goal.type) {
+      case 'BECOME_WEALTHY':
+        subgoals.push(
+          {
+            id: `find_trade_route_${now}`,
+            type: 'ESTABLISH_TRADE_ROUTE',
+            category: 'ECONOMIC',
+            name: 'Find Trade Route',
+            description: 'Establish profitable trade route',
+            priority: 8,
+            urgency: 70,
+            progress: 0,
+            subgoals: [],
+            currentSubgoal: 0,
+            prerequisites: [],
+            motivation: { type: 'EXTRINSIC', reason: 'Step toward wealth', emotionalDrive: 7 },
+            expectedReward: { credits: 5000, satisfaction: 5 },
+            status: 'ACTIVE',
+            attempts: 0,
+            failures: 0,
+            createdAt: now,
+            createdBy: 'SELF',
+            tags: ['economic', 'subgoal']
+          },
+          {
+            id: `acquire_cargo_${now}`,
+            type: 'MONOPOLIZE_COMMODITY',
+            category: 'ECONOMIC',
+            name: 'Acquire Cargo',
+            description: 'Build up cargo inventory',
+            priority: 7,
+            urgency: 60,
+            progress: 0,
+            subgoals: [],
+            currentSubgoal: 0,
+            prerequisites: [`find_trade_route_${now}`],
+            motivation: { type: 'EXTRINSIC', reason: 'Need goods to trade', emotionalDrive: 6 },
+            expectedReward: { credits: 2000, satisfaction: 4 },
+            status: 'BLOCKED',
+            attempts: 0,
+            failures: 0,
+            createdAt: now,
+            createdBy: 'SELF',
+            tags: ['economic', 'subgoal']
+          }
+        );
+        break;
+
+      case 'HUNT_PIRATE':
+        subgoals.push(
+          {
+            id: `gather_intel_${now}`,
+            type: 'INVESTIGATE_ANOMALY',
+            category: 'MISSION',
+            name: 'Gather Intelligence',
+            description: 'Find pirate locations',
+            priority: 8,
+            urgency: 80,
+            progress: 0,
+            subgoals: [],
+            currentSubgoal: 0,
+            prerequisites: [],
+            motivation: { type: 'INTRINSIC', reason: 'Need intel to hunt', emotionalDrive: 8 },
+            expectedReward: { satisfaction: 5 },
+            status: 'ACTIVE',
+            attempts: 0,
+            failures: 0,
+            createdAt: now,
+            createdBy: 'SELF',
+            tags: ['mission', 'subgoal']
+          },
+          {
+            id: `upgrade_weapons_${now}`,
+            type: 'ACHIEVE_MASTERY',
+            category: 'PERSONAL',
+            name: 'Upgrade Weapons',
+            description: 'Prepare for combat',
+            priority: 7,
+            urgency: 70,
+            progress: 0,
+            subgoals: [],
+            currentSubgoal: 0,
+            prerequisites: [],
+            motivation: { type: 'COMPULSION', reason: 'Need firepower', emotionalDrive: 7 },
+            expectedReward: { satisfaction: 6 },
+            status: 'ACTIVE',
+            attempts: 0,
+            failures: 0,
+            createdAt: now,
+            createdBy: 'SELF',
+            tags: ['combat', 'subgoal']
+          }
+        );
+        break;
+
+      case 'EXPLORE_UNKNOWN':
+        subgoals.push(
+          {
+            id: `prepare_exploration_${now}`,
+            type: 'FIND_SUPPLIES',
+            category: 'SURVIVAL',
+            name: 'Prepare for Exploration',
+            description: 'Stock up on supplies',
+            priority: 7,
+            urgency: 60,
+            progress: 0,
+            subgoals: [],
+            currentSubgoal: 0,
+            prerequisites: [],
+            motivation: { type: 'INTRINSIC', reason: 'Safety first', emotionalDrive: 6 },
+            expectedReward: { satisfaction: 4 },
+            status: 'ACTIVE',
+            attempts: 0,
+            failures: 0,
+            createdAt: now,
+            createdBy: 'SELF',
+            tags: ['exploration', 'subgoal']
+          }
+        );
+        break;
+    }
+
+    return subgoals;
+  }
+
+  /**
+   * Execute HTN with dynamic replanning
+   */
+  private executeHTN(goal: NPCGoal, context: GoalEvaluationContext): PlannedAction | null {
+    // Get current subgoal
+    let currentSubgoal = this.getCurrentSubgoal(goal);
+
+    // If no subgoal or subgoal complete, decompose next level
+    if (!currentSubgoal || this.isSubgoalComplete(currentSubgoal)) {
+      const newSubgoals = this.decomposeGoal(goal);
+
+      if (newSubgoals.length === 0) {
+        // Goal complete!
+        goal.status = 'COMPLETED';
+        return null;
+      }
+
+      // Add to goal tree
+      this.addSubgoals(goal, newSubgoals);
+      currentSubgoal = newSubgoals[0];
+    }
+
+    // Plan action for current subgoal
+    const action = this.planActionForSubgoal(currentSubgoal, context);
+
+    // If subgoal fails, try alternative or abandon
+    if (!action) {
+      if (this.hasAlternatives(currentSubgoal)) {
+        return this.tryAlternative(currentSubgoal, context);
+      } else {
+        this.abandonSubgoal(currentSubgoal);
+        return this.executeHTN(goal, context); // Try next subgoal
+      }
+    }
+
+    return action;
+  }
+
+  /**
+   * Get current active subgoal for a goal
+   */
+  private getCurrentSubgoal(goal: NPCGoal): NPCGoal | null {
+    const treeNode = this.goalTree.get(goal.id);
+    if (!treeNode || treeNode.subgoals.length === 0) return null;
+
+    // Find first active subgoal
+    for (const subNode of treeNode.subgoals) {
+      if (subNode.status === 'ACTIVE') {
+        return subNode.goal;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if subgoal is complete
+   */
+  private isSubgoalComplete(subgoal: NPCGoal): boolean {
+    return subgoal.status === 'COMPLETED' || subgoal.progress >= 1.0;
+  }
+
+  /**
+   * Add subgoals to goal tree
+   */
+  private addSubgoals(parentGoal: NPCGoal, subgoals: NPCGoal[]): void {
+    let treeNode = this.goalTree.get(parentGoal.id);
+
+    if (!treeNode) {
+      treeNode = {
+        goal: parentGoal,
+        subgoals: [],
+        status: parentGoal.status
+      };
+      this.goalTree.set(parentGoal.id, treeNode);
+    }
+
+    // Add subgoals as tree nodes
+    for (const subgoal of subgoals) {
+      const subNode: GoalTreeNode = {
+        goal: subgoal,
+        subgoals: [],
+        parent: parentGoal.id,
+        status: subgoal.status
+      };
+      treeNode.subgoals.push(subNode);
+      this.goalTree.set(subgoal.id, subNode);
+      this.goals.set(subgoal.id, subgoal);
+    }
+  }
+
+  /**
+   * Plan action for a specific subgoal
+   */
+  private planActionForSubgoal(subgoal: NPCGoal, context: GoalEvaluationContext): PlannedAction | null {
+    // Use A* to plan actions for this subgoal
+    const plan = this.planActionsToGoal(subgoal, context);
+    if (plan && plan.steps.length > 0) {
+      return plan.steps[0];
+    }
+    return null;
+  }
+
+  /**
+   * Check if subgoal has alternatives
+   */
+  private hasAlternatives(subgoal: NPCGoal): boolean {
+    // Simplified - could track alternative strategies
+    return subgoal.attempts < 2;
+  }
+
+  /**
+   * Try alternative approach to subgoal
+   */
+  private tryAlternative(subgoal: NPCGoal, context: GoalEvaluationContext): PlannedAction | null {
+    // Simplified - regenerate plan with modified parameters
+    subgoal.attempts++;
+    return this.planActionForSubgoal(subgoal, context);
+  }
+
+  /**
+   * Abandon a subgoal
+   */
+  private abandonSubgoal(subgoal: NPCGoal): void {
+    subgoal.status = 'ABANDONED';
+    const treeNode = this.goalTree.get(subgoal.id);
+    if (treeNode) {
+      treeNode.status = 'ABANDONED';
+    }
+  }
+
+  // ====================================================================
+  // DYNAMIC GOAL PRIORITIZATION
+  // ====================================================================
+
+  /**
+   * Reorder goals based on changing conditions
+   */
+  private reprioritizeGoals(goals: NPCGoal[], context: GoalEvaluationContext): void {
+    const now = context.currentTime;
+
+    for (const goal of goals) {
+      const basePriority = goal.priority || 50;
+      let priority = basePriority;
+
+      // Urgency increases priority
+      if (goal.deadline) {
+        const timeLeft = goal.deadline - now;
+        const estimatedDuration = 3600; // Simplified
+        const urgency = Math.max(0, 1 - timeLeft / estimatedDuration);
+        priority += urgency * 30;
+      }
+
+      // Opportunity increases priority
+      if (this.isOpportunityAvailable(goal, context)) {
+        priority += 20;
+      }
+
+      // Difficulty affects priority (prefer achievable)
+      const difficulty = this.estimateDifficulty(goal, context);
+      priority -= difficulty * 5;
+
+      // Motivation matters
+      if (goal.motivation) {
+        if (goal.motivation.type === 'COMPULSION') priority += 25;
+        priority += goal.motivation.emotionalDrive * 2;
+      }
+
+      // Recently failed goals get lower priority (frustration)
+      if (goal.failures > 0) {
+        priority -= goal.failures * 5;
+      }
+
+      // Clamp priority
+      goal.priority = Math.max(1, Math.min(100, priority));
+    }
+
+    // Sort goals by new priority
+    goals.sort((a, b) => b.priority - a.priority);
+  }
+
+  /**
+   * Check if opportunity is available for goal
+   */
+  private isOpportunityAvailable(goal: NPCGoal, context: GoalEvaluationContext): boolean {
+    // Check if context has relevant opportunities
+    if (goal.category === 'ECONOMIC' && context.opportunities.length > 0) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Estimate difficulty of goal
+   */
+  private estimateDifficulty(goal: NPCGoal, context: GoalEvaluationContext): number {
+    let difficulty = 5; // Base difficulty
+
+    // Resource requirements
+    if (goal.requiredResources) {
+      for (const req of goal.requiredResources) {
+        if (req.type === 'CREDITS') {
+          const ratio = req.amount / (context.currentResources.credits + 1);
+          difficulty += Math.min(5, ratio * 2);
+        }
+      }
+    }
+
+    // Threats increase difficulty
+    if (context.threats.length > 0 && goal.category !== 'SURVIVAL') {
+      difficulty += context.threats.length * 2;
+    }
+
+    return Math.min(10, difficulty);
   }
 
   // ====================================================================

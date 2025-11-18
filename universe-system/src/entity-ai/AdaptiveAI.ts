@@ -22,10 +22,12 @@ export interface LearningEvent {
 }
 
 export interface Strategy {
+  id: string;
   name: string;
   description: string;
 
   // When to use
+  condition: string;
   applicableConditions: string[];
 
   // What to do
@@ -35,11 +37,17 @@ export interface Strategy {
   successCount: number;
   failureCount: number;
   totalAttempts: number;
+  usageCount: number;
+  successRate: number;
 
   // Metrics
   averageReward: number;
   confidence: number;             // 0-1 (based on data quality)
   lastUsed: number;
+
+  // Evolution
+  createdAt: number;
+  parentStrategies?: string[];    // For evolved strategies
 }
 
 export interface Expertise {
@@ -61,6 +69,8 @@ export type ExpertiseDomain =
 export interface Skill {
   name: string;
   proficiency: number;            // 0-100
+  level: number;                  // 0-10 skill level
+  practiceCount: number;          // Number of practice attempts
   practiceHours: number;
   successRate: number;            // 0-1
   lastPracticed: number;
@@ -68,6 +78,11 @@ export interface Skill {
   // Learning curve
   learningRate: number;           // How fast they improve
   plateauLevel?: number;          // Natural limit
+  maxLevel?: number;              // Maximum achievable level
+  baseLevel?: number;             // Minimum level (after decay)
+
+  // Milestones
+  lastMilestone: number;          // Last milestone achieved
 }
 
 export interface Milestone {
@@ -102,6 +117,9 @@ export class AdaptiveAI {
   private learningHistory: LearningEvent[] = [];
   private strategies: Map<string, Strategy> = new Map();
 
+  // Q-Learning (Reinforcement Learning)
+  private qTable: Map<string, Map<string, number>> = new Map();  // situation -> action -> Q-value
+
   // Expertise
   private expertise: Map<ExpertiseDomain, Expertise> = new Map();
 
@@ -110,9 +128,13 @@ export class AdaptiveAI {
   private failedOutcomes: number = 0;
   private totalDecisions: number = 0;
 
+  // Strategy evolution tracking
+  private strategySeedCounter: number = 0;
+
   // Configuration
   private readonly LEARNING_RATE = 0.1;          // How fast to adapt
   private readonly EXPLORATION_RATE = 0.2;       // Chance to try new strategies
+  private readonly DISCOUNT_FACTOR = 0.9;        // Q-learning discount
   private readonly MEMORY_WINDOW = 100;          // Keep last N learning events
 
   constructor(memory: ExtendedNPCMemory, goalSystem: NPCGoalSystem) {
@@ -331,22 +353,28 @@ export class AdaptiveAI {
     if (!strategy) {
       // Create new strategy
       strategy = {
+        id: `strategy_${this.strategySeedCounter++}`,
         name: `${situation} → ${action}`,
         description: `When "${situation}", do "${action}"`,
+        condition: situation,
         applicableConditions: [situation],
         actions: [action],
         successCount: 0,
         failureCount: 0,
         totalAttempts: 0,
+        usageCount: 0,
+        successRate: 0,
         averageReward: 0,
         confidence: 0.1,
-        lastUsed: Date.now() / 1000
+        lastUsed: Date.now() / 1000,
+        createdAt: Date.now() / 1000
       };
       this.strategies.set(key, strategy);
     }
 
     // Update statistics
     strategy.totalAttempts++;
+    strategy.usageCount++;
     strategy.lastUsed = Date.now() / 1000;
 
     if (outcome === 'SUCCESS') {
@@ -359,10 +387,18 @@ export class AdaptiveAI {
     const alpha = this.LEARNING_RATE;
     strategy.averageReward = strategy.averageReward * (1 - alpha) + reward * alpha;
 
+    // Update success rate
+    strategy.successRate = strategy.successCount / strategy.totalAttempts;
+
     // Update confidence based on data quality
-    const successRate = strategy.successCount / strategy.totalAttempts;
     const sampleSize = Math.min(strategy.totalAttempts / 10, 1.0);  // More attempts = more confidence
-    strategy.confidence = successRate * sampleSize;
+    strategy.confidence = strategy.successRate * sampleSize;
+
+    // Update Q-values
+    this.updateQValue(situation, action, reward, situation);  // Simplified next state
+
+    // Evolve strategies periodically
+    this.evolveStrategies(outcome, reward);
   }
 
   /**
@@ -412,27 +448,26 @@ export class AdaptiveAI {
       skill = {
         name: skillName,
         proficiency: 0,
+        level: 1,
+        practiceCount: 0,
         practiceHours: 0,
         successRate: 0,
         lastPracticed: Date.now() / 1000,
-        learningRate: 1.0
+        learningRate: 1.0,
+        maxLevel: 10,
+        baseLevel: 1,
+        lastMilestone: 0
       };
       expertise.skills.set(skillName, skill);
     }
 
-    // Increase proficiency
-    skill.practiceHours += 0.1;
-    skill.lastPracticed = Date.now() / 1000;
-
-    const improvement = skill.learningRate * (event.outcome === 'SUCCESS' ? 2 : 0.5);
-    skill.proficiency = Math.min(100, skill.proficiency + improvement);
+    // Improve skill using power law of practice
+    const practiceAmount = event.outcome === 'SUCCESS' ? 1 : 0.25;
+    this.improveSkill(skill, practiceAmount);
 
     // Update success rate (moving average)
     const alpha = 0.1;
     skill.successRate = skill.successRate * (1 - alpha) + (event.outcome === 'SUCCESS' ? 1 : 0) * alpha;
-
-    // Learning rate decreases as proficiency increases (harder to improve when expert)
-    skill.learningRate = 1.0 / (1 + skill.proficiency / 50);
   }
 
   /**
@@ -586,6 +621,278 @@ export class AdaptiveAI {
         skills: new Map(),
         milestones: []
       });
+    }
+  }
+
+  // ====================================================================
+  // MACHINE LEARNING ALGORITHMS
+  // ====================================================================
+
+  /**
+   * Q-Learning: Update Q-value for situation-action pair
+   */
+  private updateQValue(
+    situation: string,
+    action: string,
+    reward: number,
+    nextSituation: string
+  ): void {
+    // Q(s,a) = Q(s,a) + α[r + γ max Q(s',a') - Q(s,a)]
+    const currentQ = this.getQValue(situation, action);
+    const maxNextQ = this.getMaxQValue(nextSituation);
+
+    const newQ = currentQ + this.LEARNING_RATE * (
+      reward + this.DISCOUNT_FACTOR * maxNextQ - currentQ
+    );
+
+    this.setQValue(situation, action, newQ);
+  }
+
+  /**
+   * Get Q-value for situation-action pair
+   */
+  private getQValue(situation: string, action: string): number {
+    const actionMap = this.qTable.get(situation);
+    if (!actionMap) return 0;
+    return actionMap.get(action) || 0;
+  }
+
+  /**
+   * Set Q-value for situation-action pair
+   */
+  private setQValue(situation: string, action: string, value: number): void {
+    let actionMap = this.qTable.get(situation);
+    if (!actionMap) {
+      actionMap = new Map();
+      this.qTable.set(situation, actionMap);
+    }
+    actionMap.set(action, value);
+  }
+
+  /**
+   * Get maximum Q-value for next situation
+   */
+  private getMaxQValue(situation: string): number {
+    const actionMap = this.qTable.get(situation);
+    if (!actionMap || actionMap.size === 0) return 0;
+
+    let maxQ = -Infinity;
+    for (const q of actionMap.values()) {
+      if (q > maxQ) maxQ = q;
+    }
+    return maxQ;
+  }
+
+  /**
+   * Select action using ε-greedy strategy
+   */
+  private selectActionQLearning(situation: string, availableActions: string[]): string {
+    // Exploration: try random action
+    if (Math.random() < this.EXPLORATION_RATE) {
+      return availableActions[Math.floor(Math.random() * availableActions.length)];
+    }
+
+    // Exploitation: use best known action
+    return this.getBestActionQLearning(situation, availableActions);
+  }
+
+  /**
+   * Get best action based on Q-values
+   */
+  private getBestActionQLearning(situation: string, availableActions: string[]): string {
+    let bestAction = availableActions[0];
+    let bestQ = this.getQValue(situation, bestAction);
+
+    for (const action of availableActions.slice(1)) {
+      const q = this.getQValue(situation, action);
+      if (q > bestQ) {
+        bestQ = q;
+        bestAction = action;
+      }
+    }
+
+    return bestAction;
+  }
+
+  /**
+   * Strategy Evolution: Successful strategies strengthen, unsuccessful weaken
+   */
+  private evolveStrategies(outcome: 'SUCCESS' | 'FAILURE' | 'MIXED', reward: number): void {
+    const recentStrategies = this.getRecentlyUsedStrategies();
+
+    for (const strategy of recentStrategies) {
+      // Credit assignment (most recent strategies get more credit)
+      const recency = 1 - (Date.now() / 1000 - strategy.lastUsed) / 3600;
+      const credit = recency * reward;
+
+      if (outcome === 'SUCCESS') {
+        strategy.confidence += credit * 0.1;
+        strategy.confidence = Math.min(1, strategy.confidence);
+      } else if (outcome === 'FAILURE') {
+        strategy.confidence -= credit * 0.15;
+        strategy.confidence = Math.max(0.1, strategy.confidence);
+      }
+    }
+
+    // Prune very unsuccessful strategies
+    const strategiesToRemove: string[] = [];
+    for (const [key, strategy] of this.strategies) {
+      if (strategy.successRate < 0.2 && strategy.usageCount >= 5) {
+        strategiesToRemove.push(key);
+      }
+    }
+    for (const key of strategiesToRemove) {
+      this.strategies.delete(key);
+    }
+
+    // Combine successful strategies (genetic algorithm)
+    if (Math.random() < 0.1) {
+      this.combineStrategies();
+    }
+  }
+
+  /**
+   * Get recently used strategies
+   */
+  private getRecentlyUsedStrategies(): Strategy[] {
+    const recent: Strategy[] = [];
+    const now = Date.now() / 1000;
+
+    for (const strategy of this.strategies.values()) {
+      if (now - strategy.lastUsed < 3600) {  // Within last hour
+        recent.push(strategy);
+      }
+    }
+
+    return recent;
+  }
+
+  /**
+   * Combine successful strategies (genetic algorithm)
+   */
+  private combineStrategies(): void {
+    const successful = Array.from(this.strategies.values())
+      .filter(s => s.successRate > 0.7 && s.usageCount > 3)
+      .sort((a, b) => b.successRate - a.successRate)
+      .slice(0, 5);
+
+    if (successful.length >= 2) {
+      const parent1 = successful[0];
+      const parent2 = successful[1];
+
+      // Create hybrid strategy
+      const child: Strategy = {
+        id: `strategy_${this.strategySeedCounter++}`,
+        name: `Evolved: ${parent1.name} × ${parent2.name}`,
+        description: `Hybrid strategy from ${parent1.id} and ${parent2.id}`,
+        condition: this.mergeConditions(parent1.condition, parent2.condition),
+        applicableConditions: [...parent1.applicableConditions, ...parent2.applicableConditions],
+        actions: this.mergeActions(parent1.actions, parent2.actions),
+        successCount: 0,
+        failureCount: 0,
+        totalAttempts: 0,
+        usageCount: 0,
+        successRate: 0.5,
+        averageReward: (parent1.averageReward + parent2.averageReward) / 2,
+        confidence: (parent1.confidence + parent2.confidence) / 2,
+        lastUsed: 0,
+        createdAt: Date.now() / 1000,
+        parentStrategies: [parent1.id, parent2.id]
+      };
+
+      const key = `${child.condition}:${child.actions[0]}`;
+      this.strategies.set(key, child);
+    }
+  }
+
+  /**
+   * Merge conditions from two strategies
+   */
+  private mergeConditions(cond1: string, cond2: string): string {
+    // Simple merge - combine both conditions
+    return `${cond1} OR ${cond2}`;
+  }
+
+  /**
+   * Merge actions from two strategies
+   */
+  private mergeActions(actions1: string[], actions2: string[]): string[] {
+    // Take best actions from both
+    const merged = [...actions1];
+    for (const action of actions2) {
+      if (!merged.includes(action)) {
+        merged.push(action);
+      }
+    }
+    return merged.slice(0, 3);  // Limit to 3 actions
+  }
+
+  /**
+   * Generate unique strategy ID
+   */
+  private generateStrategyId(): string {
+    return `strategy_${this.strategySeedCounter++}_${Date.now()}`;
+  }
+
+  /**
+   * Improve skill using power law of practice
+   */
+  private improveSkill(skill: Skill, practiceAmount: number): void {
+    // Power law: T(n) = T(1) * n^(-α) where α ≈ 0.4
+    const alpha = 0.4;
+    const practiceEffect = Math.pow(skill.practiceCount + practiceAmount, -alpha) -
+                          Math.pow(skill.practiceCount, -alpha);
+
+    skill.practiceCount += practiceAmount;
+    skill.practiceHours += 0.1;
+    skill.lastPracticed = Date.now() / 1000;
+
+    // Skill improves with diminishing returns
+    const improvement = practiceEffect * skill.learningRate * 100;
+    skill.level += improvement;
+    skill.proficiency += improvement * 10;
+    skill.level = Math.min(skill.maxLevel || 10, skill.level);
+    skill.proficiency = Math.min(100, skill.proficiency);
+
+    // Milestones unlock new abilities
+    const newMilestone = Math.floor(skill.level);
+    if (newMilestone > skill.lastMilestone) {
+      this.unlockMilestone(skill, newMilestone);
+      skill.lastMilestone = newMilestone;
+    }
+  }
+
+  /**
+   * Unlock milestone for skill
+   */
+  private unlockMilestone(skill: Skill, milestone: number): void {
+    // Record milestone achievement (could trigger special abilities)
+    console.log(`[AdaptiveAI] Unlocked ${skill.name} milestone: Level ${milestone}`);
+  }
+
+  /**
+   * Skill decay: Use it or lose it
+   */
+  public decaySkills(deltaTime: number): void {
+    const daysSince = deltaTime / 86400;
+    const now = Date.now() / 1000;
+
+    for (const expertise of this.expertise.values()) {
+      for (const skill of expertise.skills.values()) {
+        const timeSincePractice = now - skill.lastPracticed;
+        const daysSincePractice = timeSincePractice / 86400;
+
+        if (daysSincePractice > 7) {
+          // Decay starts after 1 week of no practice
+          const decayRate = 0.01; // 1% per day
+          const decay = decayRate * (daysSincePractice - 7);
+
+          skill.level *= (1 - decay);
+          skill.proficiency *= (1 - decay);
+          skill.level = Math.max(skill.baseLevel || 1, skill.level);
+          skill.proficiency = Math.max(10, skill.proficiency);
+        }
+      }
     }
   }
 

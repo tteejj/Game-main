@@ -36,6 +36,10 @@ export interface Experience {
   // Decay
   memoryStrength: number;         // 1.0 = fresh, decays over time
   recallCount: number;            // How many times recalled (strengthens memory)
+
+  // Memory consolidation
+  consolidated: boolean;          // Short-term → long-term
+  consolidationStrength?: number; // Bonus strength from consolidation
 }
 
 export type ExperienceType =
@@ -114,6 +118,7 @@ export interface DetailedRelationship extends Relationship {
 export interface TraumaMemory {
   experience: Experience;
   severity: number;               // 0-10
+  timestamp: number;              // When trauma occurred
 
   // Triggers that recall this trauma
   triggers: TriggerPattern[];
@@ -130,12 +135,16 @@ export interface TraumaMemory {
   // When triggered
   triggeredCount: number;
   lastTriggered: number;
+
+  // Related experiences
+  relatedExperiences: Experience[];
 }
 
 export interface TriggerPattern {
   type: 'LOCATION' | 'ENTITY_TYPE' | 'SITUATION' | 'SENSORY';
   pattern: string;
   sensitivity: number;            // 0-1 (how easily triggered)
+  strength: number;               // 0-1 (how strong the trigger is)
 }
 
 export interface Achievement {
@@ -233,6 +242,10 @@ export class ExtendedNPCMemory {
   private experiencesByType: Map<ExperienceType, Experience[]> = new Map();
   private significantExperiences: Experience[] = [];  // Top 20 most impactful
 
+  // Memory consolidation
+  private shortTermBuffer: Experience[] = [];         // Recent, unconsolidated memories
+  private longTermMemories: Experience[] = [];        // Consolidated memories
+
   // Relationships
   private relationships: Map<string, DetailedRelationship> = new Map();
 
@@ -310,9 +323,16 @@ export class ExtendedNPCMemory {
    * Record a new experience
    */
   public recordExperience(experience: Experience): void {
+    // Initialize consolidation properties
+    experience.consolidated = false;
+    experience.consolidationStrength = 0;
+
     // Store experience
     this.experiences.set(experience.id, experience);
     this.totalExperiences++;
+
+    // Add to short-term buffer (not yet consolidated)
+    this.shortTermBuffer.push(experience);
 
     // Index by type
     if (!this.experiencesByType.has(experience.type)) {
@@ -577,16 +597,14 @@ export class ExtendedNPCMemory {
   }
 
   /**
-   * Update memory over time (decay, healing)
+   * Update memory over time (decay, healing, consolidation)
    */
   public update(deltaTime: number): void {
     const currentTime = Date.now() / 1000;
 
-    // Decay memories
+    // Decay memories using Ebbinghaus forgetting curve
     for (const experience of this.experiences.values()) {
-      // Memories decay over time (unless frequently recalled)
-      const decayRate = 0.01 / (1 + experience.recallCount);  // More recalls = slower decay
-      experience.memoryStrength = Math.max(0, experience.memoryStrength - decayRate * deltaTime / 86400);
+      experience.memoryStrength = this.calculateMemoryDecay(experience, currentTime);
     }
 
     // Heal trauma over time
@@ -605,6 +623,197 @@ export class ExtendedNPCMemory {
       mod.type === 'PERMANENT' ||
       (mod.type === 'TEMPORARY' && (!mod.expiresAt || mod.expiresAt > currentTime))
     );
+  }
+
+  /**
+   * Calculate memory decay using Ebbinghaus forgetting curve
+   */
+  private calculateMemoryDecay(memory: Experience, currentTime: number): number {
+    const elapsed = currentTime - memory.timestamp;
+    const daysSince = elapsed / 86400;
+
+    // Base decay rate (can be modified by emotional intensity)
+    const k = 1.84; // Ebbinghaus constant
+
+    // Emotional intensity slows decay
+    const emotionalModifier = 1 - (Math.abs(memory.emotionalImpact) / 10) * 0.5;
+
+    // Recall strengthens memory (spaced repetition effect)
+    const recallBonus = Math.log(memory.recallCount + 1) * 0.1;
+
+    // Consolidation strengthens memory
+    const consolidationBonus = memory.consolidated ? (memory.consolidationStrength || 0.5) : 0;
+
+    // R = e^(-t/S) where S is "memory strength"
+    const memoryLife = k * emotionalModifier * (1 + recallBonus + consolidationBonus);
+    const retention = Math.exp(-daysSince / memoryLife);
+
+    return Math.max(0.1, retention); // Never completely forget traumatic events
+  }
+
+  /**
+   * Consolidate memories during "rest" periods (short-term → long-term)
+   */
+  public consolidateMemories(restDuration: number): number {
+    if (this.shortTermBuffer.length === 0) return 0;
+
+    // Sort by importance
+    const sorted = [...this.shortTermBuffer].sort((a, b) => {
+      const importanceA = a.intensity * Math.abs(a.emotionalImpact);
+      const importanceB = b.intensity * Math.abs(b.emotionalImpact);
+      return importanceB - importanceA;
+    });
+
+    // Top 20% become long-term memories with strengthened encoding
+    const consolidationThreshold = Math.max(1, Math.ceil(sorted.length * 0.2));
+    let consolidated = 0;
+
+    for (let i = 0; i < consolidationThreshold; i++) {
+      sorted[i].memoryStrength *= 1.5; // Strengthened through consolidation
+      sorted[i].consolidated = true;
+      sorted[i].consolidationStrength = 0.5;
+      this.longTermMemories.push(sorted[i]);
+      consolidated++;
+    }
+
+    // Clear short-term buffer
+    this.shortTermBuffer.length = 0;
+
+    return consolidated;
+  }
+
+  /**
+   * Retrieve memories based on environmental cues (sophisticated retrieval)
+   */
+  public retrieveMemoriesByCues(cues: {
+    location?: Vector3;
+    entities?: string[];
+    emotionalState?: number;
+    context?: string;
+  }): Experience[] {
+    const retrieved: Experience[] = [];
+    const allMemories = [...this.experiences.values()];
+
+    for (const memory of allMemories) {
+      let relevance = 0;
+
+      // Location cue (within range)
+      if (cues.location && memory.location) {
+        const dx = cues.location.x - memory.location.x;
+        const dy = cues.location.y - memory.location.y;
+        const dz = cues.location.z - memory.location.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (distance < 1000) {
+          relevance += (1000 - distance) / 1000 * 0.3;
+        }
+      }
+
+      // Entity cue (familiar faces)
+      if (cues.entities) {
+        const overlap = cues.entities.filter(e =>
+          memory.event.participants.includes(e)
+        ).length;
+        relevance += overlap * 0.2;
+      }
+
+      // Emotional state cue (mood-congruent recall)
+      if (cues.emotionalState !== undefined) {
+        const emotionalSimilarity = 1 - Math.abs(
+          cues.emotionalState - memory.emotionalImpact
+        ) / 10;
+        relevance += emotionalSimilarity * 0.3;
+      }
+
+      // Context cue
+      if (cues.context) {
+        if (memory.event.description.toLowerCase().includes(cues.context.toLowerCase())) {
+          relevance += 0.2;
+        }
+      }
+
+      // Retrieval probability based on strength and relevance
+      const retrievalProb = memory.memoryStrength * relevance;
+
+      if (Math.random() < retrievalProb) {
+        // Successful retrieval strengthens memory
+        memory.recallCount++;
+        memory.memoryStrength = Math.min(1.0, memory.memoryStrength * 1.05);
+        retrieved.push(memory);
+      }
+    }
+
+    return retrieved.sort((a, b) => b.memoryStrength - a.memoryStrength);
+  }
+
+  /**
+   * Process trauma with PTSD-like mechanics (triggers, flashbacks, healing)
+   */
+  public processTrauma(trauma: TraumaMemory, currentContext: {
+    location?: Vector3;
+    entityTypes?: string[];
+    situationType?: string;
+  }): {
+    triggered: boolean;
+    severity: number;
+    flashback?: Experience;
+  } {
+    // Check for triggers
+    let triggerStrength = 0;
+
+    for (const trigger of trauma.triggers) {
+      if (this.contextMatchesTrigger(currentContext, trigger)) {
+        triggerStrength += trigger.strength;
+      }
+    }
+
+    // Trauma severity decreases over time (healing)
+    const currentTime = Date.now() / 1000;
+    const elapsed = currentTime - trauma.timestamp;
+    const daysSince = elapsed / 86400;
+    const healingFactor = Math.min(0.5, daysSince / 365); // Max 50% healing over 1 year
+    const currentSeverity = trauma.severity * (1 - healingFactor);
+
+    // Triggered if trigger strength exceeds threshold
+    const triggered = triggerStrength > (1 - currentSeverity);
+
+    if (triggered) {
+      // Intrusive memory (flashback)
+      return {
+        triggered: true,
+        severity: currentSeverity * triggerStrength,
+        flashback: trauma.relatedExperiences[0] // Most vivid memory
+      };
+    }
+
+    return { triggered: false, severity: currentSeverity };
+  }
+
+  /**
+   * Check if context matches a trigger
+   */
+  private contextMatchesTrigger(context: any, trigger: TriggerPattern): boolean {
+    switch (trigger.type) {
+      case 'LOCATION':
+        if (context.location) {
+          // Simple proximity check
+          return true; // Simplified - would need actual location comparison
+        }
+        break;
+
+      case 'ENTITY_TYPE':
+        if (context.entityTypes) {
+          return context.entityTypes.some((t: string) => trigger.pattern.includes(t));
+        }
+        break;
+
+      case 'SITUATION':
+        if (context.situationType) {
+          return trigger.pattern === context.situationType;
+        }
+        break;
+    }
+
+    return false;
   }
 
   /**
@@ -673,6 +882,7 @@ export class ExtendedNPCMemory {
     const trauma: TraumaMemory = {
       experience,
       severity: Math.abs(experience.emotionalImpact),
+      timestamp: experience.timestamp,
       triggers: this.generateTriggers(experience),
       phobias: [],
       hypervigilance: [],
@@ -680,7 +890,8 @@ export class ExtendedNPCMemory {
       healingProgress: 0,
       copingMechanisms: [],
       triggeredCount: 0,
-      lastTriggered: 0
+      lastTriggered: 0,
+      relatedExperiences: [experience]
     };
 
     // Generate phobias based on experience type
@@ -714,7 +925,8 @@ export class ExtendedNPCMemory {
     triggers.push({
       type: 'LOCATION',
       pattern: `near_${this.locationKey(experience.location)}`,
-      sensitivity: 0.8
+      sensitivity: 0.8,
+      strength: 0.7
     });
 
     // Entity type trigger
@@ -722,7 +934,8 @@ export class ExtendedNPCMemory {
       triggers.push({
         type: 'ENTITY_TYPE',
         pattern: experience.event.type,
-        sensitivity: 0.7
+        sensitivity: 0.7,
+        strength: 0.6
       });
     }
 
@@ -730,7 +943,8 @@ export class ExtendedNPCMemory {
     triggers.push({
       type: 'SITUATION',
       pattern: experience.type,
-      sensitivity: 0.6
+      sensitivity: 0.6,
+      strength: 0.5
     });
 
     return triggers;
