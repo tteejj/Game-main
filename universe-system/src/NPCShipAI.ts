@@ -6,6 +6,7 @@
 import { Vector3, CelestialBody } from './CelestialBody';
 import { SpaceStation } from './StationGenerator';
 import { Commodity } from './EconomySystem';
+import { FactionSystem } from './FactionSystem';
 
 export type ShipType = 'TRADER' | 'MINER' | 'PIRATE' | 'PATROL' | 'COURIER' | 'EXPLORER' | 'PASSENGER';
 export type ShipState = 'IDLE' | 'TRAVELING' | 'DOCKING' | 'DOCKED' | 'TRADING' | 'MINING' | 'ATTACKING' | 'FLEEING' | 'PATROLLING';
@@ -62,6 +63,7 @@ export interface ShipMemory {
   profitableRoutes: TradeRoute[];
   lastTradeTime: number;
   totalProfit: number;
+  lastCombatReport: number;          // Timestamp of last combat reported to factions
 }
 
 export interface TradeRoute {
@@ -118,7 +120,8 @@ export class NPCShipAI {
         knownThreats: new Map(),
         profitableRoutes: [],
         lastTradeTime: 0,
-        totalProfit: 0
+        totalProfit: 0,
+        lastCombatReport: 0
       }
     };
 
@@ -133,10 +136,11 @@ export class NPCShipAI {
     deltaTime: number,
     stations: Map<string, SpaceStation>,
     celestialBodies: CelestialBody[],
-    playerShip?: { position: Vector3; faction: string; id: string }
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
   ): void {
     for (const ship of this.ships.values()) {
-      this.updateShip(ship, deltaTime, stations, celestialBodies, playerShip);
+      this.updateShip(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
     }
   }
 
@@ -148,7 +152,8 @@ export class NPCShipAI {
     deltaTime: number,
     stations: Map<string, SpaceStation>,
     celestialBodies: CelestialBody[],
-    playerShip?: { position: Vector3; faction: string; id: string }
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
   ): void {
     // Fuel consumption
     const speed = this.magnitude(ship.velocity);
@@ -179,11 +184,11 @@ export class NPCShipAI {
         break;
 
       case 'TRADING':
-        this.handleTradingState(ship, deltaTime);
+        this.handleTradingState(ship, deltaTime, stations, factionSystem);
         break;
 
       case 'ATTACKING':
-        this.handleAttackingState(ship, deltaTime, playerShip);
+        this.handleAttackingState(ship, deltaTime, playerShip, factionSystem);
         break;
 
       case 'FLEEING':
@@ -378,7 +383,12 @@ export class NPCShipAI {
   /**
    * Handle TRADING state
    */
-  private handleTradingState(ship: NPCShip, deltaTime: number): void {
+  private handleTradingState(
+    ship: NPCShip,
+    deltaTime: number,
+    stations: Map<string, SpaceStation>,
+    factionSystem?: FactionSystem
+  ): void {
     if (!ship.route) {
       ship.state = 'DOCKED';
       return;
@@ -409,9 +419,24 @@ export class NPCShipAI {
     else if (ship.currentTarget === ship.route.toStation && ship.cargo.length > 0) {
       const totalValue = ship.cargo.reduce((sum, c) => sum + c.value * 1.2, 0); // 20% profit
       ship.credits += totalValue;
-      ship.memory.totalProfit += totalValue - ship.cargo.reduce((sum, c) => sum + c.value, 0);
-      ship.cargo = [];
+      const profit = totalValue - ship.cargo.reduce((sum, c) => sum + c.value, 0);
+      ship.memory.totalProfit += profit;
+      ship.memory.lastTradeTime = Date.now() / 1000;
 
+      // Report trade to faction system to improve relations
+      if (factionSystem && ship.route) {
+        const fromStation = stations.get(ship.route.fromStation);
+        const toStation = stations.get(ship.route.toStation);
+
+        if (fromStation && toStation && fromStation.faction && toStation.faction) {
+          // Trade between different factions improves relations
+          if (fromStation.faction !== toStation.faction) {
+            factionSystem.reportTrade(fromStation.faction, toStation.faction, totalValue);
+          }
+        }
+      }
+
+      ship.cargo = [];
       ship.state = 'DOCKED';
       ship.route = undefined;
     }
@@ -423,7 +448,8 @@ export class NPCShipAI {
   private handleAttackingState(
     ship: NPCShip,
     deltaTime: number,
-    playerShip?: { position: Vector3; faction: string; id: string }
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
   ): void {
     if (!ship.threat || !playerShip || ship.threat !== playerShip.id) {
       ship.state = 'IDLE';
@@ -438,7 +464,17 @@ export class NPCShipAI {
     // In weapon range?
     if (distance < 5000) {
       // Attack! (this would trigger weapon systems in a full implementation)
-      // For now, just track it
+
+      // Report combat to faction system (max once per 10 seconds to avoid spam)
+      const now = Date.now() / 1000;
+      if (factionSystem && ship.faction && playerShip.faction && ship.faction !== playerShip.faction) {
+        if (now - ship.memory.lastCombatReport > 10) {
+          // Calculate combat severity based on damage potential
+          const severity = (ship.stats.weaponPower / 100) + (distance < 2000 ? 0.5 : 0);
+          factionSystem.reportCombat(ship.faction, playerShip.faction, severity);
+          ship.memory.lastCombatReport = now;
+        }
+      }
     }
 
     // Lost target or too damaged?
