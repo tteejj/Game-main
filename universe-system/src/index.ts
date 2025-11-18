@@ -62,7 +62,6 @@ export {
 
 // Universe designer and manager
 export {
-  UniverseConfig,
   JumpRoute,
   GameState,
   Mission,
@@ -240,14 +239,13 @@ export {
 // Dynamic Event System
 export {
   GameEvent,
-  EventType,
   EventCategory,
   EventSeverity,
   EventChoice,
   EventConsequence,
   EventOutcome,
   EventRewards,
-  DerelictShip,
+  Derelict Ship,
   Anomaly,
   AnomalyType,
   AnomalyEffect,
@@ -261,6 +259,48 @@ export {
   UniverseState,
   UniverseStateManager
 } from './UniverseStateManager';
+
+// NPC Ship Types
+export {
+  ShipClass,
+  ShipSpecification,
+  SHIP_SPECS,
+  getShipSpec,
+  getCivilianShips,
+  getCombatShips,
+  getSpecializedShips,
+  getShipsByPriceRange,
+  getShipsByFaction
+} from './NPCShipTypes';
+
+// Planetary Cities
+export {
+  SettlementType,
+  CityTechLevel,
+  CityEnvironment,
+  CityServices,
+  CityEconomy,
+  CityInfrastructure,
+  CityDefense,
+  CityPolitics,
+  PointOfInterest,
+  PlanetaryCity,
+  CityDistrict,
+  CityGenerator,
+  FAMOUS_CITIES
+} from './PlanetaryCities';
+
+// Station Variants
+export {
+  StationVariant,
+  STATION_VARIANTS,
+  getStationVariant,
+  getVariantsByType,
+  getRandomVariant,
+  getLegendaryStations,
+  getFrontierStations,
+  getPeacefulStations
+} from './StationVariants';
 
 // Examples
 export {
