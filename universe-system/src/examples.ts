@@ -63,6 +63,7 @@ export function createSolSystem(): StarSystem {
     numPlanets: { min: 8, max: 8 }, // Exactly 8 planets
     allowAsteroidBelt: true,
     allowStations: true,
+    allowSatellites: true,
     allowHazards: true,
     civilizationLevel: 8
   });
@@ -78,8 +79,9 @@ export function createFrontierSystem(): StarSystem {
     numPlanets: { min: 3, max: 6 },
     allowAsteroidBelt: true,
     allowStations: true,
+    allowSatellites: true,
     allowHazards: true,
-    civilizationLevel: 2 // Low tech
+    civilizationLevel: 2 // Low tech (won't have satellites due to civ level < 3)
   });
 }
 
@@ -93,6 +95,7 @@ export function createCoreWorldSystem(): StarSystem {
     numPlanets: { min: 5, max: 10 },
     allowAsteroidBelt: true,
     allowStations: true,
+    allowSatellites: true,
     allowHazards: false, // Core systems are safer
     civilizationLevel: 10 // Maximum tech
   });
@@ -113,6 +116,7 @@ export function demoUniversePlaythrough(): void {
   console.log(`- Total Planets: ${stats.totalPlanets}`);
   console.log(`- Total Moons: ${stats.totalMoons}`);
   console.log(`- Total Stations: ${stats.totalStations}`);
+  console.log(`- Total Satellites: ${stats.totalSatellites}`);
   console.log(`- Total Asteroids: ${stats.totalAsteroids}`);
   console.log(`- Habitable Planets: ${stats.habitablePlanets}`);
   console.log(`- Available Missions: ${stats.availableMissions}\n`);
@@ -126,6 +130,7 @@ export function demoUniversePlaythrough(): void {
   console.log(`- Planets: ${currentSystem.planets.length}`);
   console.log(`- Moons: ${currentSystem.moons.length}`);
   console.log(`- Stations: ${currentSystem.stations.length}`);
+  console.log(`- Satellites: ${currentSystem.satellites.length}`);
   console.log(`- Asteroids: ${currentSystem.asteroids.length}\n`);
 
   // List planets
@@ -165,6 +170,25 @@ export function demoUniversePlaythrough(): void {
         missions.forEach(m => {
           console.log(`       - [${m.type}] ${m.title} (${m.reward} credits, difficulty ${m.difficulty})`);
         });
+      }
+      console.log('');
+    });
+  }
+
+  // List satellites
+  if (currentSystem.satellites.length > 0) {
+    console.log('Satellites:');
+    currentSystem.satellites.forEach((satellite, i) => {
+      const state = satellite.getState();
+      console.log(`  ${i + 1}. ${satellite.name}`);
+      console.log(`     Type: ${satellite.type}`);
+      console.log(`     Status: ${satellite.status}`);
+      console.log(`     Orbit: ${(state.orbital.altitude / 1000).toFixed(0)} km`);
+      console.log(`     Battery: ${state.power.batteryChargePercent.toFixed(0)}%`);
+      console.log(`     Temperature: ${state.thermal.averageTemperature.toFixed(0)}K`);
+      console.log(`     Attitude: ${state.attitude.mode}`);
+      if (state.communications.downlink) {
+        console.log(`     Downlink: ${state.communications.downlink.connected ? 'Active' : 'Inactive'}`);
       }
       console.log('');
     });

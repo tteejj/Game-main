@@ -503,6 +503,7 @@ export class UniverseDesigner {
     totalPlanets: number;
     totalMoons: number;
     totalStations: number;
+    totalSatellites: number;
     totalAsteroids: number;
     habitablePlanets: number;
     discoveredSystems: number;
@@ -511,6 +512,7 @@ export class UniverseDesigner {
     let totalPlanets = 0;
     let totalMoons = 0;
     let totalStations = 0;
+    let totalSatellites = 0;
     let totalAsteroids = 0;
     let habitablePlanets = 0;
 
@@ -518,6 +520,7 @@ export class UniverseDesigner {
       totalPlanets += system.planets.length;
       totalMoons += system.moons.length;
       totalStations += system.stations.length;
+      totalSatellites += system.satellites.length;
       totalAsteroids += system.asteroids.length;
       habitablePlanets += system.getHabitablePlanets().length;
     }
@@ -531,6 +534,7 @@ export class UniverseDesigner {
       totalPlanets,
       totalMoons,
       totalStations,
+      totalSatellites,
       totalAsteroids,
       habitablePlanets,
       discoveredSystems: this.gameState.discoveredSystems.size,

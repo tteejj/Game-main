@@ -83,6 +83,13 @@ export class LifeSupportSystem {
 
   halonMassKg: number = 5.0;  // Limited resource
 
+  // Power tracking
+  public isPowered: boolean = true;
+  public currentPowerDraw: number = 0;  // W
+  private basePowerDraw: number = 50;   // W (standby power)
+  private o2GeneratorPower: number = 400;  // W when active
+  private scrubberPower: number = 300;     // W when active
+
   // Telemetry
   totalO2Generated: number = 0;  // kg
   totalCO2Scrubbed: number = 0;  // kg
@@ -219,6 +226,15 @@ export class LifeSupportSystem {
    * Main update loop
    */
   update(dt: number): void {
+    // Update power consumption
+    this.updatePowerDraw();
+
+    // If no power, shut down active systems
+    if (!this.isPowered) {
+      this.o2GeneratorActive = false;
+      this.co2ScrubberActive = false;
+    }
+
     // O2 generation
     if (this.o2GeneratorActive && this.o2ReservesKg > 0) {
       this.generateO2(dt);
@@ -551,6 +567,64 @@ export class LifeSupportSystem {
    */
   setO2GeneratorRate(ratePerMin: number): void {
     this.o2GeneratorRateLPerMin = Math.max(0, Math.min(3.0, ratePerMin)); // 0-3 L/min
+  }
+
+  /**
+   * Update power consumption based on active systems
+   */
+  private updatePowerDraw(): void {
+    this.currentPowerDraw = this.basePowerDraw;
+
+    if (this.o2GeneratorActive) {
+      this.currentPowerDraw += this.o2GeneratorPower;
+    }
+
+    if (this.co2ScrubberActive) {
+      this.currentPowerDraw += this.scrubberPower;
+    }
+  }
+
+  /**
+   * Set power state (called by systems integrator)
+   */
+  public setPower(powered: boolean): void {
+    this.isPowered = powered;
+
+    if (!powered) {
+      // Emergency shutdown - turn off power-consuming systems
+      this.o2GeneratorActive = false;
+      this.co2ScrubberActive = false;
+      this.currentPowerDraw = 0;
+    }
+  }
+
+  /**
+   * Apply damage to life support system
+   */
+  public applyDamage(severity: number, compartmentId?: string): void {
+    if (compartmentId) {
+      const comp = this.compartments.find(c => c.id === compartmentId);
+      if (comp) {
+        // Damage can cause fires or breaches
+        if (severity > 0.7) {
+          comp.breached = true;
+          comp.breachSize = severity * 0.5; // Up to 0.5 m² breach
+        } else if (severity > 0.4) {
+          comp.onFire = true;
+          comp.fireIntensity = severity * 50;
+        }
+      }
+    } else {
+      // Global damage
+      if (severity > 0.5) {
+        // Damage O2 reserves
+        this.o2ReservesKg *= (1 - severity * 0.3);
+      }
+      if (severity > 0.3) {
+        // Damage scrubber media
+        this.scrubberMediaPercent *= (1 - severity * 0.5);
+      }
+    }
   }
 
   /**

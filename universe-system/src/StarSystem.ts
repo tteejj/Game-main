@@ -17,6 +17,22 @@ import {
 import { PlanetGenerator, PlanetGenerationConfig } from './PlanetGenerator';
 import { StationGenerator, SpaceStation } from './StationGenerator';
 import { HazardSystem, Hazard } from './HazardSystem';
+import { Satellite, SatelliteFactory, SatelliteType } from '../../physics-modules/src/satellite';
+import { TrafficManager, NPCShip, ShipType } from './npc-traffic';
+import {
+  RelayNetwork,
+  CommunicationsManager,
+  NetworkNode,
+  FrequencyBand,
+  getFrequencyForBand,
+  AntennaPresets
+} from './communications';
+import {
+  Market,
+  CommodityType,
+  CommodityCategory,
+  getCommoditiesByCategory
+} from './economy';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -24,7 +40,10 @@ export interface StarSystemConfig {
   numPlanets?: { min: number; max: number };
   allowAsteroidBelt?: boolean;
   allowStations?: boolean;
+  allowSatellites?: boolean;
   allowHazards?: boolean;
+  allowNPCTraffic?: boolean;
+  allowCommunications?: boolean;
   civilizationLevel?: number; // 0-10 (0 = uninhabited, 10 = high tech)
   position?: Vector3; // Position in galaxy
 }
@@ -37,6 +56,8 @@ export interface StarSystemData {
   moons: Moon[];
   asteroids: Asteroid[];
   stations: SpaceStation[];
+  satellites: Satellite[];
+  npcShips: NPCShip[];
   hazards: Hazard[];
   position: Vector3;
 }
@@ -52,6 +73,11 @@ export class StarSystem {
   public moons: Moon[] = [];
   public asteroids: Asteroid[] = [];
   public stations: SpaceStation[] = [];
+  public satellites: Satellite[] = [];
+  public trafficManager: TrafficManager<NPCShip>;
+  public relayNetwork: RelayNetwork;
+  public communicationsManager: CommunicationsManager;
+  public markets: Map<string, Market> = new Map(); // station id -> market
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
@@ -91,6 +117,9 @@ export class StarSystem {
     this.planetGenerator = new PlanetGenerator(seed);
     this.stationGenerator = new StationGenerator(seed + 1);
     this.hazardSystem = new HazardSystem(seed + 2);
+    this.trafficManager = new TrafficManager<NPCShip>(100000, 100);
+    this.relayNetwork = new RelayNetwork(1e10); // 10 million km max range
+    this.communicationsManager = new CommunicationsManager(this.relayNetwork);
 
     // Generate the star
     this.star = this.generateStar(config.starClass);
@@ -111,6 +140,16 @@ export class StarSystem {
       this.generateStations(config.civilizationLevel || 5);
     }
 
+    // Generate satellites
+    if (config.allowSatellites !== false) {
+      this.generateSatellites(config.civilizationLevel || 5);
+    }
+
+    // Generate NPC traffic
+    if (config.allowNPCTraffic !== false) {
+      this.generateNPCTraffic(config.civilizationLevel || 5);
+    }
+
     // Generate hazards
     if (config.allowHazards !== false) {
       this.hazardSystem.generateSystemHazards(
@@ -118,6 +157,14 @@ export class StarSystem {
         [...this.planets, ...this.asteroids]
       );
     }
+
+    // Build communications network
+    if (config.allowCommunications !== false) {
+      this.buildCommunicationsNetwork(config.civilizationLevel || 5);
+    }
+
+    // Initialize station markets
+    this.initializeMarkets(config.civilizationLevel || 5);
   }
 
   /**
@@ -389,6 +436,472 @@ export class StarSystem {
   }
 
   /**
+   * Generate satellites
+   */
+  private generateSatellites(civilizationLevel: number): void {
+    // More advanced civilizations have more satellites
+    if (civilizationLevel < 3) return; // Low-tech systems don't have satellites
+
+    // Number of satellites scales with civilization level
+    // Level 3-5: 1-2 satellites (basic comms)
+    // Level 6-7: 3-5 satellites (comms + recon)
+    // Level 8-10: 6-10 satellites (full constellation)
+
+    let numSatellites = 0;
+    if (civilizationLevel >= 8) {
+      numSatellites = Math.floor(this.rng.range(6, 10));
+    } else if (civilizationLevel >= 6) {
+      numSatellites = Math.floor(this.rng.range(3, 5));
+    } else {
+      numSatellites = Math.floor(this.rng.range(1, 2));
+    }
+
+    // Find inhabited planets/moons to place satellites around
+    const inhabitedBodies = this.planets.filter(p =>
+      p.isHabitable || p.resources.size > 0 || p.children.length > 0
+    );
+
+    if (inhabitedBodies.length === 0 && this.planets.length > 0) {
+      // Fall back to any planet
+      inhabitedBodies.push(this.planets[0]);
+    }
+
+    if (inhabitedBodies.length === 0) return;
+
+    // Generate satellites around inhabited bodies
+    for (let i = 0; i < numSatellites; i++) {
+      const body = this.rng.choice(inhabitedBodies);
+      const bodyRadius = body.physical.radius;
+
+      // Choose satellite type based on civilization level
+      let satType: SatelliteType;
+      const roll = this.rng.next();
+
+      if (civilizationLevel >= 8) {
+        // High-tech: mix of all types
+        if (roll < 0.3) satType = SatelliteType.COMMUNICATIONS;
+        else if (roll < 0.5) satType = SatelliteType.RECONNAISSANCE;
+        else if (roll < 0.7) satType = SatelliteType.NAVIGATION;
+        else satType = SatelliteType.WEATHER;
+      } else if (civilizationLevel >= 6) {
+        // Mid-tech: comms and recon
+        if (roll < 0.6) satType = SatelliteType.COMMUNICATIONS;
+        else satType = SatelliteType.RECONNAISSANCE;
+      } else {
+        // Basic tech: mostly comms
+        satType = SatelliteType.COMMUNICATIONS;
+      }
+
+      // Determine orbit altitude (100km - 2000km)
+      const orbitAltitude = this.rng.range(100000, 2000000);
+
+      // Create satellite
+      const satName = `${body.name}-Sat-${i + 1}`;
+      let satellite: Satellite;
+
+      switch (satType) {
+        case SatelliteType.COMMUNICATIONS:
+          satellite = SatelliteFactory.createCommunicationsSatellite(satName, orbitAltitude);
+          break;
+        case SatelliteType.RECONNAISSANCE:
+          satellite = SatelliteFactory.createReconnaissanceSatellite(satName, orbitAltitude);
+          break;
+        case SatelliteType.NAVIGATION:
+          satellite = SatelliteFactory.createNavigationSatellite(satName, orbitAltitude);
+          break;
+        case SatelliteType.WEATHER:
+          satellite = SatelliteFactory.createWeatherSatellite(satName, orbitAltitude);
+          break;
+        default:
+          satellite = SatelliteFactory.createCommunicationsSatellite(satName, orbitAltitude);
+      }
+
+      // Deploy systems
+      satellite.deploySolarPanels();
+      if (satType === SatelliteType.COMMUNICATIONS) {
+        satellite.deployAntennas();
+      }
+
+      // Set attitude mode
+      if (satType === SatelliteType.RECONNAISSANCE || satType === SatelliteType.WEATHER) {
+        satellite.setAttitudeMode('earth_pointing');
+      } else {
+        satellite.setAttitudeMode('sun_pointing');
+      }
+
+      // Randomize orbital position
+      satellite.orbitalBody.M0 = this.rng.range(0, 2 * Math.PI);
+
+      this.satellites.push(satellite);
+    }
+  }
+
+  /**
+   * Generate NPC traffic
+   */
+  private generateNPCTraffic(civilizationLevel: number): void {
+    // No traffic in low-civilization systems
+    if (civilizationLevel < 3) return;
+    if (this.stations.length === 0) return; // Need stations for traffic
+
+    // Number of ships scales with civilization level and number of stations
+    // Level 3-5: 1-2 ships per station
+    // Level 6-7: 2-4 ships per station
+    // Level 8-10: 3-6 ships per station
+
+    let shipsPerStation = 0;
+    if (civilizationLevel >= 8) {
+      shipsPerStation = Math.floor(this.rng.range(3, 6));
+    } else if (civilizationLevel >= 6) {
+      shipsPerStation = Math.floor(this.rng.range(2, 4));
+    } else {
+      shipsPerStation = Math.floor(this.rng.range(1, 2));
+    }
+
+    const numShips = Math.min(shipsPerStation * this.stations.length, 100); // Cap at 100 ships
+
+    for (let i = 0; i < numShips; i++) {
+      // Choose ship type based on station types and civilization level
+      let shipType: ShipType;
+      const roll = this.rng.next();
+
+      if (roll < 0.3) {
+        shipType = ShipType.CARGO_FREIGHTER;
+      } else if (roll < 0.5) {
+        shipType = ShipType.CARGO_SHUTTLE;
+      } else if (roll < 0.65) {
+        shipType = ShipType.MINING_VESSEL;
+      } else if (roll < 0.8) {
+        shipType = ShipType.PATROL_SHIP;
+      } else if (roll < 0.9) {
+        shipType = ShipType.PASSENGER_LINER;
+      } else if (roll < 0.95) {
+        shipType = ShipType.RESEARCH;
+      } else {
+        shipType = ShipType.SALVAGE;
+      }
+
+      // Create ship near a random station
+      const station = this.rng.choice(this.stations);
+      const stationPos = station.position;
+
+      // Random offset from station (1000-10000 km)
+      const offsetDistance = this.rng.range(1000000, 10000000);
+      const offsetAngle = this.rng.range(0, 2 * Math.PI);
+      const offsetPhi = this.rng.range(0, Math.PI);
+
+      const position = {
+        x: stationPos.x + offsetDistance * Math.sin(offsetPhi) * Math.cos(offsetAngle),
+        y: stationPos.y + offsetDistance * Math.sin(offsetPhi) * Math.sin(offsetAngle),
+        z: stationPos.z + offsetDistance * Math.cos(offsetPhi)
+      };
+
+      // Random velocity (0-100 m/s)
+      const speed = this.rng.range(0, 100);
+      const velAngle = this.rng.range(0, 2 * Math.PI);
+      const velPhi = this.rng.range(0, Math.PI);
+
+      const velocity = {
+        x: speed * Math.sin(velPhi) * Math.cos(velAngle),
+        y: speed * Math.sin(velPhi) * Math.sin(velAngle),
+        z: speed * Math.cos(velPhi)
+      };
+
+      // Create ship
+      const shipId = `${this.id}-ship-${i}`;
+      const shipName = this.generateShipName(shipType, i);
+      const ship = new NPCShip(shipId, shipName, shipType, position, velocity);
+
+      // Set a destination (another station)
+      if (this.stations.length > 1) {
+        // Pick different station as destination
+        const destinations = this.stations.filter(s => s !== station);
+        if (destinations.length > 0) {
+          const destination = this.rng.choice(destinations);
+          ship.setDestination(destination.position, destination.name);
+          ship.originName = station.name;
+        }
+      }
+
+      // Add to traffic manager
+      this.trafficManager.addVessel(ship);
+    }
+  }
+
+  /**
+   * Generate ship name
+   */
+  private generateShipName(type: ShipType, index: number): string {
+    const prefixes: Record<ShipType, string[]> = {
+      [ShipType.CARGO_FREIGHTER]: ['Titan\'s Bounty', 'Iron Hauler', 'Merchant Prince', 'Trade Wind'],
+      [ShipType.CARGO_SHUTTLE]: ['Quick Silver', 'Swift Cargo', 'Rapid Transit', 'Express'],
+      [ShipType.MINING_VESSEL]: ['Prospector', 'Ore Finder', 'Rock Hound', 'Claim Jumper'],
+      [ShipType.PATROL_SHIP]: ['Defender', 'Guardian', 'Sentinel', 'Watchdog'],
+      [ShipType.PASSENGER_LINER]: ['Stellar Princess', 'Star Voyager', 'Cosmic Cruise', 'Nebula Queen'],
+      [ShipType.PIRATE]: ['Black Flag', 'Raider', 'Marauder', 'Rogue'],
+      [ShipType.RESEARCH]: ['Discovery', 'Explorer', 'Surveyor', 'Science Vessel'],
+      [ShipType.SALVAGE]: ['Scrap Hunter', 'Wreck Finder', 'Salvage King', 'Reclaimer']
+    };
+
+    const names = prefixes[type] || ['Unknown'];
+    const baseName = this.rng.choice(names);
+
+    return `${baseName} ${index + 1}`;
+  }
+
+  /**
+   * Build communications network
+   */
+  private buildCommunicationsNetwork(civilizationLevel: number): void {
+    // Add stations as network nodes
+    for (const station of this.stations) {
+      // Station communication power scales with civilization level
+      const powerWatts = 100 + civilizationLevel * 20; // 100-300W
+      const frequency = getFrequencyForBand(FrequencyBand.SHF); // 10 GHz for stations
+
+      const node: NetworkNode = {
+        id: station.id,
+        position: station.position,
+        transmitPower: powerWatts,
+        antenna: {
+          gain: AntennaPresets.HIGH_GAIN.gain,
+          frequency
+        },
+        maxConnections: 10,
+        isRelay: true
+      };
+
+      this.relayNetwork.addNode(node);
+    }
+
+    // Add satellites as network nodes (if they have communication capabilities)
+    for (const satellite of this.satellites) {
+      // Only comms and nav satellites have relay capability
+      const isCommsSat = satellite.type === SatelliteType.COMMUNICATIONS;
+      const isNavSat = satellite.type === SatelliteType.NAVIGATION;
+
+      if (isCommsSat || isNavSat) {
+        const powerWatts = 50; // Satellites have less power than stations
+        const frequency = getFrequencyForBand(FrequencyBand.SHF);
+
+        const node: NetworkNode = {
+          id: satellite.name,
+          position: satellite.orbitalBody.getPosition(),
+          transmitPower: powerWatts,
+          antenna: {
+            gain: AntennaPresets.SATELLITE.gain,
+            frequency
+          },
+          maxConnections: 5,
+          isRelay: isCommsSat // Only comms sats relay
+        };
+
+        this.relayNetwork.addNode(node);
+      }
+    }
+
+    // Add NPC ships as network nodes
+    const ships = this.trafficManager.getAllVessels();
+    for (const ship of ships) {
+      const powerWatts = 20; // Ships have low power
+      const frequency = getFrequencyForBand(FrequencyBand.UHF); // 1 GHz for ships
+
+      const node: NetworkNode = {
+        id: ship.id,
+        position: ship.position,
+        transmitPower: powerWatts,
+        antenna: {
+          gain: AntennaPresets.DIRECTIONAL.gain,
+          frequency
+        },
+        maxConnections: 3,
+        isRelay: false // Ships don't relay
+      };
+
+      this.relayNetwork.addNode(node);
+    }
+
+    // Build network topology
+    this.relayNetwork.updateTopology();
+
+    // Set message generation rate based on civilization
+    const messagesPerSecond = 0.05 + civilizationLevel * 0.01; // 0.05-0.15 messages/s
+    this.communicationsManager.setMessageGenerationRate(messagesPerSecond);
+  }
+
+  /**
+   * Initialize markets for all stations
+   */
+  private initializeMarkets(civilizationLevel: number): void {
+    for (const station of this.stations) {
+      // Market size based on station type and civilization
+      let marketSize = 1.0;
+      switch (station.stationType) {
+        case 'TRADING_HUB':
+          marketSize = 3.0 + civilizationLevel * 0.5;
+          break;
+        case 'ORBITAL_STATION':
+          marketSize = 2.0 + civilizationLevel * 0.3;
+          break;
+        case 'MINING_PLATFORM':
+          marketSize = 1.5 + civilizationLevel * 0.2;
+          break;
+        case 'SHIPYARD':
+          marketSize = 2.5 + civilizationLevel * 0.4;
+          break;
+        case 'FUEL_DEPOT':
+          marketSize = 1.0 + civilizationLevel * 0.2;
+          break;
+        default:
+          marketSize = 1.0 + civilizationLevel * 0.2;
+      }
+
+      // Create market
+      const market = new Market(station.id, station.name, marketSize);
+
+      // Determine which commodities to trade based on station type
+      const commodities: CommodityType[] = [];
+
+      switch (station.stationType) {
+        case 'TRADING_HUB':
+          // Trading hubs have everything
+          commodities.push(
+            ...Object.values(CommodityType)
+          );
+          break;
+
+        case 'MINING_PLATFORM':
+          // Mining platforms produce raw materials
+          commodities.push(
+            CommodityType.METALLIC_ORE,
+            CommodityType.ROCKY_ORE,
+            CommodityType.ICE,
+            CommodityType.RARE_EARTH,
+            CommodityType.PLATINUM,
+            CommodityType.URANIUM,
+            CommodityType.FOOD,
+            CommodityType.WATER,
+            CommodityType.OXYGEN,
+            CommodityType.HYDROGEN_FUEL,
+            CommodityType.MACHINERY,
+            CommodityType.TOOLS
+          );
+          break;
+
+        case 'SHIPYARD':
+          // Shipyards need materials, produce components
+          commodities.push(
+            CommodityType.STEEL,
+            CommodityType.TITANIUM,
+            CommodityType.ALUMINUM,
+            CommodityType.ELECTRONICS,
+            CommodityType.SHIP_COMPONENTS,
+            CommodityType.COMPUTER_SYSTEMS,
+            CommodityType.SENSORS,
+            CommodityType.MACHINERY,
+            CommodityType.FOOD,
+            CommodityType.WATER
+          );
+          break;
+
+        case 'FUEL_DEPOT':
+          // Fuel depots specialize in fuel
+          commodities.push(
+            CommodityType.HYDROGEN_FUEL,
+            CommodityType.FUSION_PELLETS,
+            CommodityType.ICE,
+            CommodityType.FOOD,
+            CommodityType.WATER,
+            CommodityType.OXYGEN
+          );
+          break;
+
+        case 'RESEARCH_FACILITY':
+          // Research facilities need high-tech goods
+          commodities.push(
+            CommodityType.RARE_EARTH,
+            CommodityType.SILICON,
+            CommodityType.ELECTRONICS,
+            CommodityType.COMPUTER_SYSTEMS,
+            CommodityType.SENSORS,
+            CommodityType.MEDICAL_SUPPLIES,
+            CommodityType.FOOD,
+            CommodityType.WATER
+          );
+          break;
+
+        default:
+          // General stations have common goods
+          commodities.push(
+            CommodityType.FOOD,
+            CommodityType.WATER,
+            CommodityType.OXYGEN,
+            CommodityType.HYDROGEN_FUEL,
+            CommodityType.MEDICAL_SUPPLIES,
+            CommodityType.ELECTRONICS,
+            CommodityType.MACHINERY,
+            CommodityType.TOOLS,
+            CommodityType.ENTERTAINMENT
+          );
+      }
+
+      // Initialize market with commodities
+      market.initialize(commodities, 100 * marketSize);
+
+      // Set production/consumption rates based on station type
+      this.setMarketProductionRates(market, station.stationType, civilizationLevel);
+
+      // Store market
+      this.markets.set(station.id, market);
+    }
+  }
+
+  /**
+   * Set production/consumption rates for a market
+   */
+  private setMarketProductionRates(
+    market: Market,
+    stationType: string,
+    civilizationLevel: number
+  ): void {
+    const baseProdRate = 10 * civilizationLevel; // Base production rate
+
+    switch (stationType) {
+      case 'MINING_PLATFORM':
+        // Produces raw materials
+        market.setProductionRate(CommodityType.METALLIC_ORE, baseProdRate * 3, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.ROCKY_ORE, baseProdRate * 2, baseProdRate * 0.3);
+        market.setProductionRate(CommodityType.ICE, baseProdRate * 2, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.RARE_EARTH, baseProdRate * 0.5, 0);
+        break;
+
+      case 'SHIPYARD':
+        // Consumes materials, produces components
+        market.setProductionRate(CommodityType.STEEL, baseProdRate * 0.2, baseProdRate * 2);
+        market.setProductionRate(CommodityType.TITANIUM, 0, baseProdRate * 1);
+        market.setProductionRate(CommodityType.SHIP_COMPONENTS, baseProdRate * 1, baseProdRate * 0.2);
+        break;
+
+      case 'FUEL_DEPOT':
+        // Produces fuel
+        market.setProductionRate(CommodityType.HYDROGEN_FUEL, baseProdRate * 2, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.FUSION_PELLETS, baseProdRate * 0.5, baseProdRate * 0.2);
+        break;
+
+      case 'RESEARCH_FACILITY':
+        // Consumes high-tech goods
+        market.setProductionRate(CommodityType.ELECTRONICS, 0, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.MEDICAL_SUPPLIES, baseProdRate * 0.3, baseProdRate * 0.3);
+        break;
+    }
+
+    // All stations consume food/water/oxygen
+    market.setProductionRate(CommodityType.FOOD, 0, baseProdRate * 0.5);
+    market.setProductionRate(CommodityType.WATER, 0, baseProdRate * 0.3);
+    market.setProductionRate(CommodityType.OXYGEN, 0, baseProdRate * 0.2);
+  }
+
+  /**
    * Update entire system
    */
   update(deltaTime: number): void {
@@ -413,6 +926,37 @@ export class StarSystem {
     // Update stations
     for (const station of this.stations) {
       station.updateOrbitalPosition(deltaTime);
+    }
+
+    // Update satellites with stellar body
+    const stellarBody = {
+      position: this.star.position,
+      luminosity: this.star.luminosity
+    };
+    for (const satellite of this.satellites) {
+      satellite.update(deltaTime, stellarBody);
+    }
+
+    // Update NPC ships
+    const allShips = this.trafficManager.getAllVessels();
+    for (const ship of allShips) {
+      // Get nearby ships for collision avoidance
+      const nearbyShips = this.trafficManager.getVesselsNear(ship.position, 50000) // 50 km radius
+        .filter(s => s.id !== ship.id); // Exclude self
+
+      // Update ship with nearby ships for collision avoidance
+      ship.update(deltaTime, nearbyShips);
+    }
+
+    // Update traffic manager (rebuild spatial grid)
+    this.trafficManager.update(deltaTime);
+
+    // Update communications network
+    this.communicationsManager.update(deltaTime);
+
+    // Update markets
+    for (const market of this.markets.values()) {
+      market.update(deltaTime);
     }
 
     // Update hazards
@@ -488,6 +1032,8 @@ export class StarSystem {
       moons: this.moons,
       asteroids: this.asteroids,
       stations: this.stations,
+      satellites: this.satellites,
+      npcShips: this.trafficManager.getAllVessels(),
       hazards: this.hazardSystem.getActiveHazards(),
       position: this.position
     };

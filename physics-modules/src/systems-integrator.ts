@@ -94,6 +94,12 @@ export class SystemsIntegrator {
       criticalDependency: true
     });
 
+    this.dependencies.set('lifeSupport', {
+      systemId: 'lifeSupport',
+      dependsOn: ['electrical'],
+      criticalDependency: true
+    });
+
     this.dependencies.set('landing', {
       systemId: 'landing',
       dependsOn: ['electrical'],
@@ -169,6 +175,18 @@ export class SystemsIntegrator {
       basePowerW: 800,
       currentPowerW: 800,
       maxPowerW: 1200,
+      essential: true,
+      powered: true,
+      busAssignment: 'A'
+    });
+
+    this.powerManagement.registerConsumer({
+      id: 'lifeSupport',
+      name: 'Life Support System',
+      priority: 10,
+      basePowerW: 50,
+      currentPowerW: 50,
+      maxPowerW: 800,
       essential: true,
       powered: true,
       busAssignment: 'A'
@@ -384,7 +402,7 @@ export class SystemsIntegrator {
     // Initialize all systems at full health
     const systems = [
       'mainEngine', 'rcs', 'fuel', 'electrical', 'thermal', 'coolant',
-      'navComputer', 'communications', 'environmental', 'landing', 'docking',
+      'navComputer', 'communications', 'environmental', 'lifeSupport', 'landing', 'docking',
       'cargo', 'ew', 'countermeasures', 'weapons', 'centerOfMass',
       'radar', 'opticalSensors', 'esm', 'sensorFusion'
     ];
@@ -427,6 +445,7 @@ export class SystemsIntegrator {
   private updateSubsystemPowerDraws(): void {
     // Update actual power consumption from each subsystem
     this.powerManagement.updateConsumerDraw('environmental', this.spacecraft.environmental.currentPowerDraw);
+    this.powerManagement.updateConsumerDraw('lifeSupport', this.spacecraft.lifeSupport.currentPowerDraw);
     this.powerManagement.updateConsumerDraw('navComputer', this.spacecraft.navComputer.currentPowerDraw);
     this.powerManagement.updateConsumerDraw('communications', this.spacecraft.communications.currentPowerDraw);
     this.powerManagement.updateConsumerDraw('landing', this.spacecraft.landing.currentPowerDraw);
@@ -462,6 +481,9 @@ export class SystemsIntegrator {
       switch (id) {
         case 'environmental':
           this.spacecraft.environmental.setPower(consumer.powered);
+          break;
+        case 'lifeSupport':
+          this.spacecraft.lifeSupport.setPower(consumer.powered);
           break;
         case 'navComputer':
           this.spacecraft.navComputer.setPower(consumer.powered);
@@ -523,6 +545,9 @@ export class SystemsIntegrator {
         break;
       case 'environmental':
         this.spacecraft.environmental.applyDamage(severity);
+        break;
+      case 'lifeSupport':
+        this.spacecraft.lifeSupport.applyDamage(severity);
         break;
       case 'landing':
         this.spacecraft.landing.applyDamage(severity);
