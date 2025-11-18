@@ -275,6 +275,67 @@ export function getSystemReport(system: StarSystem): string {
     lines.push('');
   }
 
+  // Economy
+  if (system.markets.size > 0) {
+    lines.push('═══ ECONOMY & TRADE ═══');
+    lines.push(`Active Markets: ${system.markets.size}`);
+    lines.push('');
+
+    // Calculate total economy stats
+    let totalTradeVolume = 0;
+    let totalListings = 0;
+    for (const market of system.markets.values()) {
+      const stats = market.getStatistics();
+      totalTradeVolume += stats.totalTradeVolume;
+      totalListings += stats.totalListings;
+    }
+
+    lines.push(`System Economy:`);
+    lines.push(`  Total Trade Volume: ${totalTradeVolume.toLocaleString()} credits`);
+    lines.push(`  Total Commodity Listings: ${totalListings}`);
+    lines.push('');
+
+    // Show sample markets (first 3)
+    const marketArray = Array.from(system.markets.values());
+    for (let i = 0; i < Math.min(3, marketArray.length); i++) {
+      const market = marketArray[i];
+      const stats = market.getStatistics();
+      const health = market.getMarketHealth();
+
+      lines.push(`Market: ${market.name}`);
+      lines.push(`  Commodities: ${stats.totalListings}`);
+      lines.push(`  Trade Volume: ${stats.totalTradeVolume.toLocaleString()} credits`);
+      lines.push(`  Market Health: ${(health * 100).toFixed(0)}%`);
+
+      // Show best buys/sells
+      const bestBuys = market.getBestBuys(2);
+      const bestSells = market.getBestSells(2);
+
+      if (bestBuys.length > 0) {
+        lines.push(`  Best Buys:`);
+        for (const listing of bestBuys) {
+          const priceChange = listing.priceChange24h >= 0 ? '+' : '';
+          lines.push(`    • ${listing.commodity}: ${listing.currentPrice} cr/t (${priceChange}${listing.priceChange24h.toFixed(1)}%)`);
+        }
+      }
+
+      if (bestSells.length > 0) {
+        lines.push(`  Best Sells:`);
+        for (const listing of bestSells) {
+          const priceChange = listing.priceChange24h >= 0 ? '+' : '';
+          lines.push(`    • ${listing.commodity}: ${listing.currentPrice} cr/t (${priceChange}${listing.priceChange24h.toFixed(1)}%)`);
+        }
+      }
+
+      lines.push('');
+    }
+
+    if (marketArray.length > 3) {
+      lines.push(`  ... and ${marketArray.length - 3} more markets`);
+      lines.push('');
+    }
+  }
+
   // Hazards
   const hazards = system.hazardSystem.getActiveHazards();
   if (hazards.length > 0) {

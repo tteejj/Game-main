@@ -27,6 +27,12 @@ import {
   getFrequencyForBand,
   AntennaPresets
 } from './communications';
+import {
+  Market,
+  CommodityType,
+  CommodityCategory,
+  getCommoditiesByCategory
+} from './economy';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -71,6 +77,7 @@ export class StarSystem {
   public trafficManager: TrafficManager<NPCShip>;
   public relayNetwork: RelayNetwork;
   public communicationsManager: CommunicationsManager;
+  public markets: Map<string, Market> = new Map(); // station id -> market
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
@@ -155,6 +162,9 @@ export class StarSystem {
     if (config.allowCommunications !== false) {
       this.buildCommunicationsNetwork(config.civilizationLevel || 5);
     }
+
+    // Initialize station markets
+    this.initializeMarkets(config.civilizationLevel || 5);
   }
 
   /**
@@ -720,6 +730,178 @@ export class StarSystem {
   }
 
   /**
+   * Initialize markets for all stations
+   */
+  private initializeMarkets(civilizationLevel: number): void {
+    for (const station of this.stations) {
+      // Market size based on station type and civilization
+      let marketSize = 1.0;
+      switch (station.stationType) {
+        case 'TRADING_HUB':
+          marketSize = 3.0 + civilizationLevel * 0.5;
+          break;
+        case 'ORBITAL_STATION':
+          marketSize = 2.0 + civilizationLevel * 0.3;
+          break;
+        case 'MINING_PLATFORM':
+          marketSize = 1.5 + civilizationLevel * 0.2;
+          break;
+        case 'SHIPYARD':
+          marketSize = 2.5 + civilizationLevel * 0.4;
+          break;
+        case 'FUEL_DEPOT':
+          marketSize = 1.0 + civilizationLevel * 0.2;
+          break;
+        default:
+          marketSize = 1.0 + civilizationLevel * 0.2;
+      }
+
+      // Create market
+      const market = new Market(station.id, station.name, marketSize);
+
+      // Determine which commodities to trade based on station type
+      const commodities: CommodityType[] = [];
+
+      switch (station.stationType) {
+        case 'TRADING_HUB':
+          // Trading hubs have everything
+          commodities.push(
+            ...Object.values(CommodityType)
+          );
+          break;
+
+        case 'MINING_PLATFORM':
+          // Mining platforms produce raw materials
+          commodities.push(
+            CommodityType.METALLIC_ORE,
+            CommodityType.ROCKY_ORE,
+            CommodityType.ICE,
+            CommodityType.RARE_EARTH,
+            CommodityType.PLATINUM,
+            CommodityType.URANIUM,
+            CommodityType.FOOD,
+            CommodityType.WATER,
+            CommodityType.OXYGEN,
+            CommodityType.HYDROGEN_FUEL,
+            CommodityType.MACHINERY,
+            CommodityType.TOOLS
+          );
+          break;
+
+        case 'SHIPYARD':
+          // Shipyards need materials, produce components
+          commodities.push(
+            CommodityType.STEEL,
+            CommodityType.TITANIUM,
+            CommodityType.ALUMINUM,
+            CommodityType.ELECTRONICS,
+            CommodityType.SHIP_COMPONENTS,
+            CommodityType.COMPUTER_SYSTEMS,
+            CommodityType.SENSORS,
+            CommodityType.MACHINERY,
+            CommodityType.FOOD,
+            CommodityType.WATER
+          );
+          break;
+
+        case 'FUEL_DEPOT':
+          // Fuel depots specialize in fuel
+          commodities.push(
+            CommodityType.HYDROGEN_FUEL,
+            CommodityType.FUSION_PELLETS,
+            CommodityType.ICE,
+            CommodityType.FOOD,
+            CommodityType.WATER,
+            CommodityType.OXYGEN
+          );
+          break;
+
+        case 'RESEARCH_FACILITY':
+          // Research facilities need high-tech goods
+          commodities.push(
+            CommodityType.RARE_EARTH,
+            CommodityType.SILICON,
+            CommodityType.ELECTRONICS,
+            CommodityType.COMPUTER_SYSTEMS,
+            CommodityType.SENSORS,
+            CommodityType.MEDICAL_SUPPLIES,
+            CommodityType.FOOD,
+            CommodityType.WATER
+          );
+          break;
+
+        default:
+          // General stations have common goods
+          commodities.push(
+            CommodityType.FOOD,
+            CommodityType.WATER,
+            CommodityType.OXYGEN,
+            CommodityType.HYDROGEN_FUEL,
+            CommodityType.MEDICAL_SUPPLIES,
+            CommodityType.ELECTRONICS,
+            CommodityType.MACHINERY,
+            CommodityType.TOOLS,
+            CommodityType.ENTERTAINMENT
+          );
+      }
+
+      // Initialize market with commodities
+      market.initialize(commodities, 100 * marketSize);
+
+      // Set production/consumption rates based on station type
+      this.setMarketProductionRates(market, station.stationType, civilizationLevel);
+
+      // Store market
+      this.markets.set(station.id, market);
+    }
+  }
+
+  /**
+   * Set production/consumption rates for a market
+   */
+  private setMarketProductionRates(
+    market: Market,
+    stationType: string,
+    civilizationLevel: number
+  ): void {
+    const baseProdRate = 10 * civilizationLevel; // Base production rate
+
+    switch (stationType) {
+      case 'MINING_PLATFORM':
+        // Produces raw materials
+        market.setProductionRate(CommodityType.METALLIC_ORE, baseProdRate * 3, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.ROCKY_ORE, baseProdRate * 2, baseProdRate * 0.3);
+        market.setProductionRate(CommodityType.ICE, baseProdRate * 2, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.RARE_EARTH, baseProdRate * 0.5, 0);
+        break;
+
+      case 'SHIPYARD':
+        // Consumes materials, produces components
+        market.setProductionRate(CommodityType.STEEL, baseProdRate * 0.2, baseProdRate * 2);
+        market.setProductionRate(CommodityType.TITANIUM, 0, baseProdRate * 1);
+        market.setProductionRate(CommodityType.SHIP_COMPONENTS, baseProdRate * 1, baseProdRate * 0.2);
+        break;
+
+      case 'FUEL_DEPOT':
+        // Produces fuel
+        market.setProductionRate(CommodityType.HYDROGEN_FUEL, baseProdRate * 2, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.FUSION_PELLETS, baseProdRate * 0.5, baseProdRate * 0.2);
+        break;
+
+      case 'RESEARCH_FACILITY':
+        // Consumes high-tech goods
+        market.setProductionRate(CommodityType.ELECTRONICS, 0, baseProdRate * 0.5);
+        market.setProductionRate(CommodityType.MEDICAL_SUPPLIES, baseProdRate * 0.3, baseProdRate * 0.3);
+        break;
+    }
+
+    // All stations consume food/water/oxygen
+    market.setProductionRate(CommodityType.FOOD, 0, baseProdRate * 0.5);
+    market.setProductionRate(CommodityType.WATER, 0, baseProdRate * 0.3);
+    market.setProductionRate(CommodityType.OXYGEN, 0, baseProdRate * 0.2);
+  }
+
+  /**
    * Update entire system
    */
   update(deltaTime: number): void {
@@ -771,6 +953,11 @@ export class StarSystem {
 
     // Update communications network
     this.communicationsManager.update(deltaTime);
+
+    // Update markets
+    for (const market of this.markets.values()) {
+      market.update(deltaTime);
+    }
 
     // Update hazards
     this.hazardSystem.update(deltaTime);
