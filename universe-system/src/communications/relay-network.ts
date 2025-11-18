@@ -481,6 +481,13 @@ export class RelayNetwork {
   }
 
   /**
+   * Get total node count
+   */
+  public getNodeCount(): number {
+    return this.nodes.size;
+  }
+
+  /**
    * Get all links
    */
   public getLinks(): NetworkLink[] {

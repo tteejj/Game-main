@@ -274,9 +274,9 @@ export class SatelliteThermalSystem {
   getState() {
     return {
       averageTemperature: this.averageTemperature,
-      components: Array.from(this.components.entries()).map(([id, c]) => ({ id, ...c })),
+      components: Array.from(this.components.entries()).map(([_componentId, c]) => ({ ...c })),
       radiators: this.radiators.map(r => ({ ...r })),
-      heaters: Array.from(this.heaters.entries()).map(([id, h]) => ({ id, ...h }))
+      heaters: Array.from(this.heaters.entries()).map(([heaterId, h]) => ({ id: heaterId, ...h }))
     };
   }
 }

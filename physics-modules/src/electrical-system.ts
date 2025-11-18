@@ -580,4 +580,44 @@ export class ElectricalSystem {
   clearEvents(): void {
     this.events = [];
   }
+
+  /**
+   * Emergency reactor SCRAM (shutdown)
+   */
+  scramReactor(): void {
+    this.SCRAM(0);
+  }
+
+  /**
+   * Set reactor power output (0-1)
+   */
+  setReactorPower(powerFraction: number): void {
+    const clamped = Math.max(0, Math.min(1, powerFraction));
+    this.reactor.throttle = clamped;
+  }
+
+  /**
+   * Set circuit breaker state
+   */
+  setCircuitBreaker(breakerId: string, state: boolean): void {
+    const breaker = this.breakers.get(breakerId);
+    if (breaker && !breaker.essential) {
+      breaker.on = state;
+      if (state) {
+        breaker.tripped = false; // Reset tripped state when manually turning on
+      }
+    }
+  }
+
+  /**
+   * Get all circuit breakers
+   */
+  getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
+    return Array.from(this.breakers.entries()).map(([id, breaker]) => ({
+      id,
+      name: breaker.name,
+      on: breaker.on,
+      tripped: breaker.tripped
+    }));
+  }
 }

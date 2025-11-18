@@ -553,4 +553,25 @@ export class RadarSystem {
     this.events = [];
     return events;
   }
+
+  /**
+   * Set radar active state
+   */
+  public setActive(active: boolean): void {
+    if (active) {
+      this.mode = 'search';
+      this.powered = true;
+      this.operational = true;
+    } else {
+      this.mode = 'off';
+      this.powered = false;
+    }
+  }
+
+  /**
+   * Set radar range in meters
+   */
+  public setRange(rangeMeters: number): void {
+    this.maxRangeKm = rangeMeters / 1000;
+  }
 }

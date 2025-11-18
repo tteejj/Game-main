@@ -1156,8 +1156,8 @@ export class Spacecraft {
   /**
    * Set circuit breaker state
    */
-  setCircuitBreaker(index: number, state: boolean): void {
-    this.electrical.setCircuitBreaker(index, state);
+  setCircuitBreaker(breakerId: string, state: boolean): void {
+    this.electrical.setCircuitBreaker(breakerId, state);
   }
 
   /**
@@ -1210,32 +1210,24 @@ export class Spacecraft {
         co2Percent: 0.04,
         pressure: 101,
         temperature: 293,
-        o2GeneratorOn: state.o2GeneratorActive,
-        co2ScrubberOn: state.co2ScrubberActive,
+        o2GeneratorOn: state.o2Generator?.active || false,
+        co2ScrubberOn: state.co2Scrubber?.active || false,
         compartments: state.compartments
       };
     }
 
-    // Calculate percentages from masses and volume
-    const totalMass = centerCompartment.o2Mass + centerCompartment.co2Mass + centerCompartment.n2Mass;
-    const o2Percent = (centerCompartment.o2Mass / totalMass) * 100;
-    const co2Percent = (centerCompartment.co2Mass / totalMass) * 100;
-
-    // Calculate pressure from ideal gas law: PV = nRT
-    const R = 8.314; // J/(mol·K)
-    const o2Moles = centerCompartment.o2Mass / 0.032;
-    const co2Moles = centerCompartment.co2Mass / 0.044;
-    const n2Moles = centerCompartment.n2Mass / 0.028;
-    const totalMoles = o2Moles + co2Moles + n2Moles;
-    const pressure = (totalMoles * R * centerCompartment.temperature) / centerCompartment.volume / 1000; // kPa
+    // Use percentages directly from the compartment state
+    const o2Percent = centerCompartment.o2Percent;
+    const co2Percent = centerCompartment.co2Percent;
+    const pressure = centerCompartment.pressureKPa;
 
     return {
       o2Percent: parseFloat(o2Percent.toFixed(1)),
       co2Percent: parseFloat(co2Percent.toFixed(2)),
       pressure: parseFloat(pressure.toFixed(1)),
       temperature: parseFloat(centerCompartment.temperature.toFixed(1)),
-      o2GeneratorOn: state.o2GeneratorActive,
-      co2ScrubberOn: state.co2ScrubberActive,
+      o2GeneratorOn: state.o2Generator?.active || false,
+      co2ScrubberOn: state.co2Scrubber?.active || false,
       compartments: state.compartments
     };
   }
@@ -1261,7 +1253,7 @@ export class Spacecraft {
     const radarState = this.radar.getState();
 
     return {
-      radarActive: radarState.active,
+      radarActive: radarState.powered && radarState.operational,
       radarRange: radarState.maxRange / 1000, // Convert to km
       radarGain: 100, // Simplified - actual gain would come from radar config
       lidarActive: false, // LIDAR not implemented yet
@@ -1418,11 +1410,11 @@ export class Spacecraft {
         temperature: loop.temperature,
         flowRate: loop.flowRateLPerMin,
         coolantMass: loop.coolantMassKg,
-        maxCapacity: loop.maxCapacityKg,
+        maxCapacity: loop.coolantMassKg * 100 / (loop.percentFull || 100), // Calculate from current mass and percent
         radiatorTemp: loop.radiatorTemperature,
         frozen: loop.frozen,
         boiling: loop.boiling,
-        leakRate: loop.leakRateLPerMin
+        leakRate: loop.leaking ? 0.1 : 0 // Estimate leak rate based on leaking flag
       })),
       crossConnectOpen: state.crossConnectOpen
     };
@@ -1477,11 +1469,27 @@ export class Spacecraft {
    */
   getDoorStatus(): Array<{ comp1: string; comp2: string; open: boolean }> {
     const state = this.lifeSupport.getState();
-    return state.connections.map(conn => ({
-      comp1: conn.compartment1,
-      comp2: conn.compartment2,
-      open: conn.doorOpen
-    }));
+    const doors: Array<{ comp1: string; comp2: string; open: boolean }> = [];
+
+    // Build door list from compartment connections
+    for (const comp of state.compartments) {
+      for (const door of comp.doors) {
+        // Only add each door once (avoid duplicates)
+        const existingDoor = doors.find(d =>
+          (d.comp1 === comp.id && d.comp2 === door.to) ||
+          (d.comp2 === comp.id && d.comp1 === door.to)
+        );
+        if (!existingDoor) {
+          doors.push({
+            comp1: comp.id,
+            comp2: door.to,
+            open: door.open
+          });
+        }
+      }
+    }
+
+    return doors;
   }
 
   /**
@@ -1658,7 +1666,7 @@ export class Spacecraft {
    * Get all circuit breaker states
    */
   getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
-    return this.electrical.getCircuitBreakers?.() || [];
+    return this.electrical.getCircuitBreakers();
   }
 }
 

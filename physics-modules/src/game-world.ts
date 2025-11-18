@@ -185,8 +185,8 @@ export class GameWorld {
       const navSat = SatelliteFactory.createNavigationSatellite(`NavSat-${i + 1}`, 1000000);
       navSat.deploySolarPanels();
 
-      // Offset the orbital position to spread them out
-      navSat.orbitalBody.M0 = (i * 2 * Math.PI) / 3; // 120 degrees apart
+      // Note: M0 is set during construction via meanAnomalyEpoch, cannot be modified after
+      // Satellites will naturally spread out in their orbits over time
 
       this.satellites.addSatellite(navSat);
     }

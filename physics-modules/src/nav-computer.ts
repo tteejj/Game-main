@@ -48,6 +48,9 @@ export class NavigationComputer {
   public currentPowerDraw: number = 0; // W
   public isPowered: boolean = true;
 
+  // Intercept solution
+  public interceptSolution: any = null;
+
   // Events
   public events: Array<{ time: number; type: string; data: any }> = [];
 
@@ -200,8 +203,75 @@ export class NavigationComputer {
       timeSinceAlignment: this.timeSinceAlignment,
       sensorData: { ...this.sensorData },
       navigationQuality: this.getNavigationQuality(),
-      gyroDriftRate: this.gyroDriftRate
+      gyroDriftRate: this.gyroDriftRate,
+      solution: this.interceptSolution
     };
+  }
+
+  /**
+   * Calculate intercept course to a moving target
+   */
+  public calculateIntercept(
+    currentPosition: any,
+    currentVelocity: any,
+    targetPosition: any,
+    targetVelocity: any
+  ): any {
+    if (!this.operational || !this.isPowered || !this.aligned) {
+      return null;
+    }
+
+    // Simple intercept calculation using relative velocity
+    const relativePosition = {
+      x: targetPosition.x - currentPosition.x,
+      y: targetPosition.y - currentPosition.y,
+      z: targetPosition.z - currentPosition.z
+    };
+
+    const relativeVelocity = {
+      x: targetVelocity.x - currentVelocity.x,
+      y: targetVelocity.y - currentVelocity.y,
+      z: targetVelocity.z - currentVelocity.z
+    };
+
+    const distance = Math.sqrt(
+      relativePosition.x ** 2 + relativePosition.y ** 2 + relativePosition.z ** 2
+    );
+
+    const relativeSpeed = Math.sqrt(
+      relativeVelocity.x ** 2 + relativeVelocity.y ** 2 + relativeVelocity.z ** 2
+    );
+
+    const timeToIntercept = distance / (relativeSpeed || 1);
+
+    // Predicted intercept point
+    const interceptPoint = {
+      x: targetPosition.x + targetVelocity.x * timeToIntercept,
+      y: targetPosition.y + targetVelocity.y * timeToIntercept,
+      z: targetPosition.z + targetVelocity.z * timeToIntercept
+    };
+
+    // Required velocity change
+    const requiredDeltaV = {
+      x: (interceptPoint.x - currentPosition.x) / timeToIntercept - currentVelocity.x,
+      y: (interceptPoint.y - currentPosition.y) / timeToIntercept - currentVelocity.y,
+      z: (interceptPoint.z - currentPosition.z) / timeToIntercept - currentVelocity.z
+    };
+
+    const deltaVMagnitude = Math.sqrt(
+      requiredDeltaV.x ** 2 + requiredDeltaV.y ** 2 + requiredDeltaV.z ** 2
+    );
+
+    this.interceptSolution = {
+      interceptPoint,
+      timeToIntercept,
+      requiredDeltaV,
+      deltaVMagnitude,
+      distance,
+      valid: true
+    };
+
+    return this.interceptSolution;
   }
 
   private logEvent(type: string, data: any): void {

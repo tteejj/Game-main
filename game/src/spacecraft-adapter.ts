@@ -114,14 +114,6 @@ export class SpacecraftAdapter {
         // Radiators not implemented as deployable, always active
     }
 
-    toggleCoolantPump(index: number, on: boolean): void {
-        if (on) {
-            this.spacecraft.startCoolantPump(index);
-        } else {
-            this.spacecraft.coolant.stopPump(index);
-        }
-    }
-
     // ========== NAVIGATION CONTROLS ==========
 
     setRadarActive(_active: boolean): void {
@@ -130,6 +122,15 @@ export class SpacecraftAdapter {
 
     setRadarRange(_rangeKm: number): void {
         // Radar range not settable directly, stub for UI
+    }
+
+    getAutopilotMode(): string {
+        // Autopilot not yet fully implemented, stub for UI
+        return 'off';
+    }
+
+    setAutopilotMode(_mode: string): void {
+        // Autopilot not yet fully implemented, stub for UI
     }
 
     // ========== WEAPONS CONTROLS ==========
@@ -158,7 +159,7 @@ export class SpacecraftAdapter {
         return this.spacecraft.weapons.deployCountermeasures();
     }
 
-    fireWeapon(weaponIndex: number, targetIndex: number): void {
+    fireWeapon(_weaponIndex: number, targetIndex: number): void {
         const targets = this.spacecraft.weapons.getState().targets;
         if (targets.length === 0 || targetIndex >= targets.length) {
             console.log('No valid target selected');

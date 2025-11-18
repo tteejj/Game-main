@@ -668,4 +668,69 @@ export class LifeSupportSystem {
       }
     };
   }
+
+  /**
+   * Toggle a bulkhead door between two compartments
+   */
+  toggleBulkheadDoor(comp1Id: string, comp2Id: string): boolean {
+    const comp1 = this.compartments.find(c => c.id === comp1Id);
+    const comp2 = this.compartments.find(c => c.id === comp2Id);
+
+    if (!comp1 || !comp2) return false;
+
+    // Find the connection from comp1 to comp2
+    const conn1 = comp1.connections.find(c => c.compartmentId === comp2Id);
+    // Find the connection from comp2 to comp1
+    const conn2 = comp2.connections.find(c => c.compartmentId === comp1Id);
+
+    if (conn1 && conn2) {
+      // Toggle the door state
+      const newState = !conn1.doorOpen;
+      conn1.doorOpen = newState;
+      conn2.doorOpen = newState;
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Vent a compartment to space (emergency depressurization)
+   */
+  ventCompartment(compartmentId: string): void {
+    const comp = this.compartments.find(c => c.id === compartmentId);
+    if (!comp) return;
+
+    // Rapidly vent atmosphere
+    comp.o2Mass = 0;
+    comp.co2Mass = 0;
+    comp.n2Mass = 0;
+
+    // Cool down temperature to near vacuum
+    comp.temperature = Math.max(this.STP_TEMP - 50, comp.temperature * 0.5);
+  }
+
+  /**
+   * Suppress fire in a compartment using halon
+   */
+  suppressFire(compartmentId: string): boolean {
+    const comp = this.compartments.find(c => c.id === compartmentId);
+    if (!comp || !comp.onFire) return false;
+    if (this.halonMassKg <= 0) return false;
+
+    // Use halon to suppress fire
+    const halonUsed = Math.min(1.0, this.halonMassKg); // Use up to 1kg
+    this.halonMassKg -= halonUsed;
+    this.fireSuppressionUses++;
+
+    // Reduce fire intensity
+    comp.fireIntensity = Math.max(0, comp.fireIntensity - (halonUsed * this.HALON_EFFECTIVENESS));
+
+    if (comp.fireIntensity <= 0) {
+      comp.onFire = false;
+      comp.fireIntensity = 0;
+    }
+
+    return true;
+  }
 }
