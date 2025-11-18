@@ -94,6 +94,27 @@ export class HelmPanel {
                 this.spacecraft.fireRCS(num, this.rcsActive[num]);
                 console.log(`RCS Thruster ${num + 1}: ${this.rcsActive[num] ? 'FIRING' : 'OFF'}`);
                 break;
+
+            // Fuel Management
+            case 't':
+                // Transfer Tank 1 → Tank 2
+                this.spacecraft.transferFuel('main_1', 'main_2');
+                console.log('Fuel transfer: Tank 1 → Tank 2');
+                break;
+            case 'y':
+                // Transfer Tank 2 → Tank 1
+                this.spacecraft.transferFuel('main_2', 'main_1');
+                console.log('Fuel transfer: Tank 2 → Tank 1');
+                break;
+            case 'u':
+                // Emergency fuel dump - vent all tanks
+                const transferStatus = this.spacecraft.getFuelTransferStatus();
+                const rcsVenting = transferStatus.find(t => t.tankId === 'rcs')?.venting || false;
+                this.spacecraft.emergencyFuelDump('main_1', !rcsVenting);
+                this.spacecraft.emergencyFuelDump('main_2', !rcsVenting);
+                this.spacecraft.emergencyFuelDump('rcs', !rcsVenting);
+                console.log(`Emergency fuel dump: ${!rcsVenting ? 'ACTIVE' : 'STOPPED'}`);
+                break;
         }
     }
 
@@ -264,6 +285,6 @@ export class HelmPanel {
 
         ctx.fillStyle = this.palette.muted;
         ctx.font = '12px "Courier New"';
-        ctx.fillText('F=Valve  G=Arm  H=Fire  R=Cutoff  Q/A=Throttle  W/S/E/D=Gimbal  1-0=RCS', 40, y);
+        ctx.fillText('F=Valve G=Arm H=Fire R=Cutoff Q/A=Throttle W/S/E/D=Gimbal 1-0=RCS T/Y=XFer U=Dump', 40, y);
     }
 }

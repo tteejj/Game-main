@@ -163,4 +163,204 @@ export class SpacecraftAdapter {
     getFuelState(): any {
         return this.spacecraft.getState().fuel;
     }
+
+    getLifeSupportTelemetry(): any {
+        return this.spacecraft.getLifeSupportTelemetry();
+    }
+
+    getSensorTelemetry(): any {
+        return this.spacecraft.getSensorTelemetry();
+    }
+
+    toggleO2Generator(on: boolean): void {
+        this.spacecraft.toggleO2Generator(on);
+    }
+
+    toggleCO2Scrubber(on: boolean): void {
+        this.spacecraft.toggleCO2Scrubber(on);
+    }
+
+    // ========== LANDING GEAR CONTROLS ==========
+
+    deployLandingGear(): boolean {
+        return this.spacecraft.deployLandingGear();
+    }
+
+    retractLandingGear(): boolean {
+        return this.spacecraft.retractLandingGear();
+    }
+
+    toggleLandingLights(on: boolean): void {
+        this.spacecraft.toggleLandingLights(on);
+    }
+
+    activateTerrainRadar(): boolean {
+        return this.spacecraft.activateTerrainRadar();
+    }
+
+    deactivateTerrainRadar(): void {
+        this.spacecraft.deactivateTerrainRadar();
+    }
+
+    checkLandingSafety(): { safe: boolean; reasons: string[] } {
+        return this.spacecraft.checkLandingSafety();
+    }
+
+    getLandingGearTelemetry(): any {
+        return this.spacecraft.getLandingGearTelemetry();
+    }
+
+    // ========== DOCKING CONTROLS ==========
+
+    initiateDocking(portId: string, target: any): boolean {
+        return this.spacecraft.initiateDocking(portId, target);
+    }
+
+    attemptDockingCapture(): boolean {
+        return this.spacecraft.attemptDockingCapture();
+    }
+
+    completeHardDock(): boolean {
+        return this.spacecraft.completeHardDock();
+    }
+
+    undock(portId: string): boolean {
+        return this.spacecraft.undock(portId);
+    }
+
+    getDockingGuidance(): any {
+        return this.spacecraft.getDockingGuidance();
+    }
+
+    getDockingTelemetry(): any {
+        return this.spacecraft.getDockingTelemetry();
+    }
+
+    // ========== COOLANT/THERMAL CONTROLS ==========
+
+    getCoolantTelemetry(): any {
+        return this.spacecraft.getCoolantTelemetry();
+    }
+
+    getThermalTelemetry(): any {
+        return this.spacecraft.getThermalTelemetry();
+    }
+
+    toggleCoolantPump(loopId: number, on: boolean): void {
+        if (on) {
+            this.spacecraft.startCoolantPump(loopId);
+        } else {
+            this.spacecraft.stopCoolantPump(loopId);
+        }
+    }
+
+    // ========== LIFE SUPPORT DOOR/BREACH CONTROLS ==========
+
+    toggleBulkheadDoor(comp1Id: string, comp2Id: string): boolean {
+        return this.spacecraft.toggleBulkheadDoor(comp1Id, comp2Id);
+    }
+
+    sealBreach(compartmentId: string): boolean {
+        return this.spacecraft.sealBreach(compartmentId);
+    }
+
+    ventCompartment(compartmentId: string): void {
+        this.spacecraft.ventCompartment(compartmentId);
+    }
+
+    suppressFire(compartmentId: string): boolean {
+        return this.spacecraft.suppressFire(compartmentId);
+    }
+
+    getDoorStatus(): Array<{ comp1: string; comp2: string; open: boolean }> {
+        return this.spacecraft.getDoorStatus();
+    }
+
+    getBreachStatus(): Array<{ id: string; breached: boolean; breachSize: number }> {
+        return this.spacecraft.getBreachStatus();
+    }
+
+    // ========== FUEL TRANSFER/VENTING CONTROLS ==========
+
+    transferFuel(sourceTankId: string, destTankId: string): boolean {
+        return this.spacecraft.transferFuel(sourceTankId, destTankId);
+    }
+
+    stopFuelTransfer(tankId: string): boolean {
+        return this.spacecraft.stopFuelTransfer(tankId);
+    }
+
+    emergencyFuelDump(tankId: string, enable: boolean): boolean {
+        return this.spacecraft.emergencyFuelDump(tankId, enable);
+    }
+
+    getFuelTransferStatus(): Array<{ tankId: string; transferringTo: string | undefined; venting: boolean }> {
+        return this.spacecraft.getFuelTransferStatus();
+    }
+
+    // ========== SENSOR CONTROLS ==========
+
+    setRadarMode(mode: 'search' | 'track' | 'mapping' | 'off'): void {
+        this.spacecraft.setRadarMode(mode);
+    }
+
+    setOpticalMode(mode: 'visual' | 'infrared' | 'combined'): void {
+        this.spacecraft.setOpticalMode(mode);
+    }
+
+    initiateRadarTrack(contactId: string): boolean {
+        return this.spacecraft.initiateRadarTrack(contactId);
+    }
+
+    dropRadarTrack(contactId: string): void {
+        this.spacecraft.dropRadarTrack(contactId);
+    }
+
+    getRadarContacts(): any[] {
+        return this.spacecraft.getRadarContacts();
+    }
+
+    getOpticalContacts(): any[] {
+        return this.spacecraft.getOpticalContacts();
+    }
+
+    getESMContacts(): any[] {
+        return this.spacecraft.getESMContacts();
+    }
+
+    setESMMode(passive: boolean): void {
+        this.spacecraft.setESMMode(passive);
+    }
+
+    // ========== AUTOPILOT/NAV COMPUTER ==========
+
+    plotInterceptCourse(targetPosition: any, targetVelocity: any): any {
+        return this.spacecraft.plotInterceptCourse(targetPosition, targetVelocity);
+    }
+
+    getNavSolution(): any {
+        return this.spacecraft.getNavSolution();
+    }
+
+    // ========== ENGINEERING/COOLANT CONTROLS ==========
+
+    openCoolantCrossConnect(): void {
+        this.spacecraft.openCoolantCrossConnect();
+    }
+
+    closeCoolantCrossConnect(): void {
+        this.spacecraft.closeCoolantCrossConnect();
+    }
+
+    getCoolantCrossConnectStatus(): boolean {
+        return this.spacecraft.getCoolantCrossConnectStatus();
+    }
+
+    toggleCircuitBreaker(breakerId: string, on: boolean): void {
+        this.spacecraft.toggleCircuitBreaker(breakerId, on);
+    }
+
+    getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
+        return this.spacecraft.getCircuitBreakers();
+    }
 }

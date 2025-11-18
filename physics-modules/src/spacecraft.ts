@@ -67,6 +67,7 @@ import { ESMSystem } from './esm-system';
 import { SensorFusionSystem } from './sensor-fusion';
 import { CrewSystem } from './crew-system';
 import { OrbitalMechanicsSystem } from './orbital-mechanics';
+import { LifeSupportSystem } from './life-support-enhanced';
 
 export interface SpacecraftConfig {
   // Optional system configurations
@@ -89,6 +90,7 @@ export interface SpacecraftConfig {
   cargoConfig?: any;
   ewConfig?: any;
   environmentalConfig?: any;
+  lifeSupportConfig?: any;
 }
 
 export class Spacecraft {
@@ -137,6 +139,9 @@ export class Spacecraft {
 
   // Orbital mechanics
   public orbitalMechanics: OrbitalMechanicsSystem;
+
+  // Life support system
+  public lifeSupport: LifeSupportSystem;
 
   // Simulation time
   public simulationTime: number = 0;
@@ -216,6 +221,9 @@ export class Spacecraft {
 
     // Initialize orbital mechanics system (default to Earth)
     this.orbitalMechanics = new OrbitalMechanicsSystem();
+
+    // Initialize life support system
+    this.lifeSupport = new LifeSupportSystem(config?.lifeSupportConfig);
 
     // Initialize systems integrator (MUST be last - needs all systems initialized)
     this.systemsIntegrator = new SystemsIntegrator(this);
@@ -636,6 +644,7 @@ export class Spacecraft {
     this.ew.update(dt);
     this.environmental.update(dt);
     this.crew.update(dt);
+    this.lifeSupport.update(dt);
 
     // 18.5. Update weapons control system
     this.weapons.updateShipState(physicsState.position, {
@@ -782,7 +791,8 @@ export class Spacecraft {
       orbitalMechanics: {
         centralBody: this.orbitalMechanics.getCentralBody().name,
         mu: this.orbitalMechanics.getCentralBody().mu
-      }
+      },
+      lifeSupport: this.lifeSupport.getState()
     };
   }
 
@@ -1061,4 +1071,594 @@ export class Spacecraft {
       crew: this.crew.getEvents()
     };
   }
+
+  // =============================================================================
+  // Additional Command Interface Methods (for UI integration)
+  // =============================================================================
+
+  /**
+   * Open main engine fuel valve
+   */
+  openMainEngineFuelValve(): void {
+    // Set valve state - this is a simplified interface
+    // In a more detailed simulation, this would control actual valve positions
+    console.log('Main engine fuel valve opened');
+  }
+
+  /**
+   * Close main engine fuel valve
+   */
+  closeMainEngineFuelValve(): void {
+    console.log('Main engine fuel valve closed');
+  }
+
+  /**
+   * Arm main engine for ignition
+   */
+  armMainEngine(): void {
+    // Prepare engine for ignition sequence
+    console.log('Main engine armed');
+  }
+
+  /**
+   * Set main engine gimbal angles
+   */
+  setMainEngineGimbal(pitchRad: number, yawRad: number): void {
+    this.mainEngine.setGimbal(pitchRad, yawRad);
+  }
+
+  /**
+   * Fire RCS thruster by index
+   */
+  fireRCSThruster(thrusterIndex: number): void {
+    // Map thruster index to RCS groups
+    // This is simplified - actual implementation would map to specific thrusters
+    const groupMap = [
+      'bow_port', 'bow_starboard', 'bow_dorsal', 'bow_ventral',
+      'mid_port', 'mid_starboard', 'mid_dorsal', 'mid_ventral',
+      'stern_port', 'stern_starboard', 'stern_dorsal', 'stern_ventral'
+    ];
+
+    if (thrusterIndex >= 0 && thrusterIndex < groupMap.length) {
+      this.rcs.activateGroup(groupMap[thrusterIndex]);
+    }
+  }
+
+  /**
+   * Stop RCS thruster by index
+   */
+  stopRCSThruster(thrusterIndex: number): void {
+    const groupMap = [
+      'bow_port', 'bow_starboard', 'bow_dorsal', 'bow_ventral',
+      'mid_port', 'mid_starboard', 'mid_dorsal', 'mid_ventral',
+      'stern_port', 'stern_starboard', 'stern_dorsal', 'stern_ventral'
+    ];
+
+    if (thrusterIndex >= 0 && thrusterIndex < groupMap.length) {
+      this.rcs.deactivateGroup(groupMap[thrusterIndex]);
+    }
+  }
+
+  /**
+   * Emergency reactor SCRAM (shutdown)
+   */
+  scramReactor(): void {
+    this.electrical.scramReactor();
+  }
+
+  /**
+   * Set reactor power output (0-1)
+   */
+  setReactorPower(powerFraction: number): void {
+    this.electrical.setReactorPower(powerFraction);
+  }
+
+  /**
+   * Set circuit breaker state
+   */
+  setCircuitBreaker(index: number, state: boolean): void {
+    this.electrical.setCircuitBreaker(index, state);
+  }
+
+  /**
+   * Deploy thermal radiators
+   */
+  deployRadiators(): void {
+    this.thermal.deployRadiators();
+  }
+
+  /**
+   * Retract thermal radiators
+   */
+  retractRadiators(): void {
+    this.thermal.retractRadiators();
+  }
+
+  /**
+   * Stop coolant pump
+   */
+  stopCoolantPump(loopId: number): void {
+    this.coolant.stopPump(loopId);
+  }
+
+  /**
+   * Set radar active state
+   */
+  setRadarActive(active: boolean): void {
+    this.radar.setActive(active);
+  }
+
+  /**
+   * Set radar range in meters
+   */
+  setRadarRange(rangeMeters: number): void {
+    this.radar.setRange(rangeMeters);
+  }
+
+  /**
+   * Get life support telemetry for UI
+   */
+  getLifeSupportTelemetry() {
+    const state = this.lifeSupport.getState();
+
+    // Return telemetry for selected compartment (default to center)
+    const centerCompartment = state.compartments.find(c => c.id === 'center');
+
+    if (!centerCompartment) {
+      return {
+        o2Percent: 21,
+        co2Percent: 0.04,
+        pressure: 101,
+        temperature: 293,
+        o2GeneratorOn: state.o2GeneratorActive,
+        co2ScrubberOn: state.co2ScrubberActive,
+        compartments: state.compartments
+      };
+    }
+
+    // Calculate percentages from masses and volume
+    const totalMass = centerCompartment.o2Mass + centerCompartment.co2Mass + centerCompartment.n2Mass;
+    const o2Percent = (centerCompartment.o2Mass / totalMass) * 100;
+    const co2Percent = (centerCompartment.co2Mass / totalMass) * 100;
+
+    // Calculate pressure from ideal gas law: PV = nRT
+    const R = 8.314; // J/(mol·K)
+    const o2Moles = centerCompartment.o2Mass / 0.032;
+    const co2Moles = centerCompartment.co2Mass / 0.044;
+    const n2Moles = centerCompartment.n2Mass / 0.028;
+    const totalMoles = o2Moles + co2Moles + n2Moles;
+    const pressure = (totalMoles * R * centerCompartment.temperature) / centerCompartment.volume / 1000; // kPa
+
+    return {
+      o2Percent: parseFloat(o2Percent.toFixed(1)),
+      co2Percent: parseFloat(co2Percent.toFixed(2)),
+      pressure: parseFloat(pressure.toFixed(1)),
+      temperature: parseFloat(centerCompartment.temperature.toFixed(1)),
+      o2GeneratorOn: state.o2GeneratorActive,
+      co2ScrubberOn: state.co2ScrubberActive,
+      compartments: state.compartments
+    };
+  }
+
+  /**
+   * Toggle O2 generator
+   */
+  toggleO2Generator(on: boolean): void {
+    this.lifeSupport.o2GeneratorActive = on;
+  }
+
+  /**
+   * Toggle CO2 scrubber
+   */
+  toggleCO2Scrubber(on: boolean): void {
+    this.lifeSupport.co2ScrubberActive = on;
+  }
+
+  /**
+   * Get sensor telemetry for navigation panel
+   */
+  getSensorTelemetry() {
+    const radarState = this.radar.getState();
+
+    return {
+      radarActive: radarState.active,
+      radarRange: radarState.maxRange / 1000, // Convert to km
+      radarGain: 100, // Simplified - actual gain would come from radar config
+      lidarActive: false, // LIDAR not implemented yet
+      radarContacts: radarState.contacts,
+      radarTracks: radarState.tracks
+    };
+  }
+
+  // =============================================================================
+  // Landing Gear Control Methods
+  // =============================================================================
+
+  /**
+   * Deploy landing gear
+   */
+  deployLandingGear(): boolean {
+    return this.landing.deployGear();
+  }
+
+  /**
+   * Retract landing gear
+   */
+  retractLandingGear(): boolean {
+    return this.landing.retractGear();
+  }
+
+  /**
+   * Toggle landing lights
+   */
+  toggleLandingLights(on: boolean): void {
+    this.landing.toggleLights(on);
+  }
+
+  /**
+   * Activate terrain scanning radar
+   */
+  activateTerrainRadar(): boolean {
+    return this.landing.activateTerrainRadar();
+  }
+
+  /**
+   * Deactivate terrain scanning radar
+   */
+  deactivateTerrainRadar(): void {
+    this.landing.deactivateTerrainRadar();
+  }
+
+  /**
+   * Check if safe to land
+   */
+  checkLandingSafety(): { safe: boolean; reasons: string[] } {
+    return this.landing.isSafeToLand();
+  }
+
+  /**
+   * Get landing gear telemetry
+   */
+  getLandingGearTelemetry() {
+    const state = this.landing.getState();
+    return {
+      deployed: state.allGearDeployed,
+      locked: state.allGearLocked,
+      surfaceContact: state.surfaceContact,
+      gearHealth: Array.from(state.gear.values()).map(g => ({
+        id: g.id,
+        deployed: g.deployed,
+        locked: g.locked,
+        contact: g.contact,
+        health: g.health,
+        compression: g.strut.compression
+      })),
+      terrainRadarActive: state.terrainRadarActive,
+      terrainData: state.terrainData,
+      lightsOn: state.lightsOn
+    };
+  }
+
+  // =============================================================================
+  // Docking System Control Methods
+  // =============================================================================
+
+  /**
+   * Initiate docking sequence
+   */
+  initiateDocking(portId: string, target: any): boolean {
+    return this.docking.initiateDocking(portId, target);
+  }
+
+  /**
+   * Attempt to capture docking target
+   */
+  attemptDockingCapture(): boolean {
+    return this.docking.attemptCapture();
+  }
+
+  /**
+   * Complete hard dock
+   */
+  completeHardDock(): boolean {
+    return this.docking.completeHardDock();
+  }
+
+  /**
+   * Undock from target
+   */
+  undock(portId: string): boolean {
+    return this.docking.undock(portId);
+  }
+
+  /**
+   * Get docking alignment guidance
+   */
+  getDockingGuidance() {
+    return this.docking.getAlignmentGuidance();
+  }
+
+  /**
+   * Get docking system telemetry
+   */
+  getDockingTelemetry() {
+    const state = this.docking.getState();
+    return {
+      operational: state.operational,
+      activePort: state.activePort,
+      dockingInProgress: state.dockingInProgress,
+      latchProgress: state.latchProgress,
+      ports: Array.from(state.ports.values()).map(p => ({
+        id: p.id,
+        type: p.type,
+        status: p.status,
+        connectedTo: p.connectedTo,
+        sealIntegrity: p.sealIntegrity,
+        alignmentError: p.alignmentError
+      })),
+      targetData: state.targetData,
+      approachRate: state.approachRate
+    };
+  }
+
+  // =============================================================================
+  // Coolant and Thermal Control Methods
+  // =============================================================================
+
+  /**
+   * Get coolant system telemetry
+   */
+  getCoolantTelemetry() {
+    const state = this.coolant.getState();
+    return {
+      loops: state.loops.map(loop => ({
+        id: loop.id,
+        name: loop.name,
+        pumpActive: loop.pumpActive,
+        temperature: loop.temperature,
+        flowRate: loop.flowRateLPerMin,
+        coolantMass: loop.coolantMassKg,
+        maxCapacity: loop.maxCapacityKg,
+        radiatorTemp: loop.radiatorTemperature,
+        frozen: loop.frozen,
+        boiling: loop.boiling,
+        leakRate: loop.leakRateLPerMin
+      })),
+      crossConnectOpen: state.crossConnectOpen
+    };
+  }
+
+  /**
+   * Get thermal system telemetry
+   */
+  getThermalTelemetry() {
+    const state = this.thermal.getState();
+    return {
+      radiatorsDeployed: state.radiatorsDeployed,
+      radiatorHealth: state.radiatorHealth,
+      nodes: state.nodes
+    };
+  }
+
+  // =============================================================================
+  // Life Support Door and Breach Control Methods
+  // =============================================================================
+
+  /**
+   * Toggle a bulkhead door between two compartments
+   */
+  toggleBulkheadDoor(comp1Id: string, comp2Id: string): boolean {
+    return this.lifeSupport.toggleBulkheadDoor(comp1Id, comp2Id);
+  }
+
+  /**
+   * Seal a breach in a compartment
+   */
+  sealBreach(compartmentId: string): boolean {
+    return this.lifeSupport.sealBreach(compartmentId);
+  }
+
+  /**
+   * Vent a compartment to space (emergency depressurization)
+   */
+  ventCompartment(compartmentId: string): void {
+    this.lifeSupport.ventCompartment(compartmentId);
+  }
+
+  /**
+   * Suppress fire in a compartment
+   */
+  suppressFire(compartmentId: string): boolean {
+    return this.lifeSupport.suppressFire(compartmentId);
+  }
+
+  /**
+   * Get door status for all compartment connections
+   */
+  getDoorStatus(): Array<{ comp1: string; comp2: string; open: boolean }> {
+    const state = this.lifeSupport.getState();
+    return state.connections.map(conn => ({
+      comp1: conn.compartment1,
+      comp2: conn.compartment2,
+      open: conn.doorOpen
+    }));
+  }
+
+  /**
+   * Get breach status for all compartments
+   */
+  getBreachStatus(): Array<{ id: string; breached: boolean; breachSize: number }> {
+    const state = this.lifeSupport.getState();
+    return state.compartments.map(comp => ({
+      id: comp.id,
+      breached: comp.breached,
+      breachSize: comp.breachSize
+    }));
+  }
+
+  // =============================================================================
+  // Fuel Transfer and Venting Control Methods
+  // =============================================================================
+
+  /**
+   * Transfer fuel from one tank to another
+   */
+  transferFuel(sourceTankId: string, destTankId: string): boolean {
+    return this.fuel.setCrossfeed(sourceTankId, destTankId);
+  }
+
+  /**
+   * Stop fuel transfer from a tank
+   */
+  stopFuelTransfer(tankId: string): boolean {
+    return this.fuel.setCrossfeed(tankId, undefined);
+  }
+
+  /**
+   * Emergency fuel dump - vent fuel from a tank to space
+   */
+  emergencyFuelDump(tankId: string, enable: boolean): boolean {
+    return this.fuel.setValve(tankId, 'vent', enable);
+  }
+
+  /**
+   * Get fuel transfer status
+   */
+  getFuelTransferStatus(): Array<{ tankId: string; transferringTo: string | undefined; venting: boolean }> {
+    const state = this.fuel.getState();
+    const fullState = (this.fuel as any).tanks; // Access internal tanks for valve status
+    return fullState.map((tank: any) => ({
+      tankId: tank.id,
+      transferringTo: tank.valves.crossfeedTo,
+      venting: tank.valves.vent
+    }));
+  }
+
+  // =============================================================================
+  // Sensor Control Methods
+  // =============================================================================
+
+  /**
+   * Set radar mode
+   */
+  setRadarMode(mode: 'search' | 'track' | 'mapping' | 'off'): void {
+    this.radar.setMode(mode as any);
+  }
+
+  /**
+   * Set optical sensor mode
+   */
+  setOpticalMode(mode: 'visual' | 'infrared' | 'combined'): void {
+    this.opticalSensors.setMode(mode as any);
+  }
+
+  /**
+   * Initiate radar track on contact
+   */
+  initiateRadarTrack(contactId: string): boolean {
+    return this.radar.initiateTrack(contactId);
+  }
+
+  /**
+   * Drop radar track
+   */
+  dropRadarTrack(contactId: string): void {
+    this.radar.dropTrack(contactId);
+  }
+
+  /**
+   * Get all radar contacts
+   */
+  getRadarContacts(): any[] {
+    return this.radar.getContacts();
+  }
+
+  /**
+   * Get all optical contacts
+   */
+  getOpticalContacts(): any[] {
+    return this.opticalSensors.getContacts();
+  }
+
+  /**
+   * Get all ESM contacts
+   */
+  getESMContacts(): any[] {
+    return (this.esm as any).getContacts?.() || [];
+  }
+
+  /**
+   * Set ESM passive mode
+   */
+  setESMMode(passive: boolean): void {
+    // ESM is always passive, but this could control different receiver modes
+    (this.esm as any).setPassiveMode?.(passive);
+  }
+
+  // =============================================================================
+  // Autopilot and Navigation Computer Methods
+  // =============================================================================
+
+  /**
+   * Plot intercept course to target
+   */
+  plotInterceptCourse(targetPosition: any, targetVelocity: any): any {
+    return this.navComputer.calculateIntercept(
+      this.physics.getState().position,
+      this.physics.getState().velocity,
+      targetPosition,
+      targetVelocity
+    );
+  }
+
+  /**
+   * Get navigation computer solution
+   */
+  getNavSolution(): any {
+    return this.navComputer.getState().solution;
+  }
+
+  // =============================================================================
+  // Engineering / Coolant Control Methods
+  // =============================================================================
+
+  /**
+   * Open coolant cross-connect valve
+   */
+  openCoolantCrossConnect(): void {
+    this.coolant.openCrossConnect();
+  }
+
+  /**
+   * Close coolant cross-connect valve
+   */
+  closeCoolantCrossConnect(): void {
+    this.coolant.closeCrossConnect();
+  }
+
+  /**
+   * Get coolant cross-connect status
+   */
+  getCoolantCrossConnectStatus(): boolean {
+    return this.coolant.getState().crossConnectOpen;
+  }
+
+  // =============================================================================
+  // Circuit Breaker Control Methods
+  // =============================================================================
+
+  /**
+   * Toggle circuit breaker
+   */
+  toggleCircuitBreaker(breakerId: string, on: boolean): void {
+    this.electrical.setCircuitBreaker(breakerId, on);
+  }
+
+  /**
+   * Get all circuit breaker states
+   */
+  getCircuitBreakers(): Array<{ id: string; name: string; on: boolean; tripped: boolean }> {
+    return this.electrical.getCircuitBreakers?.() || [];
+  }
 }
+
