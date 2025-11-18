@@ -122,7 +122,8 @@ export class GeologicalActivity {
       this.generateHotSpots();
     }
 
-    if (this.planet.physical.waterCoverage && this.planet.physical.waterCoverage > 0.1) {
+    // Check if planet has significant water coverage (property may not exist)
+    if ((this.planet.physical as any).waterCoverage && (this.planet.physical as any).waterCoverage > 0.1) {
       this.generateGeothermalVents();
     }
   }
@@ -142,8 +143,8 @@ export class GeologicalActivity {
     const ageFactor = Math.exp(-age / 1e10); // Decay over time
     activity *= (1 + ageFactor);
 
-    // Tidal heating from moons/parent
-    if (this.planet.moons && this.planet.moons.length > 0) {
+    // Tidal heating from moons/parent (moons property may not exist on planet)
+    if ((this.planet as any).moons && (this.planet as any).moons.length > 0) {
       activity *= 1.5; // Moons cause tidal heating
     }
 
