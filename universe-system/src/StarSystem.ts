@@ -19,6 +19,14 @@ import { StationGenerator, SpaceStation } from './StationGenerator';
 import { HazardSystem, Hazard } from './HazardSystem';
 import { Satellite, SatelliteFactory, SatelliteType } from '../../physics-modules/src/satellite';
 import { TrafficManager, NPCShip, ShipType } from './npc-traffic';
+import {
+  RelayNetwork,
+  CommunicationsManager,
+  NetworkNode,
+  FrequencyBand,
+  getFrequencyForBand,
+  AntennaPresets
+} from './communications';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -29,6 +37,7 @@ export interface StarSystemConfig {
   allowSatellites?: boolean;
   allowHazards?: boolean;
   allowNPCTraffic?: boolean;
+  allowCommunications?: boolean;
   civilizationLevel?: number; // 0-10 (0 = uninhabited, 10 = high tech)
   position?: Vector3; // Position in galaxy
 }
@@ -60,6 +69,8 @@ export class StarSystem {
   public stations: SpaceStation[] = [];
   public satellites: Satellite[] = [];
   public trafficManager: TrafficManager<NPCShip>;
+  public relayNetwork: RelayNetwork;
+  public communicationsManager: CommunicationsManager;
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
@@ -100,6 +111,8 @@ export class StarSystem {
     this.stationGenerator = new StationGenerator(seed + 1);
     this.hazardSystem = new HazardSystem(seed + 2);
     this.trafficManager = new TrafficManager<NPCShip>(100000, 100);
+    this.relayNetwork = new RelayNetwork(1e10); // 10 million km max range
+    this.communicationsManager = new CommunicationsManager(this.relayNetwork);
 
     // Generate the star
     this.star = this.generateStar(config.starClass);
@@ -136,6 +149,11 @@ export class StarSystem {
         this.id,
         [...this.planets, ...this.asteroids]
       );
+    }
+
+    // Build communications network
+    if (config.allowCommunications !== false) {
+      this.buildCommunicationsNetwork(config.civilizationLevel || 5);
     }
   }
 
@@ -622,6 +640,86 @@ export class StarSystem {
   }
 
   /**
+   * Build communications network
+   */
+  private buildCommunicationsNetwork(civilizationLevel: number): void {
+    // Add stations as network nodes
+    for (const station of this.stations) {
+      // Station communication power scales with civilization level
+      const powerWatts = 100 + civilizationLevel * 20; // 100-300W
+      const frequency = getFrequencyForBand(FrequencyBand.SHF); // 10 GHz for stations
+
+      const node: NetworkNode = {
+        id: station.id,
+        position: station.position,
+        transmitPower: powerWatts,
+        antenna: {
+          gain: AntennaPresets.HIGH_GAIN.gain,
+          frequency
+        },
+        maxConnections: 10,
+        isRelay: true
+      };
+
+      this.relayNetwork.addNode(node);
+    }
+
+    // Add satellites as network nodes (if they have communication capabilities)
+    for (const satellite of this.satellites) {
+      // Only comms and nav satellites have relay capability
+      const isCommsSat = satellite.type === SatelliteType.COMMUNICATIONS;
+      const isNavSat = satellite.type === SatelliteType.NAVIGATION;
+
+      if (isCommsSat || isNavSat) {
+        const powerWatts = 50; // Satellites have less power than stations
+        const frequency = getFrequencyForBand(FrequencyBand.SHF);
+
+        const node: NetworkNode = {
+          id: satellite.name,
+          position: satellite.orbitalBody.getPosition(),
+          transmitPower: powerWatts,
+          antenna: {
+            gain: AntennaPresets.SATELLITE.gain,
+            frequency
+          },
+          maxConnections: 5,
+          isRelay: isCommsSat // Only comms sats relay
+        };
+
+        this.relayNetwork.addNode(node);
+      }
+    }
+
+    // Add NPC ships as network nodes
+    const ships = this.trafficManager.getAllVessels();
+    for (const ship of ships) {
+      const powerWatts = 20; // Ships have low power
+      const frequency = getFrequencyForBand(FrequencyBand.UHF); // 1 GHz for ships
+
+      const node: NetworkNode = {
+        id: ship.id,
+        position: ship.position,
+        transmitPower: powerWatts,
+        antenna: {
+          gain: AntennaPresets.DIRECTIONAL.gain,
+          frequency
+        },
+        maxConnections: 3,
+        isRelay: false // Ships don't relay
+      };
+
+      this.relayNetwork.addNode(node);
+    }
+
+    // Build network topology
+    this.relayNetwork.updateTopology();
+
+    // Set message generation rate based on civilization
+    const messagesPerSecond = 0.05 + civilizationLevel * 0.01; // 0.05-0.15 messages/s
+    this.communicationsManager.setMessageGenerationRate(messagesPerSecond);
+  }
+
+  /**
    * Update entire system
    */
   update(deltaTime: number): void {
@@ -670,6 +768,9 @@ export class StarSystem {
 
     // Update traffic manager (rebuild spatial grid)
     this.trafficManager.update(deltaTime);
+
+    // Update communications network
+    this.communicationsManager.update(deltaTime);
 
     // Update hazards
     this.hazardSystem.update(deltaTime);

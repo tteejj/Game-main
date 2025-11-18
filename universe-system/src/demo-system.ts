@@ -231,6 +231,50 @@ export function getSystemReport(system: StarSystem): string {
     lines.push('');
   }
 
+  // Communications
+  const commStats = system.communicationsManager.getStatistics();
+  const networkStats = system.relayNetwork.getNetworkStats();
+
+  if (networkStats.nodeCount > 0) {
+    lines.push('═══ COMMUNICATIONS NETWORK ═══');
+    lines.push(`Network Nodes: ${networkStats.nodeCount}`);
+    lines.push(`Network Links: ${networkStats.linkCount}`);
+    lines.push(`Connected Segments: ${networkStats.connectedComponents}`);
+    lines.push('');
+
+    lines.push(`Network Statistics:`);
+    lines.push(`  Average Latency: ${networkStats.avgLatency.toFixed(1)} ms`);
+    lines.push(`  Average Quality: ${(networkStats.avgQuality * 100).toFixed(0)}%`);
+    lines.push('');
+
+    lines.push(`Message Traffic:`);
+    lines.push(`  Total Sent: ${commStats.totalMessagesSent}`);
+    lines.push(`  Delivered: ${commStats.totalMessagesDelivered}`);
+    lines.push(`  Failed: ${commStats.totalMessagesFailed}`);
+    lines.push(`  Delivery Rate: ${(commStats.deliveryRate * 100).toFixed(1)}%`);
+    if (commStats.avgDeliveryTimeMs > 0) {
+      lines.push(`  Avg Delivery Time: ${commStats.avgDeliveryTimeMs.toFixed(1)} ms`);
+    }
+    lines.push(`  Messages in Queue: ${commStats.messagesInQueue}`);
+    lines.push('');
+
+    // Show recent messages (last 5)
+    const recentMessages = system.communicationsManager.getRecentMessages(5);
+    if (recentMessages.length > 0) {
+      lines.push(`Recent Traffic:`);
+      for (const msg of recentMessages.slice(-5)) {
+        const status = msg.delivered ? '✓' : '...';
+        lines.push(`  ${status} [${msg.type}] ${msg.senderName} → ${msg.receiverName}`);
+        lines.push(`     "${msg.content}"`);
+        if (msg.route && msg.route.totalHops > 1) {
+          lines.push(`     Route: ${msg.route.totalHops} hops, ${msg.route.totalLatencyMs.toFixed(0)}ms latency`);
+        }
+      }
+    }
+
+    lines.push('');
+  }
+
   // Hazards
   const hazards = system.hazardSystem.getActiveHazards();
   if (hazards.length > 0) {
