@@ -314,3 +314,157 @@ export {
   demoCustomSystem,
   demoStationTrading
 } from './examples';
+
+// ====================================================================
+// LIVING UNIVERSE SYSTEMS - Phases 1-4
+// ====================================================================
+
+// Phase 1: Core Simulation
+export {
+  UniverseSimulationController,
+  SimulationConfig,
+  SimulationState,
+  UniverseState as SimulationUniverseState,
+  SystemActivity
+} from './simulation/UniverseSimulationController';
+
+export {
+  HistoricalMemorySystem,
+  HistoricalEvent,
+  HistoricalQuery,
+  EntityMemory,
+  RelationshipMemory,
+  EventCategory as HistoricalEventCategory,
+  EventType as HistoricalEventType,
+  Chronicle as HistoricalChronicle
+} from './simulation/HistoricalMemorySystem';
+
+export {
+  ConsequenceEngine,
+  Consequence,
+  ConsequenceImpact,
+  ConsequenceRule,
+  ConsequenceContext
+} from './simulation/ConsequenceEngine';
+
+// Phase 2: Entity AI
+export {
+  ExtendedNPCMemory,
+  Experience,
+  ExperienceType,
+  Lesson,
+  BehaviorModification,
+  PersonalityTraits,
+  DetailedRelationship,
+  TraumaMemory,
+  TriggerPattern,
+  Achievement,
+  AchievementType,
+  Reputation as EntityReputation,
+  Biography,
+  CareerMilestone
+} from './entity-ai/ExtendedNPCMemory';
+
+export {
+  NPCGoalSystem,
+  NPCGoal,
+  GoalType,
+  GoalCategory,
+  GoalStatus,
+  SubGoal,
+  GoalMotivation,
+  ExpectedReward,
+  ResourceRequirement,
+  ActionPlan,
+  PlannedAction,
+  ActionType,
+  GoalEvaluationContext
+} from './entity-ai/NPCGoalSystem';
+
+export {
+  AdaptiveAI,
+  LearningEvent,
+  Strategy,
+  Expertise,
+  ExpertiseDomain,
+  Skill,
+  Milestone,
+  DecisionContext,
+  Decision
+} from './entity-ai/AdaptiveAI';
+
+// Phase 3: Faction Dynamics
+export {
+  FactionDiplomacyEngine,
+  FactionRelationship,
+  DiplomaticStatus,
+  DiplomaticEvent as FactionDiplomaticEvent,
+  WarRecord,
+  WarPhase,
+  Treaty as DiplomaticTreaty,
+  TreatyType as DiplomaticTreatyType,
+  AllianceRecord,
+  DiplomaticAction,
+  RelationshipChange
+} from './faction-dynamics/FactionDiplomacyEngine';
+
+export {
+  FactionEconomicNeeds,
+  FactionEconomicState,
+  ResourceNeed,
+  SupplyChain,
+  CriticalShortage,
+  EconomicAction,
+  EconomicThreat,
+  TradeAgreement
+} from './faction-dynamics/FactionEconomicNeeds';
+
+// Phase 4: Storytelling Systems
+export {
+  NewsGenerationEngine,
+  NewsArticle,
+  NewsBias,
+  NewsTemplate,
+  NewsImportance,
+  ArticleSection
+} from './storytelling/NewsGenerationEngine';
+
+export {
+  RumorPropagationSystem,
+  Rumor,
+  RumorNode,
+  DistortionType,
+  PropagationResult
+} from './storytelling/RumorPropagationSystem';
+
+export {
+  AbsenceSimulator,
+  AbsenceSummary,
+  CrisisReport,
+  WarUpdate,
+  EconomicChange,
+  DiplomaticChange,
+  PersonalImpact,
+  UniverseStateSnapshot
+} from './storytelling/AbsenceSimulator';
+
+export {
+  ChronicleGenerator,
+  Chronicle,
+  ChronicleType,
+  Legend,
+  LegendCategory,
+  LegendVariant,
+  Prophecy,
+  FactionHistory,
+  Era
+} from './storytelling/ChronicleGenerator';
+
+// Universal Orchestrator - Integration Layer
+export {
+  UniverseOrchestrator,
+  OrchestratorConfig,
+  UniverseState as OrchestratorUniverseState,
+  EntityRegistration,
+  FactionRegistration
+} from './UniverseOrchestrator';
