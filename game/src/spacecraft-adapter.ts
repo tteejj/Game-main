@@ -138,6 +138,72 @@ export class SpacecraftAdapter {
         this.spacecraft.setRadarRange(rangeKm * 1000); // Convert to meters
     }
 
+    // ========== WEAPONS CONTROLS ==========
+
+    setWeaponsSafety(on: boolean): void {
+        this.spacecraft.weapons.weaponsSafety = on;
+    }
+
+    setPointDefense(active: boolean): void {
+        this.spacecraft.weapons.pointDefenseActive = active;
+    }
+
+    setAutoEngageHostiles(auto: boolean): void {
+        this.spacecraft.weapons.autoEngageHostiles = auto;
+    }
+
+    setEWJamming(active: boolean): void {
+        this.spacecraft.weapons.setEWJamming(active);
+    }
+
+    setCountermeasuresArmed(armed: boolean): void {
+        this.spacecraft.weapons.setCountermeasuresArmed(armed);
+    }
+
+    deployCountermeasures(): boolean {
+        return this.spacecraft.weapons.deployCountermeasures();
+    }
+
+    fireWeapon(weaponIndex: number, targetIndex: number): void {
+        const targets = this.spacecraft.weapons.getState().targets;
+        if (targets.length === 0 || targetIndex >= targets.length) {
+            console.log('No valid target selected');
+            return;
+        }
+
+        const target = targets[targetIndex];
+
+        // For now, just engage with the first available weapon type
+        this.spacecraft.weapons.engageTarget(target.id, 'kinetic', 'manual');
+    }
+
+    engageTarget(targetIndex: number, weaponType: 'kinetic' | 'missile' | 'laser' | 'all'): void {
+        const targets = this.spacecraft.weapons.getState().targets;
+        if (targets.length === 0 || targetIndex >= targets.length) {
+            console.log('No valid target selected');
+            return;
+        }
+
+        const target = targets[targetIndex];
+        this.spacecraft.weapons.engageTarget(target.id, weaponType, 'computer_assisted');
+    }
+
+    getWeaponsState(): any {
+        return this.spacecraft.weapons.getState();
+    }
+
+    getWeaponsTargets(): any[] {
+        return this.spacecraft.weapons.getState().targets;
+    }
+
+    getEWState(): any {
+        return this.spacecraft.weapons.getEWState();
+    }
+
+    getCountermeasuresState(): any {
+        return this.spacecraft.weapons.getCountermeasuresState();
+    }
+
     // ========== TELEMETRY GETTERS ==========
 
     getState(): any {

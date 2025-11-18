@@ -73,6 +73,15 @@ export class WeaponsControlSystem {
   public weaponsSafety: boolean = true; // Master safety
   public autoEngageHostiles: boolean = false;
 
+  // EW/Countermeasures
+  private ewJammingActive: boolean = false;
+  private jammingPower: number = 0; // Watts
+  private jammingEffectiveRange: number = 0; // meters
+  private countermeasuresArmed: boolean = false;
+  private chaffCount: number = 50; // Chaff cartridges
+  private flareCount: number = 50; // Flare cartridges
+  private lastCMDeployTime: number = 0; // Cooldown tracking
+
   // Power management
   private totalPowerDraw: number = 0;
   private powerAvailable: number = 100000; // 100 kW default
@@ -425,6 +434,11 @@ export class WeaponsControlSystem {
         totalPower += 5000; // Standby for magnets
       }
     });
+
+    // EW jamming system
+    if (this.ewJammingActive) {
+      totalPower += this.jammingPower; // 10 kW
+    }
 
     this.totalPowerDraw = totalPower;
   }
@@ -1015,6 +1029,96 @@ export class WeaponsControlSystem {
   }
 
   /**
+   * Set EW jamming active
+   */
+  public setEWJamming(active: boolean): void {
+    this.ewJammingActive = active;
+    if (active) {
+      // 10kW jamming power, 50km effective range
+      this.jammingPower = 10000;
+      this.jammingEffectiveRange = 50000;
+    } else {
+      this.jammingPower = 0;
+      this.jammingEffectiveRange = 0;
+    }
+  }
+
+  /**
+   * Set countermeasures armed
+   */
+  public setCountermeasuresArmed(armed: boolean): void {
+    this.countermeasuresArmed = armed;
+  }
+
+  /**
+   * Deploy countermeasures (chaff/flares)
+   */
+  public deployCountermeasures(): boolean {
+    const currentTime = Date.now();
+    const cooldownTime = 2000; // 2 seconds between deployments
+
+    if (currentTime - this.lastCMDeployTime < cooldownTime) {
+      return false; // Still in cooldown
+    }
+
+    if (!this.countermeasuresArmed) {
+      return false; // Not armed
+    }
+
+    // Deploy both chaff and flare
+    let deployed = false;
+
+    if (this.chaffCount > 0) {
+      this.chaffCount--;
+      deployed = true;
+      this.events.push({
+        time: currentTime,
+        type: 'CHAFF_DEPLOYED',
+        data: { remaining: this.chaffCount }
+      });
+    }
+
+    if (this.flareCount > 0) {
+      this.flareCount--;
+      deployed = true;
+      this.events.push({
+        time: currentTime,
+        type: 'FLARE_DEPLOYED',
+        data: { remaining: this.flareCount }
+      });
+    }
+
+    if (deployed) {
+      this.lastCMDeployTime = currentTime;
+    }
+
+    return deployed;
+  }
+
+  /**
+   * Get EW system state
+   */
+  public getEWState() {
+    return {
+      jammingActive: this.ewJammingActive,
+      jammingPower: this.jammingPower,
+      effectiveRange: this.jammingEffectiveRange
+    };
+  }
+
+  /**
+   * Get countermeasures state
+   */
+  public getCountermeasuresState() {
+    return {
+      armed: this.countermeasuresArmed,
+      chaffCount: this.chaffCount,
+      flareCount: this.flareCount,
+      cooldownRemaining: Math.max(0, 2000 - (Date.now() - this.lastCMDeployTime))
+    };
+  }
+
+  /**
    * Get complete weapons status
    */
   public getState() {
@@ -1028,6 +1132,9 @@ export class WeaponsControlSystem {
       missileLaunchers: Array.from(this.missileLaunchers.values()).map(l => l.getState()),
       laserWeapons: Array.from(this.laserWeapons.values()).map(l => l.getState()),
       particleBeams: Array.from(this.particleBeams.values()).map(b => b.getState()),
+
+      ewSystem: this.getEWState(),
+      countermeasures: this.getCountermeasuresState(),
 
       projectiles: this.projectileManager.getProjectiles(),
       targets: Array.from(this.targets.values()),
