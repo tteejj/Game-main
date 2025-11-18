@@ -221,6 +221,38 @@ export class NPCShipAI {
       this.evaluateThreat(ship, playerShip);
     }
 
+    // Update goal system (goal-driven AI)
+    const context = this.buildGoalContext(ship, stations, celestialBodies, playerShip);
+    const goalAction = ship.goalSystem.update(deltaTime, context);
+
+    // If goal system has an action, execute it (goal-driven behavior)
+    // Otherwise fall back to state machine (legacy behavior)
+    if (goalAction && goalAction.status !== 'FAILED') {
+      ship.currentGoalAction = goalAction;
+      this.executeGoalAction(ship, goalAction, stations, celestialBodies);
+    } else {
+      // Fall back to state machine for behaviors not yet goal-driven
+      this.executeStateMachine(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
+    }
+
+    // Update position
+    ship.position.x += ship.velocity.x * deltaTime;
+    ship.position.y += ship.velocity.y * deltaTime;
+    ship.position.z += ship.velocity.z * deltaTime;
+  }
+
+  /**
+   * Execute state machine (legacy behavior system)
+   */
+  private executeStateMachine(
+    ship: NPCShip,
+    deltaTime: number,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[],
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
+  ): void {
+
     // State machine
     switch (ship.state) {
       case 'IDLE':
@@ -259,11 +291,151 @@ export class NPCShipAI {
         this.handleMiningState(ship, deltaTime, celestialBodies);
         break;
     }
+  }
 
-    // Update position
-    ship.position.x += ship.velocity.x * deltaTime;
-    ship.position.y += ship.velocity.y * deltaTime;
-    ship.position.z += ship.velocity.z * deltaTime;
+  /**
+   * Build context for goal evaluation
+   */
+  private buildGoalContext(
+    ship: NPCShip,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[],
+    playerShip?: { position: Vector3; faction: string; id: string }
+  ): GoalEvaluationContext {
+    const threats: string[] = [];
+    const opportunities: string[] = [];
+    const allies: string[] = [];
+    const enemies: string[] = [];
+
+    // Detect threats and opportunities
+    if (playerShip) {
+      const distance = this.distance(ship.position, playerShip.position);
+      if (distance < ship.stats.sensorRange) {
+        if (playerShip.faction === ship.faction) {
+          allies.push(playerShip.id);
+        } else {
+          // Check if at war or hostile
+          if (ship.type === 'PIRATE' || playerShip.faction !== ship.faction) {
+            threats.push(playerShip.id);
+            enemies.push(playerShip.id);
+          }
+        }
+      }
+    }
+
+    // Find nearby stations
+    for (const [stationId, station] of stations) {
+      const distance = this.distance(ship.position, station.position);
+      if (distance < ship.stats.sensorRange) {
+        opportunities.push(stationId);
+      }
+    }
+
+    return {
+      currentTime: Date.now() / 1000,
+      currentLocation: { ...ship.position },
+      currentState: {
+        location: { ...ship.position },
+        resources: {
+          credits: ship.credits,
+          fuel: ship.fuel,
+          cargoSpace: ship.stats.cargoCapacity - ship.cargo.reduce((sum, c) => sum + c.amount, 0)
+        },
+        satisfied: []
+      },
+      currentResources: {
+        credits: ship.credits,
+        fuel: ship.fuel,
+        cargoSpace: ship.stats.cargoCapacity - ship.cargo.reduce((sum, c) => sum + c.amount, 0),
+        health: ship.stats.hullStrength
+      },
+      threats,
+      opportunities,
+      allies,
+      enemies
+    };
+  }
+
+  /**
+   * Execute a goal-driven action
+   */
+  private executeGoalAction(
+    ship: NPCShip,
+    action: PlannedAction,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[]
+  ): void {
+    // Translate goal action type to ship behavior
+    switch (action.type) {
+      case 'TRAVEL_TO':
+        if (action.location) {
+          ship.state = 'TRAVELING';
+          ship.destination = { ...action.location };
+        } else if (action.target) {
+          // Target is a station ID
+          const station = stations.get(action.target);
+          if (station) {
+            ship.state = 'TRAVELING';
+            ship.destination = { ...station.position };
+            ship.currentTarget = action.target;
+          }
+        }
+        break;
+
+      case 'DOCK_AT':
+        if (action.target) {
+          ship.state = 'DOCKING';
+          ship.currentTarget = action.target;
+          const station = stations.get(action.target);
+          if (station) {
+            ship.destination = { ...station.position };
+          }
+        }
+        break;
+
+      case 'TRADE_WITH':
+        if (action.target) {
+          ship.state = 'TRADING';
+          ship.currentTarget = action.target;
+        }
+        break;
+
+      case 'COMBAT':
+        ship.state = 'ATTACKING';
+        if (action.target) {
+          ship.threat = action.target;
+        }
+        break;
+
+      case 'FLEE':
+        ship.state = 'FLEEING';
+        break;
+
+      case 'WAIT':
+        ship.state = 'IDLE';
+        break;
+
+      case 'MINE':
+        ship.state = 'MINING';
+        break;
+
+      case 'SCAN':
+      case 'INVESTIGATE':
+        ship.state = 'PATROLLING';
+        if (action.location) {
+          ship.destination = { ...action.location };
+        }
+        break;
+
+      default:
+        // Unknown action type, fall back to idle
+        ship.state = 'IDLE';
+    }
+
+    // Mark action as in progress
+    if (action.status === 'PENDING') {
+      action.status = 'IN_PROGRESS';
+    }
   }
 
   /**
