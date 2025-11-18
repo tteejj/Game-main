@@ -253,6 +253,148 @@ export class IntegratedShip {
   }
 
   /**
+   * Apply projectile damage to ship
+   */
+  applyProjectileDamage(
+    impactPoint: Vector3,
+    impactVelocity: Vector3,
+    projectileMass: number,
+    projectileDamage: number
+  ): { damageApplied: number; breachCreated: boolean } {
+    if (!this.hullDamageSystem) {
+      // No damage system - apply simple hull integrity reduction
+      return { damageApplied: projectileDamage, breachCreated: false };
+    }
+
+    // Calculate impact angle (simplified - assumes radial impact)
+    const toShip = VectorMath.subtract(impactPoint, this.getPosition());
+    const impactDirection = VectorMath.normalize(impactVelocity);
+    const surfaceNormal = VectorMath.normalize(toShip);
+
+    const dotProduct = Math.abs(VectorMath.dot(impactDirection, surfaceNormal));
+    const impactAngle = Math.acos(Math.min(1, dotProduct)) * (180 / Math.PI);
+
+    // Process impact through damage system
+    const result = this.hullDamageSystem.processImpact({
+      position: impactPoint,
+      velocity: impactVelocity,
+      mass: projectileMass,
+      damageType: DamageType.KINETIC,
+      impactAngle
+    });
+
+    // Emit damage event
+    this.emit('damage', {
+      timestamp: Date.now(),
+      impactPoint,
+      damageApplied: result.damageApplied,
+      breachCreated: result.breachCreated,
+      armorPenetrated: result.armorPenetrated
+    });
+
+    return {
+      damageApplied: result.damageApplied,
+      breachCreated: result.breachCreated
+    };
+  }
+
+  /**
+   * Apply thermal damage to ship (from lasers, etc.)
+   */
+  applyThermalDamage(
+    impactPoint: Vector3,
+    thermalEnergy: number,  // Joules
+    duration: number        // seconds
+  ): { damageApplied: number; breachCreated: boolean } {
+    if (!this.hullDamageSystem) {
+      return { damageApplied: thermalEnergy, breachCreated: false };
+    }
+
+    // Process thermal impact through damage system
+    const result = this.hullDamageSystem.processImpact({
+      position: impactPoint,
+      velocity: { x: 0, y: 0, z: 0 },  // No kinetic component
+      mass: 0,  // No mass for thermal weapons
+      damageType: DamageType.THERMAL,
+      impactAngle: 0,  // Perpendicular for lasers
+      thermalEnergy: thermalEnergy * duration  // Total energy delivered
+    });
+
+    // Emit damage event
+    this.emit('damage', {
+      timestamp: Date.now(),
+      impactPoint,
+      damageType: 'thermal',
+      damageApplied: result.damageApplied,
+      breachCreated: result.breachCreated,
+      armorPenetrated: result.armorPenetrated
+    });
+
+    return {
+      damageApplied: result.damageApplied,
+      breachCreated: result.breachCreated
+    };
+  }
+
+  /**
+   * Apply explosive damage to ship
+   */
+  applyExplosiveDamage(
+    blastCenter: Vector3,
+    explosiveYield: number,  // Joules
+    blastRadius: number      // meters
+  ): { damageApplied: number; breachCreated: boolean } {
+    if (!this.hullDamageSystem) {
+      return { damageApplied: explosiveYield, breachCreated: false };
+    }
+
+    // Calculate distance from blast to ship
+    const distToShip = VectorMath.distance(blastCenter, this.getPosition());
+
+    // Explosive damage falls off with inverse square of distance
+    const distanceFactor = Math.max(0, 1 - (distToShip / blastRadius));
+    const effectiveYield = explosiveYield * distanceFactor;
+
+    if (effectiveYield <= 0) {
+      return { damageApplied: 0, breachCreated: false };
+    }
+
+    // Process explosive impact through damage system
+    const result = this.hullDamageSystem.processImpact({
+      position: blastCenter,
+      velocity: { x: 0, y: 0, z: 0 },
+      mass: 0,
+      damageType: DamageType.EXPLOSIVE,
+      impactAngle: 0,
+      explosiveYield: effectiveYield
+    });
+
+    // Emit damage event
+    this.emit('damage', {
+      timestamp: Date.now(),
+      impactPoint: blastCenter,
+      damageType: 'explosive',
+      damageApplied: result.damageApplied,
+      breachCreated: result.breachCreated,
+      armorPenetrated: result.armorPenetrated,
+      blastRadius,
+      distanceFromBlast: distToShip
+    });
+
+    return {
+      damageApplied: result.damageApplied,
+      breachCreated: result.breachCreated
+    };
+  }
+
+  /**
+   * Get hull damage system
+   */
+  getHullDamageSystem(): HullDamageSystem | undefined {
+    return this.hullDamageSystem;
+  }
+
+  /**
    * Get collision history
    */
   getCollisionHistory(): CollisionEvent[] {
@@ -424,5 +566,19 @@ export class SimulationController {
    */
   getShip(id: string): IntegratedShip | undefined {
     return this.ships.get(id);
+  }
+
+  /**
+   * Get ship by celestial body ID
+   */
+  getShipByBodyId(bodyId: string): IntegratedShip | undefined {
+    return this.ships.get(bodyId);
+  }
+
+  /**
+   * Get world
+   */
+  getWorld(): World {
+    return this.world;
   }
 }
