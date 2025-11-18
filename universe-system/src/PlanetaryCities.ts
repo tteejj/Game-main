@@ -177,10 +177,10 @@ export class PlanetaryCity {
     this.coordinates = coordinates;
     this.elevation = 0;
 
-    // Initialize systems
+    // Initialize systems in correct order (infrastructure before economy)
     this.services = this.generateServices();
-    this.economy = this.generateEconomy();
     this.infrastructure = this.generateInfrastructure();
+    this.economy = this.generateEconomy();
     this.defense = this.generateDefense();
     this.politics = this.generatePolitics();
   }

@@ -1,10 +1,9 @@
 #!/usr/bin/env ts-node
 /**
  * Demo Runner
- * Executes comprehensive universe system demonstrations
+ * Executes the integrated universe system demonstration
  */
 
-import runAllDemos from './src/comprehensive-demo';
+import runIntegratedDemo from './src/integrated-demo';
 
-console.clear();
-runAllDemos();
+runIntegratedDemo();

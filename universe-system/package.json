@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "demo": "ts-node src/examples.ts",
-    "demo:full": "ts-node demo-runner.ts",
+    "demo:full": "ts-node --transpile-only demo-runner.ts",
     "test": "node dist/examples.js"
   },
   "keywords": [
