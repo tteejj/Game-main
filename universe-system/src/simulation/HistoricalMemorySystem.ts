@@ -11,7 +11,7 @@
  * - Generates chronicles and narratives from history
  */
 
-import { Vector3 } from '../types';
+import { Vector3 } from '../CelestialBody';
 
 export interface HistoricalEvent {
   // Identity

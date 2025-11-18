@@ -10,8 +10,8 @@
  * - Personal history and biography
  */
 
-import { Vector3 } from '../types';
-import { HistoricalEvent, Relationship } from './HistoricalMemorySystem';
+import { Vector3 } from '../CelestialBody';
+import { HistoricalEvent, Relationship } from '../simulation/HistoricalMemorySystem';
 
 export interface Experience {
   id: string;
@@ -219,7 +219,7 @@ export interface Biography {
 
   // Legacy
   legendaryDeeds: Achievement[];
-  notorious For: string[];
+  notoriousFor: string[];
 }
 
 export interface CareerMilestone {

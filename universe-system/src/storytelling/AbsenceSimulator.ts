@@ -30,7 +30,7 @@ export interface AbsenceSummary {
 
   // Personal impacts
   personalImpacts: PersonalImpact[];
-  reputation Changes: Map<string, number>;  // faction -> change
+  reputationChanges: Map<string, number>;  // faction -> change
 
   // Messages & news
   unreadMessages: number;

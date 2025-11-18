@@ -9,7 +9,7 @@
  * - Form new goals based on experiences
  */
 
-import { Vector3 } from '../types';
+import { Vector3 } from '../CelestialBody';
 import { ExtendedNPCMemory, PersonalityTraits } from './ExtendedNPCMemory';
 
 export interface NPCGoal {

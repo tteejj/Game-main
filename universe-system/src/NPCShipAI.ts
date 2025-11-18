@@ -7,6 +7,14 @@ import { Vector3, CelestialBody } from './CelestialBody';
 import { SpaceStation } from './StationGenerator';
 import { Commodity } from './EconomySystem';
 import { FactionSystem } from './FactionSystem';
+import {
+  ExtendedNPCMemory,
+  Experience,
+  ExperienceType,
+  TraumaMemory,
+  PersonalityTraits as ExtendedPersonality
+} from './entity-ai/ExtendedNPCMemory';
+import { HistoricalEvent } from './simulation/HistoricalMemorySystem';
 
 export type ShipType = 'TRADER' | 'MINER' | 'PIRATE' | 'PATROL' | 'COURIER' | 'EXPLORER' | 'PASSENGER';
 export type ShipState = 'IDLE' | 'TRAVELING' | 'DOCKING' | 'DOCKED' | 'TRADING' | 'MINING' | 'ATTACKING' | 'FLEEING' | 'PATROLLING';
@@ -46,7 +54,13 @@ export interface NPCShip {
   threat?: string;            // ID of threatening ship
   personality: ShipPersonality;
   route?: TradeRoute;
-  memory: ShipMemory;
+  memory: ShipMemory;         // Legacy simple memory (for backward compatibility)
+  extendedMemory: ExtendedNPCMemory;  // New sophisticated memory system
+  emotionalState: {           // Current emotional state
+    stress: number;           // 0-10
+    satisfaction: number;     // -10 to +10
+    fear: number;             // 0-10
+  };
 }
 
 export interface ShipPersonality {
@@ -102,8 +116,24 @@ export class NPCShipAI {
       Object.assign(stats, customStats);
     }
 
+    const shipId = `ship_${this.nextShipId++}`;
+    const personality = this.generatePersonality(type);
+
+    // Convert simple personality to extended personality traits
+    const extendedPersonality: Partial<ExtendedPersonality> = {
+      aggression: personality.aggression,
+      caution: personality.caution,
+      greed: personality.greed,
+      curiosity: personality.curiosity,
+      loyalty: personality.loyalty,
+      // Additional traits based on ship type
+      risktaking: type === 'PIRATE' ? 0.7 : type === 'TRADER' ? 0.3 : 0.5,
+      patience: type === 'TRADER' ? 0.7 : type === 'PIRATE' ? 0.2 : 0.5,
+      adaptability: type === 'EXPLORER' ? 0.8 : 0.5
+    };
+
     const ship: NPCShip = {
-      id: `ship_${this.nextShipId++}`,
+      id: shipId,
       name: this.generateShipName(type, faction),
       type,
       faction,
@@ -114,7 +144,7 @@ export class NPCShipAI {
       cargo: [],
       fuel: stats.fuelCapacity,
       credits: this.getStartingCredits(type),
-      personality: this.generatePersonality(type),
+      personality,
       memory: {
         visitedStations: new Set(),
         knownThreats: new Map(),
@@ -122,6 +152,12 @@ export class NPCShipAI {
         lastTradeTime: 0,
         totalProfit: 0,
         lastCombatReport: 0
+      },
+      extendedMemory: new ExtendedNPCMemory(shipId, 'SHIP', extendedPersonality),
+      emotionalState: {
+        stress: 0,
+        satisfaction: 0,
+        fear: 0
       }
     };
 
@@ -272,6 +308,24 @@ export class NPCShipAI {
       return;
     }
 
+    // Check for trauma triggers at current location
+    const traumatized = this.checkTraumaTriggers(ship, {
+      location: ship.position,
+      situationType: 'TRAVELING'
+    });
+
+    // If traumatized, abort current destination and flee
+    if (traumatized) {
+      ship.destination = this.generateRandomDestination(ship.position, 1e8);
+      ship.currentTarget = undefined;
+      ship.route = undefined;
+      // Traumatized ships return to idle after fleeing from trigger
+      if (Math.random() < 0.3) {
+        ship.state = 'IDLE';
+        return;
+      }
+    }
+
     // Calculate direction to destination
     const toDestination = {
       x: ship.destination.x - ship.position.x,
@@ -368,6 +422,25 @@ export class NPCShipAI {
       ship.credits -= refuelAmount * 0.5; // Cost of fuel
     }
 
+    // Memory consolidation during rest (simulates "sleep"/downtime)
+    // Consolidate memories every ~5 seconds of docked time
+    if (Math.random() < deltaTime * 0.2) {
+      this.consolidateMemoriesWhileDocked(ship, deltaTime);
+
+      // Record docking experience if first time at this station
+      if (!ship.memory.visitedStations.has(ship.currentTarget)) {
+        ship.memory.visitedStations.add(ship.currentTarget);
+        this.recordExperience(
+          ship,
+          'FIRST_TIME',
+          `First visit to ${station.name}`,
+          2, // Slight positive emotional impact
+          5, // Moderate intensity
+          [station.id]
+        );
+      }
+    }
+
     // Trading behavior
     if (ship.type === 'TRADER' && ship.route) {
       ship.state = 'TRADING';
@@ -436,6 +509,36 @@ export class NPCShipAI {
         }
       }
 
+      // Record successful trade experience
+      const emotionalImpact = Math.min(10, profit / 500); // Higher profit = better feeling
+      const intensity = profit > 1000 ? 7 : 5; // Very profitable trades are more memorable
+
+      this.recordExperience(
+        ship,
+        profit > 1000 ? 'PROFITABLE_DISCOVERY' : 'SUCCESSFUL_TRADE',
+        `Completed trade of ${ship.route.commodity}: ${profit.toFixed(0)} credits profit`,
+        emotionalImpact,
+        intensity,
+        ship.route ? [ship.route.fromStation, ship.route.toStation] : []
+      );
+
+      // Update profitable routes memory
+      if (profit > 0 && ship.route) {
+        const existingRoute = ship.memory.profitableRoutes.find(
+          r => r.fromStation === ship.route!.fromStation && r.toStation === ship.route!.toStation
+        );
+        if (existingRoute) {
+          existingRoute.profit = (existingRoute.profit + profit) / 2; // Moving average
+          existingRoute.lastCheck = Date.now() / 1000;
+        } else {
+          ship.memory.profitableRoutes.push({
+            ...ship.route,
+            profit,
+            lastCheck: Date.now() / 1000
+          });
+        }
+      }
+
       ship.cargo = [];
       ship.state = 'DOCKED';
       ship.route = undefined;
@@ -473,12 +576,34 @@ export class NPCShipAI {
           const severity = (ship.stats.weaponPower / 100) + (distance < 2000 ? 0.5 : 0);
           factionSystem.reportCombat(ship.faction, playerShip.faction, severity);
           ship.memory.lastCombatReport = now;
+
+          // Record combat experience
+          this.recordExperience(
+            ship,
+            'COMBAT_VICTORY',
+            `Engaged ${playerShip.faction} ship in combat`,
+            -3, // Combat is stressful even when winning
+            6,
+            [playerShip.id]
+          );
         }
       }
     }
 
     // Lost target or too damaged?
     if (distance > ship.stats.sensorRange || ship.stats.hullStrength < 30) {
+      // Record combat defeat if hull is low
+      if (ship.stats.hullStrength < 30) {
+        this.recordExperience(
+          ship,
+          'COMBAT_DEFEAT',
+          `Severely damaged by ${playerShip.faction} ship - retreating`,
+          -8, // Very negative emotional impact
+          9,  // Highly memorable
+          [playerShip.id]
+        );
+      }
+
       ship.state = 'FLEEING';
       ship.threat = undefined;
     }
@@ -497,6 +622,21 @@ export class NPCShipAI {
       return;
     }
 
+    // Record near-death experience if hull is critically low
+    // This will create trauma that affects future behavior
+    if (ship.stats.hullStrength < 20 && Math.random() < 0.1) {
+      this.recordExperience(
+        ship,
+        'NEAR_DEATH',
+        `Barely escaped death from ${playerShip.faction} ship at ${ship.position.x.toFixed(0)}, ${ship.position.y.toFixed(0)}, ${ship.position.z.toFixed(0)}`,
+        -10, // Maximum negative emotional impact
+        10,  // Maximum intensity - will never forget
+        [playerShip.id]
+      );
+      // Update threat memory
+      ship.memory.knownThreats.set(playerShip.id, Date.now() / 1000);
+    }
+
     // Flee in opposite direction
     const awayFromThreat = {
       x: ship.position.x - playerShip.position.x,
@@ -506,6 +646,18 @@ export class NPCShipAI {
 
     const distance = this.magnitude(awayFromThreat);
     if (distance > ship.stats.sensorRange * 2) {
+      // Successfully escaped
+      if (ship.stats.hullStrength < 50) {
+        // Record successful escape
+        this.recordExperience(
+          ship,
+          'FLEEING',
+          `Successfully escaped from ${playerShip.faction} threat`,
+          3, // Relief
+          7,
+          [playerShip.id]
+        );
+      }
       ship.state = 'IDLE';
       return;
     }
@@ -885,5 +1037,171 @@ export class NPCShipAI {
    */
   removeShip(shipId: string): void {
     this.ships.delete(shipId);
+  }
+
+  /**
+   * Record an experience in the ship's extended memory
+   */
+  private recordExperience(
+    ship: NPCShip,
+    type: ExperienceType,
+    description: string,
+    emotionalImpact: number,
+    intensity: number,
+    participants: string[] = []
+  ): void {
+    const experience: Experience = {
+      id: `exp_${ship.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now() / 1000,
+      type,
+      event: {
+        id: `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now() / 1000,
+        type: this.mapExperienceTypeToEventType(type),
+        severity: Math.ceil(intensity / 2), // Convert 0-10 intensity to 1-5 severity
+        category: this.mapExperienceToCategory(type),
+        description,
+        participants,
+        initiator: ship.id,
+        victims: emotionalImpact < 0 ? [ship.id] : undefined,
+        location: { ...ship.position },
+        systemId: undefined,
+        stationId: undefined,
+        data: {
+          shipType: ship.type,
+          faction: ship.faction,
+          emotionalImpact,
+          intensity
+        },
+        detailedLog: undefined,
+        consequences: [],
+        witnessed: false,
+        priority: Math.ceil(intensity),
+        tags: [ship.type, ship.faction, type]
+      },
+      emotionalImpact,
+      intensity,
+      location: { ...ship.position },
+      witnesses: participants,
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    ship.extendedMemory.recordExperience(experience);
+
+    // Update emotional state based on experience
+    if (emotionalImpact < -5) {
+      ship.emotionalState.stress += Math.abs(emotionalImpact) / 2;
+      ship.emotionalState.satisfaction += emotionalImpact / 2;
+    } else if (emotionalImpact > 5) {
+      ship.emotionalState.satisfaction += emotionalImpact / 2;
+      ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - 1);
+    }
+
+    // Cap emotional states
+    ship.emotionalState.stress = Math.max(0, Math.min(10, ship.emotionalState.stress));
+    ship.emotionalState.satisfaction = Math.max(-10, Math.min(10, ship.emotionalState.satisfaction));
+    ship.emotionalState.fear = Math.max(0, Math.min(10, ship.emotionalState.fear));
+  }
+
+  /**
+   * Map ExperienceType to HistoricalEvent EventType
+   */
+  private mapExperienceTypeToEventType(type: ExperienceType): HistoricalEvent['type'] {
+    const mapping: Record<ExperienceType, HistoricalEvent['type']> = {
+      'NEAR_DEATH': 'COMBAT_ENDED',
+      'SUCCESSFUL_TRADE': 'TRADE_COMPLETED',
+      'PROFITABLE_DISCOVERY': 'POI_DISCOVERED',
+      'BETRAYAL': 'REPUTATION_CHANGE',
+      'RESCUE': 'RESCUE',
+      'BEING_RESCUED': 'RESCUE',
+      'COMBAT_VICTORY': 'COMBAT_ENDED',
+      'COMBAT_DEFEAT': 'COMBAT_ENDED',
+      'FLEEING': 'COMBAT_ENDED',
+      'FIRST_TIME': 'ENCOUNTER',
+      'MILESTONE': 'GOAL_ACHIEVED',
+      'FAILURE': 'GOAL_FAILED',
+      'FRIENDSHIP_FORMED': 'REPUTATION_CHANGE',
+      'FRIENDSHIP_BROKEN': 'REPUTATION_CHANGE',
+      'REPUTATION_GAINED': 'REPUTATION_EARNED',
+      'REPUTATION_LOST': 'REPUTATION_CHANGE',
+      'GOAL_ACHIEVED': 'GOAL_ACHIEVED',
+      'GOAL_FAILED': 'GOAL_FAILED',
+      'DISCOVERY': 'POI_DISCOVERED',
+      'EXPLORATION': 'SYSTEM_MAPPED',
+      'LEARNING': 'GOAL_ACHIEVED'
+    };
+    return mapping[type] || 'ENCOUNTER';
+  }
+
+  /**
+   * Map ExperienceType to HistoricalEvent EventCategory
+   */
+  private mapExperienceToCategory(type: ExperienceType): HistoricalEvent['category'] {
+    const mapping: Record<ExperienceType, HistoricalEvent['category']> = {
+      'NEAR_DEATH': 'MILITARY',
+      'SUCCESSFUL_TRADE': 'ECONOMIC',
+      'PROFITABLE_DISCOVERY': 'DISCOVERY',
+      'BETRAYAL': 'SOCIAL',
+      'RESCUE': 'PERSONAL',
+      'BEING_RESCUED': 'PERSONAL',
+      'COMBAT_VICTORY': 'MILITARY',
+      'COMBAT_DEFEAT': 'MILITARY',
+      'FLEEING': 'MILITARY',
+      'FIRST_TIME': 'PERSONAL',
+      'MILESTONE': 'PERSONAL',
+      'FAILURE': 'PERSONAL',
+      'FRIENDSHIP_FORMED': 'SOCIAL',
+      'FRIENDSHIP_BROKEN': 'SOCIAL',
+      'REPUTATION_GAINED': 'SOCIAL',
+      'REPUTATION_LOST': 'SOCIAL',
+      'GOAL_ACHIEVED': 'PERSONAL',
+      'GOAL_FAILED': 'PERSONAL',
+      'DISCOVERY': 'DISCOVERY',
+      'EXPLORATION': 'DISCOVERY',
+      'LEARNING': 'PERSONAL'
+    };
+    return mapping[type] || 'PERSONAL';
+  }
+
+  /**
+   * Check for trauma triggers before making decisions
+   * Returns true if ship is too traumatized to proceed
+   */
+  private checkTraumaTriggers(
+    ship: NPCShip,
+    situation: {
+      location?: Vector3;
+      entityTypes?: string[];
+      situationType?: string;
+    }
+  ): boolean {
+    const triggeredTraumas = ship.extendedMemory.checkTraumaTriggers(situation);
+
+    if (triggeredTraumas.length > 0) {
+      // Trauma triggered! Update emotional state
+      ship.emotionalState.fear += triggeredTraumas.length * 2;
+      ship.emotionalState.stress += triggeredTraumas.length;
+      ship.emotionalState.fear = Math.min(10, ship.emotionalState.fear);
+      ship.emotionalState.stress = Math.min(10, ship.emotionalState.stress);
+
+      // If fear is too high, ship should avoid this situation
+      return ship.emotionalState.fear > 7;
+    }
+
+    return false;
+  }
+
+  /**
+   * Consolidate memories during rest period (docking)
+   */
+  private consolidateMemoriesWhileDocked(ship: NPCShip, dockingDuration: number): void {
+    const consolidated = ship.extendedMemory.consolidateMemories(dockingDuration);
+
+    if (consolidated > 0) {
+      // Consolidation reduces stress
+      ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - consolidated * 0.5);
+    }
   }
 }
