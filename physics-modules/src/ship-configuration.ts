@@ -268,7 +268,7 @@ export class ShipTemplates {
           material: MaterialType.TITANIUM,
           thickness: 0.05,  // 5cm
           density: 4500,
-          hardness: 6.0,
+          hardness: 970,  // Brinell hardness (corrected from 6.0)
           integrity: 1.0,
           ablationDepth: 0
         }

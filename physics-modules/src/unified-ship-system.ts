@@ -25,10 +25,10 @@ export interface UnifiedShipConfig {
   orientation?: Quaternion;
   angularVelocity?: Vector3;
 
-  // Hull configuration
+  // Hull configuration (proper types from hull-damage.ts)
   hullConfig?: {
-    compartments: any[];
-    armorLayers: any[];
+    compartments: import('./hull-damage').Compartment[];
+    armorLayers: import('./hull-damage').ArmorLayer[];
   };
 
   // Weapon mounts

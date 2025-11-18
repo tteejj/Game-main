@@ -19,10 +19,10 @@ export interface ShipConfiguration {
   orientation?: Quaternion;
   angularVelocity?: Vector3;
 
-  // Optional hull configuration
+  // Optional hull configuration (proper types from hull-damage.ts)
   hullConfig?: {
-    compartments: any[];
-    armorLayers: any[];
+    compartments: import('./hull-damage').Compartment[];
+    armorLayers: import('./hull-damage').ArmorLayer[];
   };
 }
 
@@ -419,9 +419,9 @@ export class IntegratedShip {
   }
 
   /**
-   * Emit event
+   * Emit event (PUBLIC so external systems can emit events)
    */
-  private emit(event: string, ...args: any[]): void {
+  public emit(event: string, ...args: any[]): void {
     const listeners = this.eventListeners.get(event);
     if (listeners) {
       for (const callback of listeners) {
