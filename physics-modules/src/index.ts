@@ -14,6 +14,35 @@ export { OrbitalBody, OrbitalBodiesManager, createDefaultSatellite } from './orb
 export { EnvironmentSystem } from './environment';
 export { WaypointManager, createPracticeWaypoints } from './waypoints';
 
+// Export satellite system (comprehensive satellite modeling)
+export {
+  Satellite,
+  SatelliteManager,
+  SatelliteFactory,
+  SatelliteType,
+  SatelliteMissionStatus,
+  SatellitePowerSystem,
+  SatelliteThermalSystem,
+  SatelliteAttitudeControl,
+  SatelliteCommunications,
+  SatelliteSensorSystem
+} from './satellite';
+export type {
+  SatelliteConfig,
+  SatelliteLayout,
+  SolarPanel,
+  SatelliteBattery,
+  PowerBus,
+  ThermalComponent,
+  Radiator,
+  ReactionWheel,
+  Magnetorquer,
+  AttitudeThuster,
+  Transponder,
+  Antenna,
+  SatelliteSensor
+} from './satellite';
+
 // Export integrated game systems
 export { GameWorld } from './game-world';
 export { GameSpacecraft } from './game-spacecraft';
