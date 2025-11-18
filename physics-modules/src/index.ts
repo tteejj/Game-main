@@ -124,6 +124,22 @@ export type {
   PhysicsForces
 } from './unified-physics-engine';
 
+// ========== PERFORMANCE OPTIMIZATIONS ⚡ ==========
+// Spatial partitioning, object pooling, LOD, and performance monitoring
+export {
+  SpatialHashGrid,
+  ObjectPool,
+  LODManager,
+  FrustumCuller,
+  PerformanceMonitor,
+  BatchRenderer
+} from './performance-optimizations';
+export type {
+  LODLevel,
+  PerformanceMetric,
+  BoundingBox
+} from './performance-optimizations';
+
 // ========== COMPLETE SHIP SYSTEM ⭐ ==========
 // The unified ship implementation with ALL features
 export {
