@@ -461,6 +461,233 @@ export class AbsenceSimulator {
   }
 
   // ====================================================================
+  // SOPHISTICATED PROCEDURAL GENERATION
+  // ====================================================================
+
+  /**
+   * Context-aware event generation based on universe state
+   */
+  private generateContextualEvent(
+    context: {
+      timeOfDay: number;
+      dayOfWeek: number;
+      economicState: string;
+      warState: boolean;
+      recentEvents: HistoricalEvent[];
+    },
+    timeElapsed: number
+  ): HistoricalEvent | null {
+    // Calculate event probability based on context
+    let probability = 0.1; // Base 10% chance per time chunk
+
+    // Time of day affects event types
+    const hour = Math.floor(context.timeOfDay % 24);
+    if (hour >= 6 && hour <= 18) {
+      probability *= 1.5; // Daytime is more active
+    }
+
+    // Economic state affects event frequency
+    if (context.economicState === 'BOOMING') {
+      probability *= 1.3; // More activity during boom
+    } else if (context.economicState === 'RECESSION') {
+      probability *= 0.7; // Less activity during recession
+    }
+
+    // War increases military events
+    if (context.warState) {
+      probability *= 1.8;
+    }
+
+    // Recent events create momentum
+    const recentMilitary = context.recentEvents.filter(e =>
+      e.category === 'MILITARY'
+    ).length;
+    if (recentMilitary > 2) {
+      probability *= 1.4; // Conflict escalation
+    }
+
+    if (Math.random() > probability) {
+      return null; // No event this time
+    }
+
+    // Generate event based on context
+    return this.selectEventType(context);
+  }
+
+  /**
+   * Select appropriate event type based on context
+   */
+  private selectEventType(context: any): HistoricalEvent {
+    const eventTypes: Array<{
+      type: string;
+      category: string;
+      weight: number;
+      condition?: () => boolean;
+    }> = [
+      {
+        type: 'TRADE_COMPLETED',
+        category: 'ECONOMIC',
+        weight: 30,
+        condition: () => context.economicState !== 'COLLAPSE'
+      },
+      {
+        type: 'PIRATE_RAID',
+        category: 'MILITARY',
+        weight: 15,
+        condition: () => !context.warState // Pirates less active during war
+      },
+      {
+        type: 'COMBAT',
+        category: 'MILITARY',
+        weight: context.warState ? 40 : 10
+      },
+      {
+        type: 'DISCOVERY',
+        category: 'EXPLORATION',
+        weight: 10
+      },
+      {
+        type: 'DIPLOMATIC_EVENT',
+        category: 'DIPLOMATIC',
+        weight: 12
+      },
+      {
+        type: 'STATION_UPGRADE',
+        category: 'ECONOMIC',
+        weight: 8,
+        condition: () => context.economicState === 'BOOMING'
+      },
+      {
+        type: 'REFUGEE_CRISIS',
+        category: 'SOCIAL',
+        weight: context.warState ? 20 : 5
+      }
+    ];
+
+    // Filter by conditions and calculate total weight
+    const available = eventTypes.filter(e => !e.condition || e.condition());
+    const totalWeight = available.reduce((sum, e) => sum + e.weight, 0);
+
+    // Weighted random selection
+    let random = Math.random() * totalWeight;
+    for (const eventType of available) {
+      random -= eventType.weight;
+      if (random <= 0) {
+        return this.createEvent(eventType.type, eventType.category);
+      }
+    }
+
+    return this.createEvent('TRADE_COMPLETED', 'ECONOMIC');
+  }
+
+  /**
+   * Create event with procedurally generated details
+   */
+  private createEvent(type: string, category: string): HistoricalEvent {
+    const timestamp = Date.now() / 1000;
+    const severity = 1 + Math.random() * 9; // 1-10
+
+    return {
+      id: `event_${timestamp}_${Math.random()}`,
+      timestamp,
+      type,
+      severity,
+      category: category as any,
+      location: { x: Math.random() * 1000, y: Math.random() * 1000, z: Math.random() * 1000 },
+      participants: [this.generateFactionName(), this.generateFactionName()],
+      description: this.generateEventDescription(type, severity),
+      data: {},
+      consequences: [],
+      witnessed: false,
+      priority: severity,
+      tags: [category.toLowerCase(), type.toLowerCase()]
+    };
+  }
+
+  /**
+   * Generate faction name
+   */
+  private generateFactionName(): string {
+    const prefixes = ['United', 'Free', 'Imperial', 'Corporate', 'Independent'];
+    const names = ['Traders', 'Alliance', 'Federation', 'Consortium', 'Collective'];
+    return `${prefixes[Math.floor(Math.random() * prefixes.length)]} ${names[Math.floor(Math.random() * names.length)]}`;
+  }
+
+  /**
+   * Generate event description
+   */
+  private generateEventDescription(type: string, severity: number): string {
+    const intensity = severity > 7 ? 'Major' : severity > 4 ? 'Moderate' : 'Minor';
+
+    const descriptions: Record<string, string[]> = {
+      'TRADE_COMPLETED': [
+        `${intensity} trade agreement finalized`,
+        `${intensity} commodity exchange completed`,
+        `${intensity} cargo shipment delivered`
+      ],
+      'PIRATE_RAID': [
+        `${intensity} pirate attack on trade routes`,
+        `${intensity} raid on civilian station`,
+        `${intensity} convoy ambushed by raiders`
+      ],
+      'COMBAT': [
+        `${intensity} military engagement`,
+        `${intensity} space battle erupts`,
+        `${intensity} fleet confrontation`
+      ],
+      'DISCOVERY': [
+        `${intensity} discovery made`,
+        `${intensity} anomaly detected`,
+        `${intensity} resource deposit found`
+      ]
+    };
+
+    const options = descriptions[type] || [`${intensity} event occurred`];
+    return options[Math.floor(Math.random() * options.length)];
+  }
+
+  /**
+   * Intelligent event clustering - related events happen together
+   */
+  private clusterRelatedEvents(events: HistoricalEvent[]): HistoricalEvent[] {
+    const clustered: HistoricalEvent[] = [];
+
+    for (const event of events) {
+      clustered.push(event);
+
+      // Military events may trigger counter-actions
+      if (event.category === 'MILITARY' && event.severity > 6) {
+        if (Math.random() < 0.4) {
+          const counterEvent = {
+            ...event,
+            id: `event_counter_${event.id}`,
+            type: 'MILITARY_RESPONSE',
+            timestamp: event.timestamp + 3600, // 1 hour later
+            description: `Counter-response to ${event.description}`,
+            participants: [event.participants[1], event.participants[0]] // Swap participants
+          };
+          clustered.push(counterEvent);
+        }
+      }
+
+      // Trade creates follow-up trade
+      if (event.type === 'TRADE_COMPLETED' && event.severity > 5) {
+        if (Math.random() < 0.3) {
+          const followUp = {
+            ...event,
+            id: `event_followup_${event.id}`,
+            timestamp: event.timestamp + 7200, // 2 hours later
+            description: `Follow-up trade from ${event.description}`
+          };
+          clustered.push(followUp);
+        }
+      }
+    }
+
+    return clustered;
+  }
+
+  // ====================================================================
   // PUBLIC API
   // ====================================================================
 
