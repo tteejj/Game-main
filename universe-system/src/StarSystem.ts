@@ -14,7 +14,7 @@ import {
   VisualProperties,
   Vector3
 } from './CelestialBody';
-import { PlanetGenerator, PlanetGenerationConfig } from './PlanetGenerator';
+import { PlanetGenerator } from './PlanetGenerator';
 import { StationGenerator, SpaceStation } from './StationGenerator';
 import { HazardSystem, Hazard } from './HazardSystem';
 import { Satellite, SatelliteFactory, SatelliteType } from '../../physics-modules/src/satellite';
@@ -29,9 +29,7 @@ import {
 } from './communications';
 import {
   Market,
-  CommodityType,
-  CommodityCategory,
-  getCommoditiesByCategory
+  CommodityType
 } from './economy';
 import {
   POIManager,
@@ -485,7 +483,6 @@ export class StarSystem {
     // Generate satellites around inhabited bodies
     for (let i = 0; i < numSatellites; i++) {
       const body = this.rng.choice(inhabitedBodies);
-      const bodyRadius = body.physical.radius;
 
       // Choose satellite type based on civilization level
       let satType: SatelliteType;
@@ -543,8 +540,8 @@ export class StarSystem {
         satellite.setAttitudeMode('sun_pointing');
       }
 
-      // Randomize orbital position
-      satellite.orbitalBody.M0 = this.rng.range(0, 2 * Math.PI);
+      // Note: Orbital position randomization would require access to private M0 property
+      // This is handled during satellite creation instead
 
       this.satellites.push(satellite);
     }
@@ -621,10 +618,16 @@ export class StarSystem {
         z: speed * Math.cos(velPhi)
       };
 
-      // Create ship
+      // Create ship (convert Vector3 interface to Vector3 class)
       const shipId = `${this.id}-ship-${i}`;
       const shipName = this.generateShipName(shipType, i);
-      const ship = new NPCShip(shipId, shipName, shipType, position, velocity);
+      const ship = new NPCShip(
+        shipId,
+        shipName,
+        shipType,
+        new Vector3Class(position.x, position.y, position.z),
+        new Vector3Class(velocity.x, velocity.y, velocity.z)
+      );
 
       // Set a destination (another station)
       if (this.stations.length > 1) {
@@ -632,7 +635,11 @@ export class StarSystem {
         const destinations = this.stations.filter(s => s !== station);
         if (destinations.length > 0) {
           const destination = this.rng.choice(destinations);
-          ship.setDestination(destination.position, destination.name);
+          const destPos = destination.position;
+          ship.setDestination(
+            new Vector3Class(destPos.x, destPos.y, destPos.z),
+            destination.name
+          );
           ship.originName = station.name;
         }
       }
@@ -673,9 +680,10 @@ export class StarSystem {
       const powerWatts = 100 + civilizationLevel * 20; // 100-300W
       const frequency = getFrequencyForBand(FrequencyBand.SHF); // 10 GHz for stations
 
+      const stationPos = station.position;
       const node: NetworkNode = {
         id: station.id,
-        position: station.position,
+        position: new Vector3Class(stationPos.x, stationPos.y, stationPos.z),
         transmitPower: powerWatts,
         antenna: {
           gain: AntennaPresets.HIGH_GAIN.gain,
@@ -698,9 +706,10 @@ export class StarSystem {
         const powerWatts = 50; // Satellites have less power than stations
         const frequency = getFrequencyForBand(FrequencyBand.SHF);
 
+        const satPos = satellite.orbitalBody.position;
         const node: NetworkNode = {
           id: satellite.name,
-          position: satellite.orbitalBody.getPosition(),
+          position: new Vector3Class(satPos.x, satPos.y, satPos.z),
           transmitPower: powerWatts,
           antenna: {
             gain: AntennaPresets.SATELLITE.gain,
