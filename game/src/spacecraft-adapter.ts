@@ -10,6 +10,15 @@ export class SpacecraftAdapter {
     public spacecraft: Spacecraft;
     private updateCallbacks: Array<() => void> = [];
 
+    // External sensor contacts (injected from game world)
+    private externalRadarContacts: any[] = [];
+    private externalOpticalContacts: any[] = [];
+
+    // Terrain data (injected from game world)
+    private terrainAltitude: number = 0;
+    private terrainSlope: number = 0;
+    private surfaceType: string = 'unknown';
+
     constructor() {
         // Initialize spacecraft at 15km altitude above moon
         this.spacecraft = new Spacecraft({
@@ -53,13 +62,16 @@ export class SpacecraftAdapter {
 
     // ========== HELM / PROPULSION CONTROLS ==========
 
-    setFuelValve(_open: boolean): void {
-        // The main engine doesn't have a separate fuel valve in this implementation
-        // Just track it as state if needed by UI
+    setFuelValve(open: boolean): void {
+        if (open) {
+            this.spacecraft.openMainEngineFuelValve();
+        } else {
+            this.spacecraft.closeMainEngineFuelValve();
+        }
     }
 
     armIgnition(): void {
-        // Arming is implicit in this implementation
+        this.spacecraft.armMainEngine();
     }
 
     fireEngine(): void {
@@ -106,31 +118,45 @@ export class SpacecraftAdapter {
         this.spacecraft.electrical.setReactorThrottle(percent / 100);
     }
 
-    toggleBreaker(_index: number, _state: boolean): void {
-        // Circuit breakers not exposed by index directly, stub for UI
+    toggleBreaker(index: number, state: boolean): void {
+        // Map index to breaker IDs
+        const breakerIds = ['main_bus', 'engine', 'rcs', 'radar', 'weapons',
+                           'life_support', 'comms', 'thermal', 'aux_1', 'aux_2'];
+        if (index >= 0 && index < breakerIds.length) {
+            this.spacecraft.setCircuitBreaker(breakerIds[index], state);
+        }
     }
 
-    toggleRadiators(_deploy: boolean): void {
-        // Radiators not implemented as deployable, always active
+    toggleRadiators(deploy: boolean): void {
+        if (deploy) {
+            this.spacecraft.deployRadiators();
+        } else {
+            this.spacecraft.retractRadiators();
+        }
     }
 
     // ========== NAVIGATION CONTROLS ==========
 
-    setRadarActive(_active: boolean): void {
-        // Radar activation not exposed directly, stub for UI
+    setRadarActive(active: boolean): void {
+        this.spacecraft.setRadarActive(active);
     }
 
-    setRadarRange(_rangeKm: number): void {
-        // Radar range not settable directly, stub for UI
+    setRadarRange(rangeKm: number): void {
+        this.spacecraft.setRadarRange(rangeKm * 1000); // Convert km to meters
     }
 
     getAutopilotMode(): string {
-        // Autopilot not yet fully implemented, stub for UI
-        return 'off';
+        return this.spacecraft.getAutopilotMode();
     }
 
-    setAutopilotMode(_mode: string): void {
-        // Autopilot not yet fully implemented, stub for UI
+    setAutopilotMode(mode: string): void {
+        // Map string mode to AutopilotMode type
+        const validModes = ['off', 'attitude_hold', 'altitude_hold', 'velocity_hold',
+                           'prograde', 'retrograde', 'normal', 'antinormal',
+                           'radial_in', 'radial_out', 'target', 'maneuver'];
+        if (validModes.includes(mode)) {
+            this.spacecraft.setAutopilotMode(mode as any);
+        }
     }
 
     // ========== WEAPONS CONTROLS ==========
@@ -268,7 +294,18 @@ export class SpacecraftAdapter {
     }
 
     getLandingGearTelemetry(): any {
-        return this.spacecraft.getLandingGearTelemetry();
+        const telemetry = this.spacecraft.getLandingGearTelemetry();
+
+        // Inject external terrain data
+        if (telemetry.terrainRadarActive) {
+            telemetry.terrainData = {
+                altitude: this.terrainAltitude,
+                slope: this.terrainSlope,
+                surfaceType: this.surfaceType
+            };
+        }
+
+        return telemetry;
     }
 
     // ========== DOCKING CONTROLS ==========
@@ -378,11 +415,35 @@ export class SpacecraftAdapter {
     }
 
     getRadarContacts(): any[] {
-        return this.spacecraft.getRadarContacts();
+        // Combine internal sensor contacts with external game world contacts
+        const internalContacts = this.spacecraft.getRadarContacts();
+        return [...internalContacts, ...this.externalRadarContacts];
     }
 
     getOpticalContacts(): any[] {
-        return this.spacecraft.getOpticalContacts();
+        // Combine internal sensor contacts with external game world contacts
+        const internalContacts = this.spacecraft.getOpticalContacts();
+        return [...internalContacts, ...this.externalOpticalContacts];
+    }
+
+    // Inject external contacts from game world
+    injectRadarContacts(contacts: any[]): void {
+        this.externalRadarContacts = contacts;
+    }
+
+    injectOpticalContacts(contacts: any[]): void {
+        this.externalOpticalContacts = contacts;
+    }
+
+    // Inject terrain data from game world
+    injectTerrainData(altitude: number, slope: number, surfaceType: string): void {
+        this.terrainAltitude = altitude;
+        this.terrainSlope = slope;
+        this.surfaceType = surfaceType;
+    }
+
+    getTerrainAltitude(): number {
+        return this.terrainAltitude;
     }
 
     getESMContacts(): any[] {
@@ -437,6 +498,10 @@ export class SpacecraftAdapter {
 
     getVelocity(): { x: number; y: number; z: number } {
         return this.spacecraft.physics.velocity;
+    }
+
+    setVelocity(vel: { x: number; y: number; z: number }): void {
+        this.spacecraft.physics.velocity = vel;
     }
 
     applyGravity(gravity: { x: number; y: number; z: number }, deltaTime: number): void {

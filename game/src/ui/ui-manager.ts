@@ -9,6 +9,7 @@ import { EngineeringPanel } from './panels/engineering-panel';
 import { NavigationPanel } from './panels/navigation-panel';
 import { LifeSupportPanel } from './panels/lifesupport-panel';
 import { WeaponsPanel } from './panels/weapons-panel';
+import { HUD } from './hud';
 
 export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel;
 
@@ -17,6 +18,7 @@ export class UIManager {
     private ctx: CanvasRenderingContext2D;
     private activeStationIndex: number = 0; // Start with Helm (Station 1)
     private stations: StationPanel[];
+    private hud: HUD;
 
     // Color palette (green monochrome by default)
     palette = {
@@ -45,6 +47,9 @@ export class UIManager {
             new LifeSupportPanel(this.ctx, this.palette, spacecraft),    // Station 4
             new WeaponsPanel(this.ctx, this.palette, spacecraft)         // Station 5
         ];
+
+        // Initialize HUD
+        this.hud = new HUD(this.ctx, this.palette, spacecraft, canvas);
 
         // Start rendering
         this.startRenderLoop();
@@ -95,6 +100,9 @@ export class UIManager {
             activeStation.render();
         }
 
+        // Render HUD overlay (on top of everything)
+        this.hud.render();
+
         // Render station indicator
         this.renderStationIndicator();
     }
@@ -110,7 +118,7 @@ export class UIManager {
         this.ctx.font = '16px "Courier New"';
         this.ctx.fillStyle = this.palette.info;
         this.ctx.textAlign = 'right';
-        this.ctx.fillText(`[${stationNum}/5] ${stationName}`, this.canvas.width - 20, 30);
+        this.ctx.fillText(`[F${stationNum}] ${stationName}`, this.canvas.width - 20, 30);
         this.ctx.textAlign = 'left'; // Reset
     }
 }
