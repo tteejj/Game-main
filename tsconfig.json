@@ -23,5 +23,5 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "physics-modules", "examples", "tests"]
+  "exclude": ["node_modules", "physics-modules", "examples", "tests", "src/demo/**/*", "src/game/PlayerGameLoop.ts"]
 }
