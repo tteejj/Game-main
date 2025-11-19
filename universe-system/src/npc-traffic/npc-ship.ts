@@ -14,6 +14,7 @@ import { VesselPhysics, VesselPresets } from './vessel-physics';
 import { VesselNavigator, Waypoint, NavigationObstacle } from './vessel-navigator';
 import { CollisionAvoidance } from './collision-avoidance';
 import { ITrackableVessel } from './traffic-manager';
+import { NPCShipSubsystems, SystemHealth } from './npc-ship-subsystems';
 
 /**
  * Ship types
@@ -91,6 +92,7 @@ export class NPCShip implements ITrackableVessel {
   private physics: VesselPhysics;
   private navigator: VesselNavigator;
   private collisionAvoidance: CollisionAvoidance;
+  public subsystems: NPCShipSubsystems; // Enhanced subsystems
 
   // Ship properties
   public cargo: CargoItem[] = [];
@@ -128,6 +130,9 @@ export class NPCShip implements ITrackableVessel {
 
     // Create collision avoidance
     this.collisionAvoidance = new CollisionAvoidance();
+
+    // Create subsystems
+    this.subsystems = new NPCShipSubsystems(type, this.physics.mass);
 
     // Set cargo capacity based on type
     this.cargoCapacity = this.getCargoCapacityForType(type);
@@ -203,6 +208,22 @@ export class NPCShip implements ITrackableVessel {
    * @param obstacles Static obstacles
    */
   public update(dt: number, nearbyShips: NPCShip[] = [], obstacles: NavigationObstacle[] = []): void {
+    // Check for critical system failures
+    this.checkEmergencyConditions();
+
+    // Calculate current thrust level for subsystems
+    const thrustLevel = this.physics.getState().acceleration.length() / this.physics.maxAcceleration;
+
+    // Check if weapons are firing (simplified - would need actual combat logic)
+    const weaponsFiring = this.status === ShipStatus.ATTACKING;
+
+    // Update subsystems
+    this.subsystems.update(dt, thrustLevel, weaponsFiring);
+
+    // Sync health from subsystems
+    this.health = this.subsystems.health.hull;
+    this.fuel = (this.subsystems.fuel.mainFuel.current / this.subsystems.fuel.mainFuel.capacity);
+
     // Update based on status
     switch (this.status) {
       case ShipStatus.TRAVELING:
@@ -215,19 +236,32 @@ export class NPCShip implements ITrackableVessel {
         this.updateMining(dt);
         break;
       case ShipStatus.DOCKED:
-        // Do nothing while docked
+        // Recharge/refuel while docked
+        this.refuelWhileDocked(dt);
         break;
       case ShipStatus.IDLE:
         // Idle - just apply physics
         this.physics.applyAcceleration(new Vector3(0, 0, 0));
         this.physics.update(dt);
         break;
+      case ShipStatus.DISABLED:
+        // Disabled - drift
+        this.physics.update(dt);
+        break;
+      case ShipStatus.FLEEING:
+        this.updateFleeing(dt, nearbyShips, obstacles);
+        break;
       default:
         this.physics.update(dt);
     }
 
-    // Consume fuel based on thrust
-    this.consumeFuel(dt);
+    // Legacy fuel consumption (now handled by subsystems, but keep for compatibility)
+    // this.consumeFuel(dt); // DISABLED - using subsystems now
+
+    // Check if ship is destroyed
+    if (this.subsystems.isDestroyed()) {
+      this.status = ShipStatus.DISABLED;
+    }
   }
 
   /**
@@ -324,22 +358,137 @@ export class NPCShip implements ITrackableVessel {
   }
 
   /**
-   * Consume fuel based on acceleration
+   * Consume fuel based on acceleration (LEGACY - now handled by subsystems)
    */
   private consumeFuel(dt: number): void {
-    // Fuel consumption proportional to thrust used
-    const accelMagnitude = this.physics.getState().acceleration.length();
-    const accelFraction = accelMagnitude / this.physics.maxAcceleration;
+    // This is now handled by NPCShipSubsystems.updateFuel()
+    // Keeping method for backward compatibility but it does nothing
+  }
 
-    // Consume fuel (arbitrary rate)
-    const fuelConsumptionRate = 0.001; // 0.1% per second at max thrust
-    this.fuel -= fuelConsumptionRate * accelFraction * dt;
-    this.fuel = Math.max(0, this.fuel);
+  /**
+   * Check for emergency conditions and respond
+   */
+  private checkEmergencyConditions(): void {
+    const health = this.subsystems.health;
 
-    // If out of fuel, disable
-    if (this.fuel <= 0) {
+    // Critical hull damage - flee or disable
+    if (health.hull < 0.2) {
+      if (this.status !== ShipStatus.DISABLED && this.status !== ShipStatus.FLEEING) {
+        this.status = ShipStatus.FLEEING;
+      }
+    }
+
+    // Critical power - emergency shutdown
+    if (health.electrical < 0.1) {
+      this.subsystems.emergencyShutdown();
+      if (health.electrical <= 0) {
+        this.status = ShipStatus.DISABLED;
+      }
+    }
+
+    // Out of fuel - disable
+    if (health.propulsion < 0.05) {
       this.status = ShipStatus.DISABLED;
     }
+
+    // Life support failure - emergency
+    if (this.subsystems.lifeSupport && health.lifeSupport < 0.3) {
+      // Try to get to nearest station
+      if (this.status !== ShipStatus.FLEEING && this.status !== ShipStatus.DISABLED) {
+        this.status = ShipStatus.FLEEING;
+      }
+    }
+
+    // Critical overheat - scram reactor
+    if (this.subsystems.thermal.criticalOverheat) {
+      this.subsystems.electrical.reactor.scrammed = true;
+      this.subsystems.electrical.reactor.online = false;
+    }
+
+    // Overall system failure
+    if (this.subsystems.isCriticallyDamaged()) {
+      if (this.status !== ShipStatus.DISABLED) {
+        this.status = ShipStatus.FLEEING;
+      }
+    }
+  }
+
+  /**
+   * Update fleeing behavior
+   */
+  private updateFleeing(dt: number, nearbyShips: NPCShip[], obstacles: NavigationObstacle[]): void {
+    // Flee away from threats at maximum speed
+    // For now, just move away from nearest ship
+    if (nearbyShips.length > 0) {
+      const nearest = nearbyShips[0];
+      const awayVector = this.position.subtract(nearest.position).normalize();
+      const fleeAcceleration = awayVector.scale(this.physics.maxAcceleration);
+
+      this.physics.applyAcceleration(fleeAcceleration);
+      this.physics.update(dt);
+    } else {
+      // No threats - go idle or seek station
+      this.status = ShipStatus.IDLE;
+    }
+  }
+
+  /**
+   * Refuel and recharge while docked
+   */
+  private refuelWhileDocked(dt: number): void {
+    // Refuel at 10% per second
+    const refuelRate = 0.1 * dt;
+    this.subsystems.fuel.mainFuel.current += refuelRate * this.subsystems.fuel.mainFuel.capacity;
+    this.subsystems.fuel.mainFuel.current = Math.min(
+      this.subsystems.fuel.mainFuel.current,
+      this.subsystems.fuel.mainFuel.capacity
+    );
+
+    this.subsystems.fuel.rcsFuel.current += refuelRate * this.subsystems.fuel.rcsFuel.capacity;
+    this.subsystems.fuel.rcsFuel.current = Math.min(
+      this.subsystems.fuel.rcsFuel.current,
+      this.subsystems.fuel.rcsFuel.capacity
+    );
+
+    // Recharge battery
+    this.subsystems.electrical.battery.charge += dt * this.subsystems.electrical.battery.chargeRate;
+    this.subsystems.electrical.battery.charge = Math.min(
+      this.subsystems.electrical.battery.charge,
+      this.subsystems.electrical.battery.capacity
+    );
+
+    // Repair hull slowly
+    this.subsystems.hull.integrity += dt * 0.01; // 1% per second
+    this.subsystems.hull.integrity = Math.min(1.0, this.subsystems.hull.integrity);
+
+    // Repair compartments
+    for (const comp of this.subsystems.hull.compartments) {
+      comp.integrity += dt * 0.01;
+      comp.integrity = Math.min(1.0, comp.integrity);
+      comp.breached = false;
+      comp.onFire = false;
+    }
+
+    // Restore life support
+    if (this.subsystems.lifeSupport) {
+      this.subsystems.lifeSupport.oxygenLevel = 1.0;
+      this.subsystems.lifeSupport.co2Level = 0.1;
+      this.subsystems.lifeSupport.pressure = 101.3;
+      this.subsystems.lifeSupport.breached = false;
+      this.subsystems.lifeSupport.lifeSupportOnline = true;
+    }
+
+    // Reload weapons
+    if (this.subsystems.weapons) {
+      for (const weapon of this.subsystems.weapons.weapons) {
+        weapon.ammo += dt * 10; // Reload 10 rounds per second
+        weapon.ammo = Math.min(weapon.ammo, weapon.maxAmmo);
+      }
+    }
+
+    // Sync legacy values
+    this.health = this.subsystems.health.hull;
+    this.fuel = this.subsystems.fuel.mainFuel.current / this.subsystems.fuel.mainFuel.capacity;
   }
 
   /**
@@ -485,12 +634,17 @@ export class NPCShip implements ITrackableVessel {
   /**
    * Take damage
    */
-  public takeDamage(amount: number): void {
-    this.health -= amount;
-    this.health = Math.max(0, this.health);
+  public takeDamage(amount: number, location?: string): void {
+    // Use subsystems damage model
+    this.subsystems.applyDamage(amount, location);
 
-    if (this.health <= 0) {
+    // Update legacy health value
+    this.health = this.subsystems.health.hull;
+
+    if (this.subsystems.isDestroyed()) {
       this.status = ShipStatus.DISABLED;
+    } else if (this.subsystems.isCriticallyDamaged()) {
+      this.status = ShipStatus.FLEEING;
     }
   }
 
@@ -523,9 +677,44 @@ export class NPCShip implements ITrackableVessel {
   }
 
   /**
-   * Generate traffic chatter message
+   * Get subsystem diagnostics
+   */
+  public getDiagnostics(): string {
+    return this.subsystems.getDiagnostics();
+  }
+
+  /**
+   * Get system health
+   */
+  public getSystemHealth(): SystemHealth {
+    return this.subsystems.health;
+  }
+
+  /**
+   * Check if ship needs emergency assistance
+   */
+  public needsAssistance(): boolean {
+    return this.subsystems.isCriticallyDamaged() ||
+           (this.subsystems.lifeSupport && this.subsystems.lifeSupport.breached) ||
+           this.subsystems.health.electrical < 0.2 ||
+           this.subsystems.health.propulsion < 0.1;
+  }
+
+  /**
+   * Generate traffic chatter message (enhanced with system status)
    */
   public generateChatter(): string {
+    // Emergency messages take priority
+    if (this.needsAssistance()) {
+      const emergencyMessages = [
+        `MAYDAY! ${this.name} critical systems failure - requesting immediate assistance!`,
+        `${this.name} to all stations: hull breach detected, life support failing!`,
+        `Emergency! ${this.name} reactor scrammed, battery at ${(this.subsystems.electrical.battery.charge / this.subsystems.electrical.battery.capacity * 100).toFixed(0)}%`,
+        `${this.name} declaring emergency - fuel at ${(this.subsystems.fuel.mainFuel.current / this.subsystems.fuel.mainFuel.capacity * 100).toFixed(0)}%`
+      ];
+      return emergencyMessages[Math.floor(Math.random() * emergencyMessages.length)];
+    }
+
     const messages: Record<ShipStatus, string[]> = {
       [ShipStatus.IDLE]: [
         `${this.name} standing by`,

@@ -151,12 +151,39 @@ export class SpacecraftAdapter {
 
     setAutopilotMode(mode: string): void {
         // Map string mode to AutopilotMode type
-        const validModes = ['off', 'attitude_hold', 'altitude_hold', 'velocity_hold',
-                           'prograde', 'retrograde', 'normal', 'antinormal',
-                           'radial_in', 'radial_out', 'target', 'maneuver'];
+        const validModes = ['off', 'altitude_hold', 'vertical_speed_hold',
+                           'suicide_burn', 'hover', 'landing', 'docking', 'orbital_insertion'];
         if (validModes.includes(mode)) {
             this.spacecraft.setAutopilotMode(mode as any);
         }
+    }
+
+    // ========== NEW AUTOPILOT CONTROLS ==========
+
+    /**
+     * Set docking target position for docking autopilot
+     */
+    setDockingTarget(position: { x: number; y: number; z: number }): void {
+        this.spacecraft.flightControl.setDockingTarget(position);
+    }
+
+    /**
+     * Set target orbit altitude for orbital insertion autopilot
+     */
+    setTargetOrbitAltitude(altitudeMeters: number): void {
+        this.spacecraft.flightControl.setTargetOrbitAltitude(altitudeMeters);
+    }
+
+    /**
+     * Get autopilot phase information
+     */
+    getAutopilotPhases(): any {
+        const state = this.spacecraft.flightControl.getState();
+        return {
+            landing: state.landingPhase,
+            docking: state.dockingPhase,
+            orbitalInsertion: state.orbitalInsertionPhase
+        };
     }
 
     // ========== WEAPONS CONTROLS ==========
