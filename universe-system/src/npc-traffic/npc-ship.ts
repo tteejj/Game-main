@@ -15,6 +15,9 @@ import { VesselNavigator, Waypoint, NavigationObstacle } from './vessel-navigato
 import { CollisionAvoidance } from './collision-avoidance';
 import { ITrackableVessel } from './traffic-manager';
 import { NPCShipSubsystems, SystemHealth } from './npc-ship-subsystems';
+import { ExtendedNPCMemory, Experience, PersonalityTraits } from '../entity-ai/ExtendedNPCMemory';
+import { NPCGoalSystem, NPCGoal, GoalEvaluationContext, PlannedAction, WorldState } from '../entity-ai/NPCGoalSystem';
+import { AdaptiveAI, DecisionContext } from '../entity-ai/AdaptiveAI';
 
 /**
  * Ship types
@@ -95,6 +98,11 @@ export class NPCShip implements ITrackableVessel {
   private collisionAvoidance: CollisionAvoidance;
   public subsystems: NPCShipSubsystems; // Enhanced subsystems
 
+  // AI systems
+  public extendedMemory: ExtendedNPCMemory; // Deep memory with experiences, relationships, trauma
+  public goalSystem: NPCGoalSystem;        // Goal-driven planning (A*, HTN)
+  public adaptiveAI: AdaptiveAI;          // Learning from outcomes (Q-learning, strategy evolution)
+
   // Ship properties
   public cargo: CargoItem[] = [];
   public cargoCapacity: number = 100; // tons
@@ -139,6 +147,20 @@ export class NPCShip implements ITrackableVessel {
 
     // Set cargo capacity based on type
     this.cargoCapacity = this.getCargoCapacityForType(type);
+
+    // Initialize AI systems
+    const initialPersonality = this.generateInitialPersonality(type);
+    this.extendedMemory = new ExtendedNPCMemory(
+      this.id,
+      'SHIP',
+      initialPersonality
+    );
+    this.goalSystem = new NPCGoalSystem(this.extendedMemory);
+    this.adaptiveAI = new AdaptiveAI(this.extendedMemory, this.goalSystem);
+
+    // Set behavior parameters from personality
+    this.aggressiveness = initialPersonality.aggression || 0.3;
+    this.caution = initialPersonality.caution || 0.5;
   }
 
   /**
@@ -186,6 +208,125 @@ export class NPCShip implements ITrackableVessel {
   }
 
   /**
+   * Generate initial personality based on ship type
+   */
+  private generateInitialPersonality(type: ShipType): Partial<PersonalityTraits> {
+    // Base personality with some randomness
+    const base = {
+      aggression: Math.random() * 0.5,
+      caution: 0.3 + Math.random() * 0.4,
+      greed: Math.random() * 0.6,
+      curiosity: Math.random() * 0.5,
+      loyalty: 0.5 + Math.random() * 0.3,
+      trustingness: 0.4 + Math.random() * 0.3,
+      sociability: 0.3 + Math.random() * 0.4,
+      risktaking: Math.random() * 0.5,
+      patience: 0.4 + Math.random() * 0.4,
+      adaptability: 0.5 + Math.random() * 0.3
+    };
+
+    // Adjust based on ship type
+    switch (type) {
+      case ShipType.PIRATE:
+        base.aggression = 0.7 + Math.random() * 0.3;
+        base.greed = 0.8 + Math.random() * 0.2;
+        base.trustingness = Math.random() * 0.3;
+        base.caution = 0.2 + Math.random() * 0.3;
+        base.risktaking = 0.6 + Math.random() * 0.4;
+        break;
+
+      case ShipType.PATROL_SHIP:
+        base.aggression = 0.3 + Math.random() * 0.3;
+        base.caution = 0.6 + Math.random() * 0.3;
+        base.loyalty = 0.8 + Math.random() * 0.2;
+        base.patience = 0.6 + Math.random() * 0.3;
+        break;
+
+      case ShipType.CARGO_FREIGHTER:
+      case ShipType.CARGO_SHUTTLE:
+        base.aggression = Math.random() * 0.2;
+        base.caution = 0.7 + Math.random() * 0.3;
+        base.greed = 0.6 + Math.random() * 0.3;
+        base.patience = 0.7 + Math.random() * 0.3;
+        break;
+
+      case ShipType.MINING_VESSEL:
+        base.aggression = Math.random() * 0.2;
+        base.patience = 0.8 + Math.random() * 0.2;
+        base.greed = 0.5 + Math.random() * 0.4;
+        break;
+
+      case ShipType.RESEARCH:
+        base.curiosity = 0.8 + Math.random() * 0.2;
+        base.patience = 0.7 + Math.random() * 0.3;
+        base.caution = 0.6 + Math.random() * 0.3;
+        break;
+
+      case ShipType.PASSENGER_LINER:
+        base.caution = 0.8 + Math.random() * 0.2;
+        base.patience = 0.6 + Math.random() * 0.3;
+        base.sociability = 0.7 + Math.random() * 0.3;
+        break;
+    }
+
+    return base;
+  }
+
+  /**
+   * Update AI systems (memory, goals, learning)
+   */
+  private updateAISystems(dt: number, nearbyShips: NPCShip[]): void {
+    const currentTime = Date.now() / 1000;
+
+    // Update memory system (decay, trauma healing)
+    this.extendedMemory.update(dt);
+
+    // Decay skills over time
+    this.adaptiveAI.decaySkills(dt);
+
+    // Build context for goal system
+    const context: GoalEvaluationContext = {
+      currentTime,
+      currentLocation: this.position.clone(),
+      currentState: {
+        location: this.position.clone(),
+        resources: {
+          credits: this.getCargoValue(),
+          fuel: this.fuel * 100,
+          cargoSpace: this.cargoCapacity - this.getCargoMass(),
+          health: this.health * 100
+        },
+        satisfied: []
+      },
+      currentResources: {
+        credits: this.getCargoValue(),
+        fuel: this.fuel,
+        cargoSpace: this.cargoCapacity - this.getCargoMass(),
+        health: this.health
+      },
+      threats: nearbyShips
+        .filter(s => s.type === ShipType.PIRATE && s.position.subtract(this.position).length() < 5000)
+        .map(s => s.id),
+      opportunities: nearbyShips
+        .filter(s => s.type === ShipType.CARGO_FREIGHTER && s.position.subtract(this.position).length() < 10000)
+        .map(s => s.id),
+      allies: nearbyShips
+        .filter(s => s.faction === this.faction && s.id !== this.id)
+        .map(s => s.id),
+      enemies: nearbyShips
+        .filter(s => s.faction !== this.faction && s.type === ShipType.PIRATE)
+        .map(s => s.id)
+    };
+
+    // Update goal system - returns next action to take
+    const plannedAction = this.goalSystem.update(dt, context);
+
+    // If goal system suggests an action, we could influence ship behavior
+    // For now, just let the goal system run in the background
+    // (Future: integrate planned actions into ship behavior)
+  }
+
+  /**
    * Set destination (single waypoint)
    */
   public setDestination(position: Vector3, name?: string, arrivalRadius: number = 1000): void {
@@ -211,6 +352,9 @@ export class NPCShip implements ITrackableVessel {
    * @param obstacles Static obstacles
    */
   public update(dt: number, nearbyShips: NPCShip[] = [], obstacles: NavigationObstacle[] = []): void {
+    // Update AI systems
+    this.updateAISystems(dt, nearbyShips);
+
     // Check for critical system failures
     this.checkEmergencyConditions();
 
@@ -621,10 +765,15 @@ export class NPCShip implements ITrackableVessel {
   /**
    * Dock at station
    */
-  public dock(): void {
+  public dock(stationId?: string, stationName?: string): void {
     this.status = ShipStatus.DOCKED;
     this.physics.velocity = new Vector3(0, 0, 0);
     this.physics.applyAcceleration(new Vector3(0, 0, 0));
+
+    // Record docking experience
+    if (stationId && stationName) {
+      this.recordDockingExperience(stationId, stationName);
+    }
   }
 
   /**
@@ -637,12 +786,21 @@ export class NPCShip implements ITrackableVessel {
   /**
    * Take damage
    */
-  public takeDamage(amount: number, location?: string): void {
+  public takeDamage(amount: number, location?: string, attackerId?: string): void {
+    const healthBefore = this.health;
+
     // Use subsystems damage model
     this.subsystems.applyDamage(amount, location);
 
     // Update legacy health value
     this.health = this.subsystems.health.hull;
+
+    // Record near-death experience if health drops below 0.2
+    if (healthBefore > 0.2 && this.health <= 0.2) {
+      this.recordNearDeathExperience(
+        attackerId ? `Combat damage from ${attackerId}` : 'Critical damage'
+      );
+    }
 
     if (this.subsystems.isDestroyed()) {
       this.status = ShipStatus.DISABLED;
@@ -701,6 +859,280 @@ export class NPCShip implements ITrackableVessel {
            (this.subsystems.lifeSupport && this.subsystems.lifeSupport.breached) ||
            this.subsystems.health.electrical < 0.2 ||
            this.subsystems.health.propulsion < 0.1;
+  }
+
+  // ====================================================================
+  // AI EXPERIENCE RECORDING
+  // ====================================================================
+
+  /**
+   * Record combat experience
+   */
+  public recordCombatExperience(
+    targetId: string,
+    outcome: 'VICTORY' | 'DEFEAT' | 'FLED',
+    damageTaken: number,
+    damageDealt: number
+  ): void {
+    const now = Date.now() / 1000;
+    const emotionalImpact = outcome === 'VICTORY' ? 5 : outcome === 'DEFEAT' ? -8 : -3;
+    const intensity = damageTaken > 0.5 ? 9 : 6;
+
+    const experience: Experience = {
+      id: `combat_${this.id}_${now}`,
+      timestamp: now,
+      type: outcome === 'VICTORY' ? 'COMBAT_VICTORY' : outcome === 'DEFEAT' ? 'COMBAT_DEFEAT' : 'FLEEING',
+      event: {
+        id: `combat_event_${now}`,
+        timestamp: now,
+        type: 'COMBAT',
+        severity: damageTaken * 10,
+        category: 'MILITARY',
+        location: this.position.clone(),
+        participants: [this.id, targetId],
+        description: `${this.name} ${outcome === 'VICTORY' ? 'defeated' : outcome === 'DEFEAT' ? 'was defeated by' : 'fled from'} target ${targetId}`,
+        data: { outcome, damageTaken, damageDealt },
+        consequences: [],
+        witnessed: true,
+        priority: 8,
+        tags: ['combat', outcome.toLowerCase()]
+      },
+      emotionalImpact,
+      intensity,
+      location: this.position.clone(),
+      witnesses: [],
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    this.extendedMemory.recordExperience(experience);
+
+    // Record learning outcome
+    const reward = outcome === 'VICTORY' ? 8 : outcome === 'DEFEAT' ? -8 : -3;
+    this.adaptiveAI.recordOutcome(
+      'combat_situation',
+      outcome === 'VICTORY' ? 'attack' : 'flee',
+      outcome === 'VICTORY' ? 'SUCCESS' : 'FAILURE',
+      reward
+    );
+  }
+
+  /**
+   * Record trade experience
+   */
+  public recordTradeExperience(
+    traderId: string,
+    commodity: string,
+    profit: number,
+    volume: number
+  ): void {
+    const now = Date.now() / 1000;
+    const emotionalImpact = profit > 0 ? Math.min(10, profit / 100) : Math.max(-10, profit / 100);
+    const intensity = Math.abs(profit) > 500 ? 7 : 5;
+
+    const experience: Experience = {
+      id: `trade_${this.id}_${now}`,
+      timestamp: now,
+      type: profit > 0 ? 'SUCCESSFUL_TRADE' : 'FAILURE',
+      event: {
+        id: `trade_event_${now}`,
+        timestamp: now,
+        type: 'TRADE',
+        severity: 3,
+        category: 'ECONOMIC',
+        location: this.position.clone(),
+        participants: [this.id, traderId],
+        description: `${this.name} ${profit > 0 ? 'profited' : 'lost'} ${Math.abs(profit).toFixed(0)} credits trading ${commodity}`,
+        data: { commodity, profit, volume },
+        consequences: [],
+        witnessed: true,
+        priority: 5,
+        tags: ['trade', 'economic']
+      },
+      emotionalImpact,
+      intensity,
+      location: this.position.clone(),
+      witnesses: [],
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    this.extendedMemory.recordExperience(experience);
+
+    // Record learning outcome
+    this.adaptiveAI.recordOutcome(
+      'trade_situation',
+      'trade',
+      profit > 0 ? 'SUCCESS' : 'FAILURE',
+      emotionalImpact
+    );
+  }
+
+  /**
+   * Record docking experience
+   */
+  public recordDockingExperience(stationId: string, stationName: string): void {
+    const now = Date.now() / 1000;
+
+    const experience: Experience = {
+      id: `docking_${this.id}_${now}`,
+      timestamp: now,
+      type: 'MILESTONE',
+      event: {
+        id: `dock_event_${now}`,
+        timestamp: now,
+        type: 'DOCKING',
+        severity: 2,
+        category: 'NAVIGATION',
+        location: this.position.clone(),
+        participants: [this.id, stationId],
+        description: `${this.name} docked at ${stationName}`,
+        data: { stationId, stationName },
+        consequences: [],
+        witnessed: true,
+        priority: 3,
+        tags: ['docking', 'station']
+      },
+      emotionalImpact: 2,
+      intensity: 3,
+      location: this.position.clone(),
+      witnesses: [],
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    this.extendedMemory.recordExperience(experience);
+  }
+
+  /**
+   * Record near-death experience
+   */
+  public recordNearDeathExperience(cause: string): void {
+    const now = Date.now() / 1000;
+
+    const experience: Experience = {
+      id: `neardeath_${this.id}_${now}`,
+      timestamp: now,
+      type: 'NEAR_DEATH',
+      event: {
+        id: `neardeath_event_${now}`,
+        timestamp: now,
+        type: 'NEAR_DEATH',
+        severity: 10,
+        category: 'SURVIVAL',
+        location: this.position.clone(),
+        participants: [this.id],
+        description: `${this.name} narrowly escaped death: ${cause}`,
+        data: { cause, health: this.health, fuel: this.fuel },
+        consequences: [],
+        witnessed: true,
+        priority: 10,
+        tags: ['near_death', 'survival', 'trauma']
+      },
+      emotionalImpact: -9,
+      intensity: 10,
+      location: this.position.clone(),
+      witnesses: [],
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    this.extendedMemory.recordExperience(experience);
+
+    // This will likely create trauma due to high negative emotional impact
+  }
+
+  /**
+   * Record being rescued
+   */
+  public recordRescueExperience(rescuerId: string, rescuerName: string): void {
+    const now = Date.now() / 1000;
+
+    const experience: Experience = {
+      id: `rescued_${this.id}_${now}`,
+      timestamp: now,
+      type: 'BEING_RESCUED',
+      event: {
+        id: `rescue_event_${now}`,
+        timestamp: now,
+        type: 'RESCUE',
+        severity: 8,
+        category: 'SOCIAL',
+        location: this.position.clone(),
+        participants: [this.id, rescuerId],
+        description: `${this.name} was rescued by ${rescuerName}`,
+        data: { rescuerId, rescuerName },
+        consequences: [],
+        witnessed: true,
+        priority: 9,
+        tags: ['rescue', 'gratitude', 'relationship']
+      },
+      emotionalImpact: 8,
+      intensity: 9,
+      location: this.position.clone(),
+      witnesses: [],
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    this.extendedMemory.recordExperience(experience);
+
+    // Update relationship with rescuer
+    this.extendedMemory.updateRelationship(
+      rescuerId,
+      {
+        type: 'ALLY',
+        strength: 75,
+        trustLevel: 80,
+        respectLevel: 70,
+        favorsDone: 0,
+        favorsOwed: 1
+      },
+      experience
+    );
+  }
+
+  /**
+   * Get AI statistics for debugging
+   */
+  public getAIStatistics(): string {
+    const memoryStats = this.extendedMemory.getStatistics();
+    const goalStats = this.goalSystem.getStatistics();
+    const learningStats = this.adaptiveAI.getStatistics();
+
+    const lines: string[] = [];
+    lines.push(`=== ${this.name} AI Statistics ===`);
+    lines.push('');
+    lines.push('MEMORY:');
+    lines.push(`  Experiences: ${memoryStats.totalExperiences}`);
+    lines.push(`  Relationships: ${memoryStats.relationships}`);
+    lines.push(`  Traumas: ${memoryStats.traumas}`);
+    lines.push(`  Lessons Learned: ${memoryStats.lessons}`);
+    lines.push('');
+    lines.push('GOALS:');
+    lines.push(`  Active Goals: ${goalStats.activeGoals}`);
+    lines.push(`  Completed Goals: ${goalStats.completedGoals}`);
+    lines.push(`  Abandoned Goals: ${goalStats.abandonedGoals}`);
+    const currentGoal = this.goalSystem.getCurrentGoal();
+    if (currentGoal) {
+      lines.push(`  Current Goal: ${currentGoal.name} (${(currentGoal.progress * 100).toFixed(0)}%)`);
+    }
+    lines.push('');
+    lines.push('LEARNING:');
+    lines.push(`  Total Decisions: ${learningStats.totalDecisions}`);
+    lines.push(`  Success Rate: ${(learningStats.successRate * 100).toFixed(1)}%`);
+    lines.push(`  Strategies Learned: ${learningStats.strategiesLearned}`);
+    if (learningStats.topExpertise) {
+      lines.push(`  Top Expertise: ${learningStats.topExpertise.domain} (Level ${learningStats.topExpertise.level})`);
+    }
+    lines.push('');
+
+    return lines.join('\n');
   }
 
   /**
