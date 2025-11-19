@@ -322,7 +322,7 @@ export class PlayerSystemsIntegration {
    * Gather intelligence from news
    */
   public gatherIntelFromNews(playerLocation: string): IntelligenceData[] {
-    const recent News = this.newsSystem.getRecentNews(20);
+    const recentNews = this.newsSystem.getRecentNews(20);
     const intel: IntelligenceData[] = [];
 
     for (const article of recentNews) {
