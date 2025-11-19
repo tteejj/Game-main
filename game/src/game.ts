@@ -42,6 +42,9 @@ export class Game {
     private commNetwork: RelayNetwork;
     private markets: Map<string, any> = new Map();
 
+    // Background event tracking
+    private lastBackgroundEventTime: number = 0;
+
     // Performance tracking
     private frameCount: number = 0;
     private fps: number = 0;
@@ -222,6 +225,176 @@ export class Game {
             });
 
             console.log(`💰 Trade completed with ${nearestStation.name} (${stationFaction}): ${value} credits`);
+        }
+    }
+
+    /**
+     * Process player rescuing/assisting a distressed NPC
+     * Significantly improves diplomatic relations
+     */
+    public processRescue(npcShip: any, assistanceType: 'REPAIR' | 'REFUEL' | 'TOW'): void {
+        const shipPos = this.spacecraft.getPosition();
+
+        // Apply assistance based on type
+        let assistanceValue = 0;
+        let description = '';
+
+        switch (assistanceType) {
+            case 'REPAIR':
+                npcShip.repair(0.3); // Repair 30% hull
+                assistanceValue = 30;
+                description = `Player repaired ${npcShip.name}`;
+                console.log(`🔧 Repaired ${npcShip.name} (${npcShip.faction})`);
+                break;
+            case 'REFUEL':
+                npcShip.refuel(0.5); // Refuel 50%
+                assistanceValue = 20;
+                description = `Player refueled ${npcShip.name}`;
+                console.log(`⛽ Refueled ${npcShip.name} (${npcShip.faction})`);
+                break;
+            case 'TOW':
+                assistanceValue = 40;
+                description = `Player towed ${npcShip.name} to safety`;
+                console.log(`🚀 Towed ${npcShip.name} (${npcShip.faction}) to safety`);
+                break;
+        }
+
+        // Fire diplomatic event
+        this.starSystem.processDiplomaticEvent({
+            type: 'RESCUE',
+            category: 'HUMANITARIAN',
+            timestamp: Date.now() / 1000,
+            severity: 5,
+            rescuerFaction: 'PLAYER',
+            victimFaction: npcShip.faction,
+            livesSaved: Math.floor(assistanceValue / 10),
+            location: shipPos,
+            description: description
+        });
+
+        console.log(`❤️  Rescue improved relations with ${npcShip.faction}`);
+    }
+
+    /**
+     * Get nearest distressed NPC ship within range
+     */
+    public getNearestDistressedShip(maxRange: number = 50000): any | null {
+        const shipPos = this.spacecraft.getPosition();
+        const npcVessels = this.trafficManager.getAllVessels();
+
+        let nearestShip = null;
+        let nearestDist = Infinity;
+
+        for (const npc of npcVessels) {
+            if (!npc.needsAssistance()) continue;
+
+            const dx = npc.position.x - shipPos.x;
+            const dy = npc.position.y - shipPos.y;
+            const dz = npc.position.z - shipPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist < maxRange && dist < nearestDist) {
+                nearestDist = dist;
+                nearestShip = npc;
+            }
+        }
+
+        return nearestShip;
+    }
+
+    /**
+     * Simulate NPC-to-NPC background events for dynamic universe
+     * Called periodically to generate diplomatic activity
+     */
+    private simulateBackgroundEvents(deltaTime: number): void {
+        // Only process every few seconds to avoid spam
+        if (!this.lastBackgroundEventTime) {
+            this.lastBackgroundEventTime = this.gameTime;
+        }
+
+        const timeSinceLastEvent = this.gameTime - this.lastBackgroundEventTime;
+        if (timeSinceLastEvent < 10) return; // Every 10 seconds
+
+        this.lastBackgroundEventTime = this.gameTime;
+
+        // Get all NPC factions
+        const npcVessels = this.trafficManager.getAllVessels();
+        if (npcVessels.length < 2) return;
+
+        // Small chance of background events
+        const roll = Math.random();
+
+        if (roll < 0.1) { // 10% chance - Pirate raid
+            const pirateIndex = Math.floor(Math.random() * npcVessels.length);
+            const victimIndex = (pirateIndex + 1) % npcVessels.length;
+            const pirate = npcVessels[pirateIndex];
+            const victim = npcVessels[victimIndex];
+
+            // Skip if same faction
+            if (pirate.faction === victim.faction) return;
+
+            this.starSystem.processDiplomaticEvent({
+                type: 'PIRATE_RAID',
+                category: 'MILITARY',
+                timestamp: Date.now() / 1000,
+                severity: 6,
+                attackerFaction: pirate.faction,
+                victimFaction: victim.faction,
+                casualties: Math.floor(Math.random() * 5) + 1,
+                stolenCargo: Math.floor(Math.random() * 50000) + 10000,
+                location: pirate.position,
+                description: `${pirate.faction} raided ${victim.faction} vessel`
+            });
+
+            console.log(`☠️  Background event: ${pirate.faction} pirate raid on ${victim.faction}`);
+
+        } else if (roll < 0.15) { // 5% chance - NPC trade
+            const trader1Index = Math.floor(Math.random() * npcVessels.length);
+            const trader2Index = (trader1Index + 1) % npcVessels.length;
+            const trader1 = npcVessels[trader1Index];
+            const trader2 = npcVessels[trader2Index];
+
+            // Skip if same faction
+            if (trader1.faction === trader2.faction) return;
+
+            const tradeValue = Math.floor(Math.random() * 100000) + 20000;
+
+            this.starSystem.processDiplomaticEvent({
+                type: 'TRADE_COMPLETED',
+                category: 'ECONOMIC',
+                timestamp: Date.now() / 1000,
+                severity: 3,
+                factionA: trader1.faction,
+                factionB: trader2.faction,
+                tradeVolume: tradeValue,
+                location: trader1.position,
+                description: `${trader1.faction} traded with ${trader2.faction}`
+            });
+
+            console.log(`📦 Background event: ${trader1.faction} traded with ${trader2.faction} (${tradeValue} credits)`);
+
+        } else if (roll < 0.17) { // 2% chance - NPC combat
+            const combatant1Index = Math.floor(Math.random() * npcVessels.length);
+            const combatant2Index = (combatant1Index + 1) % npcVessels.length;
+            const combatant1 = npcVessels[combatant1Index];
+            const combatant2 = npcVessels[combatant2Index];
+
+            // Skip if same faction
+            if (combatant1.faction === combatant2.faction) return;
+
+            this.starSystem.processDiplomaticEvent({
+                type: 'COMBAT_STARTED',
+                category: 'MILITARY',
+                timestamp: Date.now() / 1000,
+                severity: 7,
+                attackerFaction: combatant1.faction,
+                defenderFaction: combatant2.faction,
+                casualties: Math.floor(Math.random() * 10) + 2,
+                location: combatant1.position,
+                description: `${combatant1.faction} engaged in combat with ${combatant2.faction}`
+            });
+
+            console.log(`⚔️  Background event: ${combatant1.faction} combat with ${combatant2.faction}`);
         }
     }
 
@@ -464,6 +637,9 @@ export class Game {
 
         // Update NPC traffic (navigation, collision avoidance)
         this.updateTraffic(deltaTime);
+
+        // Simulate background diplomatic events (pirate raids, NPC combat, trade)
+        this.simulateBackgroundEvents(deltaTime);
 
         // Economy is passive (pricing calculator), no update needed
 
