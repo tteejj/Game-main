@@ -468,3 +468,44 @@ export {
   EntityRegistration,
   FactionRegistration
 } from './UniverseOrchestrator';
+
+// ====================================================================
+// COMPLETE INTEGRATION MODULE - Universe-Aware NPCs and Faction AI
+// ====================================================================
+
+// Universe Context and Environmental Awareness
+export {
+  UniverseContextProvider,
+  UniverseContext,
+  HazardInfo,
+  POIInfo,
+  ContextQuery
+} from './integration/UniverseContextProvider';
+
+// Universe-Aware AI
+export {
+  UniverseAwareAI,
+  UniverseDecisionContext,
+  UniverseDecision,
+  NavigationAdvice,
+  HazardAvoidance,
+  OpportunityAssessment
+} from './integration/UniverseAwareAI';
+
+// Faction Strategic AI
+export {
+  FactionAI,
+  FactionStrategy,
+  FactionGoal,
+  Territory as FactionTerritory,
+  Fleet,
+  FleetMission,
+  StrategicAction
+} from './integration/FactionAI';
+
+// Integrated Universe Orchestrator (Main Integration Entry Point)
+export {
+  IntegratedUniverseOrchestrator,
+  IntegratedNPCShip,
+  UniverseConfig as IntegratedUniverseConfig
+} from './integration/IntegratedUniverseOrchestrator';
