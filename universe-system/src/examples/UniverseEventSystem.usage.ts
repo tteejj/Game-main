@@ -660,7 +660,7 @@ class CompleteSystemIntegration {
     this.logger = new EventLogger(this.eventBus);
 
     this.setupLogging();
-    this.setupCrossSy stemHandlers();
+    this.setupCrossSystemHandlers();
   }
 
   private setupLogging() {

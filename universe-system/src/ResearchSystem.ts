@@ -1296,4 +1296,91 @@ export class ResearchSystem {
 
     return [...baseBuildings, ...bonuses.newBuildingTypes.map(b => b.toUpperCase())];
   }
+
+  // ====================================================================
+  // SAVE/LOAD SUPPORT
+  // ====================================================================
+
+  /**
+   * Serialize system state for saving
+   */
+  serialize(): import('./SaveFileFormat').ResearchSystemState {
+    // Serialize active projects
+    const activeProjects = Array.from(this.activeProjects.values()).map(project => ({
+      techId: project.techId,
+      factionId: project.factionId,
+      startTime: project.startTime,
+      progress: project.progress,
+      estimatedCompletion: project.estimatedCompletion,
+      priority: project.priority
+    }));
+
+    // Serialize completed research
+    const completedResearch: Array<{ factionId: string; research: import('./SaveFileFormat').SerializedCompletedResearch[] }> = [];
+    for (const [factionId, researchList] of this.completedResearch.entries()) {
+      const research = researchList.map(cr => ({
+        techId: cr.techId,
+        factionId: cr.factionId,
+        completionTime: cr.completionTime,
+        bonusesApplied: { ...cr.bonusesApplied }
+      }));
+      completedResearch.push({ factionId, research });
+    }
+
+    // Serialize faction research speeds
+    const factionResearchSpeed = Array.from(this.factionResearchSpeed.entries()).map(([factionId, speed]) => ({
+      factionId,
+      speed
+    }));
+
+    return {
+      activeProjects,
+      completedResearch,
+      factionResearchSpeed
+    };
+  }
+
+  /**
+   * Deserialize and restore system state
+   */
+  deserialize(state: import('./SaveFileFormat').ResearchSystemState): void {
+    console.log('[ResearchSystem] Deserializing state...');
+
+    // Clear existing state
+    this.activeProjects.clear();
+    this.completedResearch.clear();
+    this.factionResearchSpeed.clear();
+
+    // Restore active projects
+    for (const serializedProject of state.activeProjects) {
+      const projectKey = `${serializedProject.factionId}_${serializedProject.techId}`;
+      const project: ResearchProject = {
+        techId: serializedProject.techId,
+        factionId: serializedProject.factionId,
+        startTime: serializedProject.startTime,
+        progress: serializedProject.progress,
+        estimatedCompletion: serializedProject.estimatedCompletion,
+        priority: serializedProject.priority
+      };
+      this.activeProjects.set(projectKey, project);
+    }
+
+    // Restore completed research
+    for (const { factionId, research } of state.completedResearch) {
+      const researchList: CompletedResearch[] = research.map(cr => ({
+        techId: cr.techId,
+        factionId: cr.factionId,
+        completionTime: cr.completionTime,
+        bonusesApplied: { ...cr.bonusesApplied }
+      }));
+      this.completedResearch.set(factionId, researchList);
+    }
+
+    // Restore faction research speeds
+    for (const { factionId, speed } of state.factionResearchSpeed) {
+      this.factionResearchSpeed.set(factionId, speed);
+    }
+
+    console.log(`[ResearchSystem] Restored ${this.activeProjects.size} active projects and ${this.completedResearch.size} faction research histories`);
+  }
 }

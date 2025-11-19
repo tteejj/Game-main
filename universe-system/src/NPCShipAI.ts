@@ -6,8 +6,9 @@
 
 import { Vector3, CelestialBody } from './CelestialBody';
 import { SpaceStation } from './StationGenerator';
-import { Commodity } from './EconomySystem';
+import { Commodity, EconomySystem } from './EconomySystem';
 import { FactionSystem } from './FactionSystem';
+import { NPCTradeIntegration } from './NPCTradeIntegration';
 import {
   ExtendedNPCMemory,
   Experience,
@@ -127,6 +128,10 @@ export class NPCShipAI {
   // INTEGRATED: Single personality system manages all NPCs
   private personalitySystem: NPCPersonalitySystem = new NPCPersonalitySystem();
 
+  // INTEGRATED: Real economy system for trading
+  private economySystem?: EconomySystem;
+  private tradeIntegration?: NPCTradeIntegration;
+
   /**
    * Create a new NPC ship with full personality integration
    */
@@ -209,6 +214,14 @@ export class NPCShipAI {
 
     this.ships.set(ship.id, ship);
     return ship;
+  }
+
+  /**
+   * Link economy system for real market trading
+   */
+  linkEconomySystem(economySystem: EconomySystem): void {
+    this.economySystem = economySystem;
+    this.tradeIntegration = new NPCTradeIntegration(economySystem);
   }
 
   /**
@@ -923,7 +936,7 @@ export class NPCShipAI {
   }
 
   /**
-   * Handle TRADING state
+   * Handle TRADING state - NOW WITH REAL MARKET INTEGRATION
    */
   private handleTradingState(
     ship: NPCShip,
@@ -936,32 +949,117 @@ export class NPCShipAI {
       return;
     }
 
-    // Simplified trading logic
-    // In reality, this would interact with EconomySystem
+    // INTEGRATED: Real market trading via EconomySystem
+    if (!this.tradeIntegration || !this.economySystem) {
+      // Fallback to docked if economy system not linked
+      console.warn(`[NPCShipAI] Cannot trade - economy system not linked for ship ${ship.id}`);
+      ship.state = 'DOCKED';
+      return;
+    }
 
     // Buy cargo at from station
     if (ship.currentTarget === ship.route.fromStation && ship.cargo.length === 0) {
-      const affordableAmount = Math.min(
-        ship.stats.cargoCapacity,
-        ship.credits / 100 // Simplified pricing
+      // Check real market availability
+      const availability = this.tradeIntegration.getCommodityAvailability(
+        ship.currentTarget,
+        ship.route.commodity
       );
 
-      ship.cargo.push({
-        commodity: ship.route.commodity,
-        amount: affordableAmount,
-        value: affordableAmount * 100
-      });
-      ship.credits -= affordableAmount * 100;
+      if (!availability.available) {
+        // Commodity not available, abort route
+        console.warn(`[NPCShipAI] Commodity ${ship.route.commodity} not available at ${ship.currentTarget}`);
+        ship.route = undefined;
+        ship.state = 'DOCKED';
+        return;
+      }
 
-      // Now travel to destination
+      // Calculate how much we can afford and fit
+      const maxByCredits = Math.floor(ship.credits / availability.price);
+      const commodityDef = Array.from(this.economySystem.getAllCommodities()).find(c => c.id === ship.route!.commodity);
+      const maxByCargoSpace = commodityDef ? Math.floor(ship.stats.cargoCapacity / commodityDef.volume) : 0;
+      const maxBySupply = Math.floor(availability.supply);
+
+      const buyAmount = Math.min(maxByCredits, maxByCargoSpace, maxBySupply);
+
+      if (buyAmount <= 0) {
+        // Cannot afford or fit any, abort route
+        ship.route = undefined;
+        ship.state = 'DOCKED';
+        return;
+      }
+
+      // Execute real market purchase
+      const buyResult = this.tradeIntegration.buyFromMarket(
+        ship,
+        ship.currentTarget,
+        ship.route.commodity,
+        buyAmount
+      );
+
+      if (!buyResult.success) {
+        // Purchase failed, abort route
+        console.warn(`[NPCShipAI] Purchase failed: ${buyResult.message}`);
+        ship.route = undefined;
+        ship.state = 'DOCKED';
+        return;
+      }
+
+      // Purchase successful! Now travel to destination
       ship.currentTarget = ship.route.toStation;
+      const destStation = stations.get(ship.route.toStation);
+      if (destStation) {
+        ship.destination = { ...destStation.position };
+      }
       ship.state = 'TRAVELING';
+
+      // Record purchase in extended memory
+      this.recordExperience(
+        ship,
+        'SUCCESSFUL_TRADE',
+        `Purchased ${buyAmount.toFixed(1)} units of ${ship.route.commodity} at ${stations.get(ship.route.fromStation)?.name || 'station'} for ${buyResult.total.toFixed(0)} credits`,
+        2, // Slight positive emotional impact
+        4,
+        [ship.route.fromStation]
+      );
     }
     // Sell cargo at destination
     else if (ship.currentTarget === ship.route.toStation && ship.cargo.length > 0) {
-      const totalValue = ship.cargo.reduce((sum, c) => sum + c.value * 1.2, 0); // 20% profit
-      ship.credits += totalValue;
-      const profit = totalValue - ship.cargo.reduce((sum, c) => sum + c.value, 0);
+      const cargoItem = ship.cargo.find(c => c.commodity === ship.route!.commodity);
+
+      if (!cargoItem || cargoItem.amount <= 0) {
+        // No cargo to sell, abort
+        ship.route = undefined;
+        ship.state = 'DOCKED';
+        return;
+      }
+
+      // Check market demand
+      const availability = this.tradeIntegration.getCommodityAvailability(
+        ship.currentTarget,
+        ship.route.commodity
+      );
+
+      // Calculate original cost per unit
+      const originalCostPerUnit = cargoItem.value / cargoItem.amount;
+
+      // Execute real market sale
+      const sellResult = this.tradeIntegration.sellToMarket(
+        ship,
+        ship.currentTarget,
+        ship.route.commodity,
+        cargoItem.amount
+      );
+
+      if (!sellResult.success) {
+        // Sale failed, abort route but keep cargo
+        console.warn(`[NPCShipAI] Sale failed: ${sellResult.message}`);
+        ship.route = undefined;
+        ship.state = 'DOCKED';
+        return;
+      }
+
+      // Sale successful!
+      const profit = sellResult.profit || 0;
       ship.memory.totalProfit += profit;
       ship.memory.lastTradeTime = Date.now() / 1000;
 
@@ -973,7 +1071,7 @@ export class NPCShipAI {
         if (fromStation && toStation && fromStation.faction && toStation.faction) {
           // Trade between different factions improves relations
           if (fromStation.faction !== toStation.faction) {
-            factionSystem.reportTrade(fromStation.faction, toStation.faction, totalValue);
+            factionSystem.reportTrade(fromStation.faction, toStation.faction, sellResult.total);
           }
         }
       }
@@ -1015,9 +1113,10 @@ export class NPCShipAI {
         }
       }
 
-      ship.cargo = [];
-      ship.state = 'DOCKED';
+      // Trade route completed
+      const completedRoute = ship.route;
       ship.route = undefined;
+      ship.state = 'DOCKED';
 
       // Update goal progress: completed a trade
       if (ship.currentGoalAction && ship.currentGoalAction.type === 'TRADE_WITH') {
@@ -1028,11 +1127,11 @@ export class NPCShipAI {
       // Record learning outcome for adaptive AI
       const normalizedReward = Math.max(-10, Math.min(10, profit / 1000)); // Normalize to -10 to +10
       ship.adaptiveAI.recordOutcome(
-        `trading_${ship.route.commodity}`,
-        `route_${ship.route.fromStation}_to_${ship.route.toStation}`,
+        `trading_${completedRoute.commodity}`,
+        `route_${completedRoute.fromStation}_to_${completedRoute.toStation}`,
         'SUCCESS',
         normalizedReward,
-        { profit, commodity: ship.route.commodity }
+        { profit, commodity: completedRoute.commodity }
       );
     }
   }
@@ -1336,7 +1435,7 @@ export class NPCShipAI {
   }
 
   /**
-   * INTEGRATED: Find best trade route with personality influence
+   * INTEGRATED: Find best trade route with personality influence and REAL MARKET DATA
    */
   private findBestTradeRoute(
     ship: NPCShip,
@@ -1345,7 +1444,51 @@ export class NPCShipAI {
   ): TradeRoute | null {
     const personality = ship.npcPersonality;
 
-    // Check memory first (but deprioritize if faction needs exist)
+    // Use trade integration to find best route with real market data
+    if (this.tradeIntegration) {
+      const realRoute = this.tradeIntegration.findBestTradeRoute(ship, stations);
+
+      if (realRoute) {
+        // Convert to our TradeRoute format
+        const tradeRoute: TradeRoute = {
+          fromStation: realRoute.fromStation,
+          toStation: realRoute.toStation,
+          commodity: realRoute.commodity,
+          profit: realRoute.profit,
+          lastCheck: Date.now() / 1000
+        };
+
+        // Factor in faction needs if available
+        if (factionSystem && ship.faction) {
+          try {
+            const economy = factionSystem.getFactionEconomy(ship.faction);
+
+            // Check if this commodity is critical for faction
+            for (const [commodity, need] of economy.criticalResources) {
+              if (commodity.toLowerCase() === realRoute.commodity.toLowerCase()) {
+                if (need.inCrisis || need.daysRemaining < 30) {
+                  const urgency = need.inCrisis ? 100 : (100 - need.daysRemaining);
+                  // INTEGRATED: Honor affects willingness to help faction
+                  tradeRoute.profit += urgency * 50 * (0.5 + personality.traits.honor * 0.5);
+                }
+              }
+            }
+          } catch (e) {
+            // Faction economy not initialized yet, continue with normal trade
+          }
+        }
+
+        // Add to memory
+        ship.memory.profitableRoutes.push(tradeRoute);
+        if (ship.memory.profitableRoutes.length > 5) {
+          ship.memory.profitableRoutes.shift();
+        }
+
+        return tradeRoute;
+      }
+    }
+
+    // Fallback: Check memory first (but deprioritize if faction needs exist)
     if (ship.memory.profitableRoutes.length > 0 && !factionSystem) {
       const route = ship.memory.profitableRoutes[0];
       // Verify stations still exist
@@ -1354,24 +1497,21 @@ export class NPCShipAI {
       }
     }
 
-    // Find new route considering faction economic needs
+    // Final fallback: Simple route finding (no economy system linked)
     const stationList = Array.from(stations.values());
     let bestRoute: TradeRoute | null = null;
     let bestScore = 0;
 
     // If faction system available, get economic actions for ship's faction
-    let criticalCommodities: string[] = [];
     let urgentDemand: Map<string, number> = new Map(); // commodity -> priority
 
     if (factionSystem && ship.faction) {
       try {
         const economy = factionSystem.getFactionEconomy(ship.faction);
-        const actions = factionSystem.getFactionEconomicActions(ship.faction);
 
         // Identify critical resources
         for (const [commodity, need] of economy.criticalResources) {
           if (need.inCrisis || need.daysRemaining < 30) {
-            criticalCommodities.push(commodity);
             const priority = need.inCrisis ? 100 : (100 - need.daysRemaining);
             urgentDemand.set(commodity.toLowerCase(), priority);
           }

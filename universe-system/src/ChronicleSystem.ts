@@ -1256,4 +1256,187 @@ export class ChronicleSystem {
 
     return Array.from(this.chronicles.values());
   }
+
+  // ====================================================================
+  // SAVE/LOAD SUPPORT
+  // ====================================================================
+
+  /**
+   * Serialize system state for saving
+   */
+  serialize(): import('./SaveFileFormat').ChronicleSystemState {
+    // Serialize event relationships
+    const eventRelationships: Array<{ eventId: string; relationships: import('./SaveFileFormat').SerializedEventRelationship[] }> = [];
+    for (const [eventId, relationships] of this.eventRelationships.entries()) {
+      const serializedRels = relationships.map(rel => ({
+        eventId1: rel.eventId1,
+        eventId2: rel.eventId2,
+        relationshipType: rel.relationshipType,
+        strength: rel.strength,
+        description: rel.description
+      }));
+      eventRelationships.push({ eventId, relationships: serializedRels });
+    }
+
+    // Serialize chronicles
+    const chronicles = Array.from(this.chronicles.values()).map(chronicle => ({
+      id: chronicle.id,
+      title: chronicle.title,
+      timespan: { ...chronicle.timespan },
+      eventIds: chronicle.events.map(e => e.id),
+      narrative: chronicle.narrative,
+      keyFigures: [...chronicle.keyFigures],
+      majorConsequences: [...chronicle.majorConsequences],
+      turningPoints: chronicle.turningPoints.map(tp => ({
+        eventId: tp.eventId,
+        timestamp: tp.timestamp,
+        description: tp.description,
+        impactScore: tp.impactScore,
+        beforeState: tp.beforeState,
+        afterState: tp.afterState
+      })),
+      factionId: chronicle.factionId,
+      tags: [...chronicle.tags],
+      significance: chronicle.significance
+    }));
+
+    // Serialize faction chronicles
+    const factionChronicles: Array<{ factionId: string; chronicleIds: string[] }> = [];
+    for (const [factionId, chronicleIds] of this.factionChronicles.entries()) {
+      factionChronicles.push({ factionId, chronicleIds: [...chronicleIds] });
+    }
+
+    // Serialize significant events cache
+    const significantEventsCache = this.significantEventsCache.map(event => ({
+      id: event.id,
+      timestamp: event.timestamp,
+      type: event.type,
+      severity: event.severity,
+      category: event.category,
+      location: { ...event.location },
+      systemId: event.systemId,
+      participants: [...event.participants],
+      description: event.description,
+      data: event.data,
+      consequences: event.consequences ? [...event.consequences] : [],
+      witnessed: event.witnessed,
+      priority: event.priority,
+      tags: event.tags ? [...event.tags] : [],
+      actors: event.actors ? [...event.actors] : event.participants,
+      outcome: event.outcome || '',
+      significance: event.significance,
+      relatedEvents: event.relatedEvents ? [...event.relatedEvents] : []
+    }));
+
+    return {
+      eventRelationships,
+      chronicles,
+      factionChronicles,
+      significantEventsCache,
+      lastCacheUpdate: this.lastCacheUpdate,
+      queryCount: this.queryCount,
+      totalQueryTime: this.totalQueryTime
+    };
+  }
+
+  /**
+   * Deserialize and restore system state
+   */
+  deserialize(state: import('./SaveFileFormat').ChronicleSystemState): void {
+    console.log('[ChronicleSystem] Deserializing state...');
+
+    // Clear existing state
+    this.eventRelationships.clear();
+    this.eventGraph.clear();
+    this.chronicles.clear();
+    this.factionChronicles.clear();
+    this.significantEventsCache = [];
+
+    // Restore event relationships
+    for (const { eventId, relationships } of state.eventRelationships) {
+      const rels: EventRelationship[] = relationships.map(rel => ({
+        eventId1: rel.eventId1,
+        eventId2: rel.eventId2,
+        relationshipType: rel.relationshipType,
+        strength: rel.strength,
+        description: rel.description
+      }));
+      this.eventRelationships.set(eventId, rels);
+
+      // Rebuild graph
+      if (!this.eventGraph.has(eventId)) {
+        this.eventGraph.set(eventId, new Set());
+      }
+      for (const rel of rels) {
+        this.eventGraph.get(eventId)!.add(rel.eventId2);
+        if (!this.eventGraph.has(rel.eventId2)) {
+          this.eventGraph.set(rel.eventId2, new Set());
+        }
+        this.eventGraph.get(rel.eventId2)!.add(eventId);
+      }
+    }
+
+    // Restore chronicles
+    for (const serializedChronicle of state.chronicles) {
+      // Get events from history system
+      const events: HistoricalEventExtended[] = [];
+      for (const eventId of serializedChronicle.eventIds) {
+        const historyEvents = this.historySystem.queryEvents({ limit: 10000 });
+        const event = historyEvents.find(e => e.id === eventId) as HistoricalEventExtended;
+        if (event) {
+          events.push(event);
+        }
+      }
+
+      const chronicle: Chronicle = {
+        id: serializedChronicle.id,
+        title: serializedChronicle.title,
+        timespan: { ...serializedChronicle.timespan },
+        events,
+        narrative: serializedChronicle.narrative,
+        keyFigures: [...serializedChronicle.keyFigures],
+        majorConsequences: [...serializedChronicle.majorConsequences],
+        turningPoints: serializedChronicle.turningPoints.map(tp => ({ ...tp })),
+        factionId: serializedChronicle.factionId,
+        tags: [...serializedChronicle.tags],
+        significance: serializedChronicle.significance
+      };
+
+      this.chronicles.set(chronicle.id, chronicle);
+    }
+
+    // Restore faction chronicles
+    for (const { factionId, chronicleIds } of state.factionChronicles) {
+      this.factionChronicles.set(factionId, [...chronicleIds]);
+    }
+
+    // Restore significant events cache
+    this.significantEventsCache = state.significantEventsCache.map(event => ({
+      id: event.id,
+      timestamp: event.timestamp,
+      type: event.type as any,
+      severity: event.severity,
+      category: event.category as any,
+      location: { ...event.location },
+      systemId: event.systemId,
+      participants: [...event.participants],
+      description: event.description,
+      data: event.data,
+      consequences: [...event.consequences],
+      witnessed: event.witnessed,
+      priority: event.priority,
+      tags: event.tags ? [...event.tags] : [],
+      actors: event.actors,
+      outcome: event.outcome,
+      significance: event.significance,
+      relatedEvents: event.relatedEvents
+    }));
+
+    // Restore metadata
+    this.lastCacheUpdate = state.lastCacheUpdate;
+    this.queryCount = state.queryCount;
+    this.totalQueryTime = state.totalQueryTime;
+
+    console.log(`[ChronicleSystem] Restored ${this.eventRelationships.size} event relationships, ${this.chronicles.size} chronicles`);
+  }
 }

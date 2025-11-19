@@ -491,4 +491,62 @@ export class ConstructionSystem {
     this.activeProjects.clear();
     console.log('[ConstructionSystem] Cleared all active projects');
   }
+
+  // ====================================================================
+  // SAVE/LOAD SUPPORT
+  // ====================================================================
+
+  /**
+   * Serialize system state for saving
+   */
+  serialize(): import('./SaveFileFormat').ConstructionSystemState {
+    const projects = Array.from(this.activeProjects.values()).map(project => ({
+      id: project.id,
+      type: project.type,
+      position: { ...project.position },
+      costs: project.costs.map(c => ({ ...c })),
+      buildTime: project.buildTime,
+      progress: project.progress,
+      startTime: project.startTime,
+      owner: project.owner,
+      systemId: project.systemId
+    }));
+
+    return {
+      activeProjects: projects,
+      nextProjectId: this.nextProjectId
+    };
+  }
+
+  /**
+   * Deserialize and restore system state
+   */
+  deserialize(state: import('./SaveFileFormat').ConstructionSystemState): void {
+    console.log('[ConstructionSystem] Deserializing state...');
+
+    // Clear existing state
+    this.activeProjects.clear();
+
+    // Restore projects
+    for (const serializedProject of state.activeProjects) {
+      const project: ConstructionProject = {
+        id: serializedProject.id,
+        type: serializedProject.type,
+        position: { ...serializedProject.position },
+        costs: serializedProject.costs.map(c => ({ ...c })),
+        buildTime: serializedProject.buildTime,
+        progress: serializedProject.progress,
+        startTime: serializedProject.startTime,
+        owner: serializedProject.owner,
+        systemId: serializedProject.systemId
+      };
+
+      this.activeProjects.set(project.id, project);
+    }
+
+    // Restore counter
+    this.nextProjectId = state.nextProjectId;
+
+    console.log(`[ConstructionSystem] Restored ${this.activeProjects.size} active projects`);
+  }
 }

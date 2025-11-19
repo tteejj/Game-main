@@ -1194,4 +1194,179 @@ export class PopulationSystem {
     this.unrestEvents.delete(cityId);
     this.cityRegistry.delete(cityId);
   }
+
+  // ====================================================================
+  // SAVE/LOAD SUPPORT
+  // ====================================================================
+
+  /**
+   * Serialize system state for saving
+   */
+  serialize(): import('./SaveFileFormat').PopulationSystemState {
+    // Serialize citizen groups
+    const citizenGroups = Array.from(this.citizenGroups.values()).map(group => ({
+      id: group.id,
+      cityId: group.cityId,
+      count: group.count,
+      ageGroup: group.ageGroup,
+      skillCategory: group.skillCategory,
+      happiness: group.happiness,
+      health: group.health,
+      education: group.education,
+      wealth: group.wealth,
+      needs: { ...group.needs },
+      politicalEngagement: group.politicalEngagement,
+      crimePropensity: group.crimePropensity,
+      migrationDesire: group.migrationDesire
+    }));
+
+    // Serialize city populations
+    const cityPopulations: Array<{ cityId: string; groupIds: string[] }> = [];
+    for (const [cityId, groups] of this.cityPopulations.entries()) {
+      cityPopulations.push({
+        cityId,
+        groupIds: groups.map(g => g.id)
+      });
+    }
+
+    // Serialize migration events
+    const migrationEvents = this.migrationEvents.map(event => ({
+      fromCityId: event.fromCityId,
+      toCityId: event.toCityId,
+      citizenGroupId: event.citizenGroupId,
+      count: event.count,
+      reason: event.reason,
+      timestamp: event.timestamp
+    }));
+
+    // Serialize unrest events
+    const unrestEvents: Array<{ cityId: string; unrest: import('./SaveFileFormat').SerializedSocialUnrest[] }> = [];
+    for (const [cityId, events] of this.unrestEvents.entries()) {
+      const unrest = events.map(e => ({
+        cityId: e.cityId,
+        severity: e.severity,
+        type: e.type,
+        participants: e.participants,
+        demands: [...e.demands],
+        startTime: e.startTime,
+        duration: e.duration,
+        economicImpact: e.economicImpact
+      }));
+      unrestEvents.push({ cityId, unrest });
+    }
+
+    // Serialize labor markets
+    const laborMarkets: Array<{ cityId: string; market: import('./SaveFileFormat').SerializedLaborMarket }> = [];
+    for (const [cityId, market] of this.laborMarkets.entries()) {
+      const serializedMarket: import('./SaveFileFormat').SerializedLaborMarket = {
+        totalWorkforce: market.totalWorkforce,
+        employed: market.employed,
+        unemployed: market.unemployed,
+        unemploymentRate: market.unemploymentRate,
+        laborDemand: Array.from(market.laborDemand.entries()).map(([skill, count]) => ({ skill, count })),
+        laborSupply: Array.from(market.laborSupply.entries()).map(([skill, count]) => ({ skill, count })),
+        averageWage: market.averageWage
+      };
+      laborMarkets.push({ cityId, market: serializedMarket });
+    }
+
+    return {
+      citizenGroups,
+      cityPopulations,
+      migrationEvents,
+      unrestEvents,
+      laborMarkets,
+      currentTime: this.currentTime
+    };
+  }
+
+  /**
+   * Deserialize and restore system state
+   */
+  deserialize(state: import('./SaveFileFormat').PopulationSystemState): void {
+    console.log('[PopulationSystem] Deserializing state...');
+
+    // Clear existing state
+    this.citizenGroups.clear();
+    this.cityPopulations.clear();
+    this.migrationEvents = [];
+    this.unrestEvents.clear();
+    this.laborMarkets.clear();
+
+    // Restore citizen groups
+    for (const serializedGroup of state.citizenGroups) {
+      const group: CitizenGroup = {
+        id: serializedGroup.id,
+        cityId: serializedGroup.cityId,
+        count: serializedGroup.count,
+        ageGroup: serializedGroup.ageGroup,
+        skillCategory: serializedGroup.skillCategory,
+        happiness: serializedGroup.happiness,
+        health: serializedGroup.health,
+        education: serializedGroup.education,
+        wealth: serializedGroup.wealth,
+        needs: { ...serializedGroup.needs },
+        politicalEngagement: serializedGroup.politicalEngagement,
+        crimePropensity: serializedGroup.crimePropensity,
+        migrationDesire: serializedGroup.migrationDesire
+      };
+      this.citizenGroups.set(group.id, group);
+    }
+
+    // Restore city populations
+    for (const { cityId, groupIds } of state.cityPopulations) {
+      const groups: CitizenGroup[] = [];
+      for (const groupId of groupIds) {
+        const group = this.citizenGroups.get(groupId);
+        if (group) {
+          groups.push(group);
+        }
+      }
+      this.cityPopulations.set(cityId, groups);
+    }
+
+    // Restore migration events
+    this.migrationEvents = state.migrationEvents.map(event => ({
+      fromCityId: event.fromCityId,
+      toCityId: event.toCityId,
+      citizenGroupId: event.citizenGroupId,
+      count: event.count,
+      reason: event.reason,
+      timestamp: event.timestamp
+    }));
+
+    // Restore unrest events
+    for (const { cityId, unrest } of state.unrestEvents) {
+      const events: SocialUnrest[] = unrest.map(e => ({
+        cityId: e.cityId,
+        severity: e.severity,
+        type: e.type,
+        participants: e.participants,
+        demands: [...e.demands],
+        startTime: e.startTime,
+        duration: e.duration,
+        economicImpact: e.economicImpact
+      }));
+      this.unrestEvents.set(cityId, events);
+    }
+
+    // Restore labor markets
+    for (const { cityId, market } of state.laborMarkets) {
+      const laborMarket: LaborMarket = {
+        totalWorkforce: market.totalWorkforce,
+        employed: market.employed,
+        unemployed: market.unemployed,
+        unemploymentRate: market.unemploymentRate,
+        laborDemand: new Map(market.laborDemand.map(({ skill, count }) => [skill, count])),
+        laborSupply: new Map(market.laborSupply.map(({ skill, count }) => [skill, count])),
+        averageWage: market.averageWage
+      };
+      this.laborMarkets.set(cityId, laborMarket);
+    }
+
+    // Restore time
+    this.currentTime = state.currentTime;
+
+    console.log(`[PopulationSystem] Restored ${this.citizenGroups.size} citizen groups across ${this.cityPopulations.size} cities`);
+  }
 }

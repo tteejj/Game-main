@@ -567,9 +567,14 @@ export class FactionDiplomacyEngine {
       factionB,
       status: 'NEUTRAL',
       relationshipValue: 0,
+      opinion: 0,
       recentInteractions: [],
       trend: 'STABLE',
       trendStrength: 0,
+      momentum: 0,
+      inertia: 0,
+      history: [],
+      diplomaticCapital: 0,
       treaties: [],
       tradeAgreements: [],
       sharedAllies: [],
@@ -936,7 +941,7 @@ export class FactionDiplomacyEngine {
 
     interactions.push({
       timestamp: event.timestamp,
-      type: 'PEACEFUL_CONTACT',
+      type: 'DIPLOMATIC_PRAISE',
       factionA: dockingShip,
       factionB: stationFaction,
       impact: baseImpact,
@@ -1405,10 +1410,7 @@ export class FactionDiplomacyEngine {
     }
   }
 
-  private getAllies(factionId: string): string[] {
-    // TODO: Get allies from alliance system
-    return [];
-  }
+  // getAllies method moved to public section below for event integration
 
   private calculateMilitaryStrength(factionId: string): number {
     // TODO: Calculate from faction resources
@@ -1571,9 +1573,9 @@ export class FactionDiplomacyEngine {
   }
 
   /**
-   * Modify diplomatic capital
+   * Modify diplomatic capital (made public for event integration)
    */
-  private modifyDiplomaticCapital(faction: string, target: string, amount: number): void {
+  public modifyDiplomaticCapital(faction: string, target: string, amount: number): void {
     const relationship = this.getRelationship(faction, target);
     relationship.diplomaticCapital = (relationship.diplomaticCapital || 0) + amount;
     relationship.diplomaticCapital = Math.max(0, Math.min(100, relationship.diplomaticCapital));
@@ -1619,5 +1621,334 @@ export class FactionDiplomacyEngine {
         }
       }
     }
+  }
+
+  // ====================================================================
+  // DIPLOMATIC CONSEQUENCE METHODS (for Event Integration)
+  // ====================================================================
+
+  /**
+   * Apply diplomatic consequence with optional cascade to allies
+   */
+  public applyDiplomaticConsequence(params: {
+    factionA: string;
+    factionB: string;
+    relationshipDelta: number;
+    reason: string;
+    eventType: InteractionType;
+    cascadeToAllies: boolean;
+    cascadeStrength?: number;
+  }): void {
+    const { factionA, factionB, relationshipDelta, reason, eventType, cascadeToAllies, cascadeStrength = 0.5 } = params;
+
+    // Apply to primary relationship
+    const relationship = this.getRelationship(factionA, factionB);
+
+    const interaction: DiplomaticInteraction = {
+      timestamp: Date.now() / 1000,
+      type: eventType,
+      factionA,
+      factionB,
+      impact: relationshipDelta,
+      description: reason,
+      witnesses: []
+    };
+
+    this.applyInteraction(interaction);
+
+    // Cascade to allies if requested
+    if (cascadeToAllies) {
+      const alliesA = this.getAllies(factionA);
+      const alliesB = this.getAllies(factionB);
+
+      // Allies of A react to B
+      for (const ally of alliesA) {
+        const allyInteraction: DiplomaticInteraction = {
+          timestamp: Date.now() / 1000,
+          type: eventType,
+          factionA: ally,
+          factionB,
+          impact: relationshipDelta * cascadeStrength,
+          description: `Ally reaction: ${reason}`,
+          witnesses: [factionA]
+        };
+        this.applyInteraction(allyInteraction);
+      }
+
+      // Allies of B react to A
+      for (const ally of alliesB) {
+        const allyInteraction: DiplomaticInteraction = {
+          timestamp: Date.now() / 1000,
+          type: eventType,
+          factionA: ally,
+          factionB: factionA,
+          impact: relationshipDelta * cascadeStrength,
+          description: `Ally reaction: ${reason}`,
+          witnesses: [factionB]
+        };
+        this.applyInteraction(allyInteraction);
+      }
+    }
+  }
+
+  /**
+   * Get all allies of a faction
+   */
+  public getAllies(factionId: string): string[] {
+    const allies: string[] = [];
+
+    // Check all alliances
+    for (const alliance of this.activeAlliances.values()) {
+      if (alliance.members.includes(factionId)) {
+        allies.push(...alliance.members.filter(m => m !== factionId));
+      }
+    }
+
+    // Also check for ALLIED status relationships
+    for (const [key, relationship] of this.relationships.entries()) {
+      if (relationship.status === 'ALLIED') {
+        if (relationship.factionA === factionId) {
+          allies.push(relationship.factionB);
+        } else if (relationship.factionB === factionId) {
+          allies.push(relationship.factionA);
+        }
+      }
+    }
+
+    // Remove duplicates
+    return [...new Set(allies)];
+  }
+
+  /**
+   * Get all known factions
+   */
+  public getAllFactions(): string[] {
+    const factions = new Set<string>();
+
+    for (const relationship of this.relationships.values()) {
+      factions.add(relationship.factionA);
+      factions.add(relationship.factionB);
+    }
+
+    return Array.from(factions);
+  }
+
+  /**
+   * Create trade agreement between factions
+   */
+  public createTradeAgreement(params: {
+    factionA: string;
+    factionB: string;
+    commodities: string[];
+    tariffReduction: number;
+    duration: number;
+  }): TradeAgreement {
+    const { factionA, factionB, commodities, tariffReduction, duration } = params;
+
+    const agreement: TradeAgreement = {
+      id: `trade_${Date.now()}`,
+      parties: [factionA, factionB],
+      commodities,
+      tariffReduction,
+      tradeVolume: 0,
+      quotas: new Map(),
+      signedAt: Date.now() / 1000,
+      duration,
+      actualTradeVolume: 0,
+      compliance: 1.0
+    };
+
+    const relationship = this.getRelationship(factionA, factionB);
+    relationship.tradeAgreements.push(agreement);
+
+    console.log(`[Diplomacy] Trade agreement created: ${factionA} <-> ${factionB} (${commodities.join(', ')})`);
+
+    return agreement;
+  }
+
+  /**
+   * Increase economic interdependence between factions
+   */
+  public increaseEconomicInterdependence(factionA: string, factionB: string, amount: number): void {
+    const relationship = this.getRelationship(factionA, factionB);
+    relationship.economicInterdependence = Math.min(1.0, relationship.economicInterdependence + amount);
+
+    // High interdependence reduces war probability
+    if (relationship.economicInterdependence > 0.5) {
+      relationship.warProbability = Math.max(0, relationship.warProbability - amount * 0.2);
+    }
+  }
+
+  /**
+   * Unlock diplomatic option for a faction
+   */
+  public unlockDiplomaticOption(params: {
+    factionId: string;
+    technologyId: string;
+    optionType: string;
+  }): void {
+    const { factionId, technologyId, optionType } = params;
+
+    // Store unlocked options (you could extend FactionRelationship to track this)
+    console.log(`[Diplomacy] ${factionId} unlocked diplomatic option: ${optionType} (via ${technologyId})`);
+
+    // Improve diplomatic capital with all factions
+    const allFactions = this.getAllFactions();
+    for (const otherFaction of allFactions) {
+      if (otherFaction === factionId) continue;
+      this.modifyDiplomaticCapital(factionId, otherFaction, 3);
+    }
+  }
+
+  /**
+   * Reduce faction stability (affects diplomatic standing)
+   */
+  public reduceFactionStability(params: {
+    factionId: string;
+    stabilityLoss: number;
+    reason: string;
+  }): void {
+    const { factionId, stabilityLoss, reason } = params;
+
+    console.log(`[Diplomacy] ${factionId} stability reduced by ${(stabilityLoss * 100).toFixed(1)}%: ${reason}`);
+
+    // Low stability makes faction vulnerable
+    // This could be tracked in a faction state object
+    // For now, we reduce diplomatic capital with all factions
+    const allFactions = this.getAllFactions();
+    for (const otherFaction of allFactions) {
+      if (otherFaction === factionId) continue;
+      this.modifyDiplomaticCapital(factionId, otherFaction, -stabilityLoss * 5);
+    }
+  }
+
+  /**
+   * Increase war probability between factions
+   */
+  public increaseWarProbability(params: {
+    factionA: string;
+    factionB: string;
+    increase: number;
+    reason: string;
+  }): void {
+    const { factionA, factionB, increase, reason } = params;
+    const relationship = this.getRelationship(factionA, factionB);
+
+    relationship.warProbability = Math.min(1.0, relationship.warProbability + increase);
+
+    console.log(`[Diplomacy] War probability ${factionA} vs ${factionB}: ${(relationship.warProbability * 100).toFixed(1)}% (${reason})`);
+  }
+
+  /**
+   * Create diplomatic tension (ongoing negative modifier)
+   */
+  public createDiplomaticTension(params: {
+    factionA: string;
+    territories?: string[];
+    tensionType: string;
+    severity: number;
+  }): void {
+    const { factionA, territories, tensionType, severity } = params;
+
+    console.log(`[Diplomacy] Diplomatic tension created: ${factionA} - ${tensionType} (severity: ${severity})`);
+
+    // Tensions reduce relations with all factions over time
+    const allFactions = this.getAllFactions();
+    for (const otherFaction of allFactions) {
+      if (otherFaction === factionA) continue;
+
+      const relationship = this.getRelationship(factionA, otherFaction);
+      relationship.relationshipValue -= severity * 5;
+    }
+  }
+
+  /**
+   * Create territorial dispute between factions
+   */
+  public createTerritorialDispute(params: {
+    factionA: string;
+    factionB: string;
+    disputedTerritory: string;
+    reason: string;
+  }): void {
+    const { factionA, factionB, disputedTerritory, reason } = params;
+    const relationship = this.getRelationship(factionA, factionB);
+
+    relationship.territorialDisputes += 1;
+
+    console.log(`[Diplomacy] Territorial dispute: ${factionA} vs ${factionB} over ${disputedTerritory} (${reason})`);
+    console.log(`   Total disputes: ${relationship.territorialDisputes}`);
+
+    // Disputes increase war probability
+    relationship.warProbability = Math.min(1.0, relationship.warProbability + 0.1 * relationship.territorialDisputes);
+  }
+
+  /**
+   * Update military balance perception
+   */
+  public updateMilitaryBalance(params: {
+    factionId: string;
+    balanceChange: number;
+    reason: string;
+  }): void {
+    const { factionId, balanceChange, reason } = params;
+
+    console.log(`[Diplomacy] Military balance updated: ${factionId} ${balanceChange > 0 ? '+' : ''}${balanceChange} (${reason})`);
+
+    // Update balance with all factions
+    const allFactions = this.getAllFactions();
+    for (const otherFaction of allFactions) {
+      if (otherFaction === factionId) continue;
+
+      const relationship = this.getRelationship(factionId, otherFaction);
+      relationship.militaryBalance += balanceChange;
+      relationship.militaryBalance = Math.max(-1, Math.min(1, relationship.militaryBalance));
+
+      // Weaker factions are more likely to be targeted
+      if (relationship.militaryBalance < -0.5 && relationship.relationshipValue < 0) {
+        relationship.warProbability = Math.min(1.0, relationship.warProbability + 0.05);
+      }
+    }
+  }
+
+  /**
+   * Create diplomatic crisis (complex situation requiring resolution)
+   */
+  public createDiplomaticCrisis(params: {
+    factionId: string;
+    crisisType: string;
+    involvedFactions: string[];
+  }): void {
+    const { factionId, crisisType, involvedFactions } = params;
+
+    console.log(`[Diplomacy] CRISIS: ${factionId} - ${crisisType} involving ${involvedFactions.join(', ')}`);
+
+    // Crisis damages diplomatic capital
+    for (const faction of involvedFactions) {
+      this.modifyDiplomaticCapital(factionId, faction, -15);
+    }
+
+    // May need to choose sides or dissolve alliances
+    if (crisisType === 'ALLIANCE_CONFLICT') {
+      // Faction may need to break alliance with one side
+      const alliances = Array.from(this.activeAlliances.values()).filter(a =>
+        a.members.includes(factionId)
+      );
+
+      for (const alliance of alliances) {
+        const conflictMembers = alliance.members.filter(m => involvedFactions.includes(m));
+        if (conflictMembers.length > 0) {
+          console.log(`   Alliance ${alliance.name} is strained due to internal conflict`);
+          // Could reduce alliance effectiveness or dissolve it
+        }
+      }
+    }
+  }
+
+  /**
+   * Get faction allies (wrapper for external access)
+   */
+  public getFactionAllies(factionId: string): string[] {
+    return this.getAllies(factionId);
   }
 }

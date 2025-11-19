@@ -2,12 +2,19 @@
  * MiningSystem - Mine asteroids and celestial bodies for resources
  * Mining lasers, extraction efficiency, ore types, refining
  * Integrates with ManufacturingSystem to convert ore into tradeable commodities
+ * NOW WITH: NPC mining, persistent asteroids, depletion tracking, fleet coordination
  */
 
 import { Vector3 } from './CelestialBody';
 import { UniverseOrchestrator } from './UniverseOrchestrator';
 import { CommodityType } from './economy/commodity';
 import { ORE_TO_COMMODITY_MAP } from './ManufacturingSystem';
+import {
+  AsteroidDepletionTracker,
+  PersistentAsteroid,
+  AsteroidField
+} from './AsteroidDepletionTracker';
+import { MiningFleetAI, MiningAssignment } from './MiningFleetAI';
 
 export type OreType =
   | 'IRON'
@@ -79,16 +86,32 @@ export interface RefinedCommodities {
   refinedAt: number; // timestamp
 }
 
+/**
+ * Mining mode - player-controlled or NPC-controlled
+ */
+export enum MiningMode {
+  PLAYER = 'PLAYER',     // Player ship
+  NPC = 'NPC'            // NPC ship controlled by fleet AI
+}
+
 export class MiningSystem {
   private orchestrator: UniverseOrchestrator;
   private miningLasers: MiningLaser[] = [];
   private refinery: RefineryBay;
 
-  private currentTarget: Asteroid | null = null;
+  private currentTarget: PersistentAsteroid | null = null; // Changed to PersistentAsteroid
   private miningActive: boolean = false;
 
   // Track refined commodities ready for market
   private refinedCommodities: Map<CommodityType, number> = new Map();
+
+  // Integration with persistent asteroids and fleet AI
+  private asteroidTracker: AsteroidDepletionTracker;
+  private fleetAI: MiningFleetAI | null = null;
+
+  // Mining mode
+  private mode: MiningMode = MiningMode.PLAYER;
+  private shipId: string | null = null; // Ship ID when in NPC mode
 
   private static readonly ORE_VALUES: Map<OreType, number> = new Map([
     ['IRON', 5],
@@ -105,8 +128,14 @@ export class MiningSystem {
     ['EXOTIC_MATTER', 5000]
   ]);
 
-  constructor(orchestrator: UniverseOrchestrator) {
+  constructor(
+    orchestrator: UniverseOrchestrator,
+    asteroidTracker?: AsteroidDepletionTracker
+  ) {
     this.orchestrator = orchestrator;
+
+    // Use provided tracker or create new one
+    this.asteroidTracker = asteroidTracker || new AsteroidDepletionTracker();
 
     // Initialize with basic mining laser
     this.miningLasers.push({
@@ -135,29 +164,77 @@ export class MiningSystem {
   }
 
   /**
-   * Scan for asteroids
+   * Link to mining fleet AI for NPC coordination
    */
-  public scanForAsteroids(playerPosition: Vector3, scanRange: number): Asteroid[] {
-    // Would scan current system for asteroids
-    // For now, generate some procedural asteroids
+  linkFleetAI(fleetAI: MiningFleetAI): void {
+    this.fleetAI = fleetAI;
+    console.log('[MINING] Linked to fleet AI');
+  }
 
-    const asteroids: Asteroid[] = [];
-    const numAsteroids = Math.floor(Math.random() * 5) + 3;
+  /**
+   * Set mining mode
+   */
+  setMode(mode: MiningMode, shipId?: string): void {
+    this.mode = mode;
+    this.shipId = shipId || null;
 
-    for (let i = 0; i < numAsteroids; i++) {
-      asteroids.push(this.generateAsteroid(playerPosition));
+    if (mode === MiningMode.NPC && !shipId) {
+      console.warn('[MINING] NPC mode requires shipId');
     }
+  }
+
+  /**
+   * Get asteroid tracker (for external use)
+   */
+  getAsteroidTracker(): AsteroidDepletionTracker {
+    return this.asteroidTracker;
+  }
+
+  /**
+   * Scan for asteroids (now uses persistent system)
+   */
+  public scanForAsteroids(playerPosition: Vector3, scanRange: number): PersistentAsteroid[] {
+    // Find asteroids near player using persistent tracker
+    const asteroids = this.asteroidTracker.findAsteroidsNear(playerPosition, scanRange, false);
+
+    // Mark as discovered
+    asteroids.forEach(ast => {
+      ast.discovered = true;
+    });
 
     return asteroids;
   }
 
   /**
+   * Scan for asteroid fields
+   */
+  public scanForFields(playerPosition: Vector3, scanRange: number): AsteroidField[] {
+    const fields = this.asteroidTracker.findFieldsNear(playerPosition, scanRange);
+
+    // Mark as discovered
+    fields.forEach(field => {
+      field.discovered = true;
+    });
+
+    return fields;
+  }
+
+  /**
    * Target asteroid for mining
    */
-  public targetAsteroid(asteroid: Asteroid, playerPosition: Vector3): {
+  public targetAsteroid(asteroidId: string, playerPosition: Vector3): {
     success: boolean;
     message: string;
   } {
+    const asteroid = this.asteroidTracker.getAsteroid(asteroidId);
+
+    if (!asteroid) {
+      return {
+        success: false,
+        message: 'Asteroid not found'
+      };
+    }
+
     const distance = this.calculateDistance(playerPosition, asteroid.position);
     const maxRange = Math.max(...this.miningLasers.map(l => l.range));
 
@@ -172,16 +249,17 @@ export class MiningSystem {
     asteroid.discovered = true;
 
     console.log(`[MINING] Targeted asteroid ${asteroid.id}`);
-    console.log(`  Mass: ${(asteroid.mass / 1000).toFixed(0)}t`);
-    console.log(`  Estimated value: ${asteroid.value.toFixed(0)} credits`);
+    console.log(`  Current mass: ${(asteroid.currentMass / 1000).toFixed(0)}t (${(asteroid.currentMass / asteroid.originalMass * 100).toFixed(0)}% remaining)`);
+    console.log(`  Estimated value: ${asteroid.estimatedValue.toFixed(0)} credits`);
     console.log('  Composition:');
-    for (const [ore, percentage] of asteroid.composition) {
-      console.log(`    ${ore}: ${(percentage * 100).toFixed(1)}%`);
+    for (const [ore, percentage] of asteroid.originalComposition) {
+      const remaining = asteroid.remainingOre.get(ore) || 0;
+      console.log(`    ${ore}: ${(percentage * 100).toFixed(1)}% (${remaining.toFixed(0)}kg remaining)`);
     }
 
     return {
       success: true,
-      message: `Asteroid targeted: ${asteroid.value.toFixed(0)} credits estimated value`
+      message: `Asteroid targeted: ${asteroid.estimatedValue.toFixed(0)} credits estimated value`
     };
   }
 
@@ -245,6 +323,11 @@ export class MiningSystem {
       laser.active = false;
     }
 
+    // Unregister from asteroid if in NPC mode
+    if (this.mode === MiningMode.NPC && this.shipId && this.currentTarget) {
+      this.asteroidTracker.stopMining(this.currentTarget.id, this.shipId);
+    }
+
     console.log('[MINING] Mining stopped');
   }
 
@@ -287,26 +370,54 @@ export class MiningSystem {
         continue;
       }
 
-      // Extract ore
-      const yield = this.extractOre(minedAmount, laser.efficiency);
-      if (yield) {
-        yields.push(yield);
+      // Extract ore using persistent asteroid tracker
+      const shipId = this.shipId || 'player';
+      const mineResult = this.asteroidTracker.mineAsteroid(
+        this.currentTarget.id,
+        shipId,
+        minedAmount
+      );
 
-        // Add to refinery
-        this.refinery.currentLoad += yield.quantity;
+      if (!mineResult.success) {
+        console.log(`[MINING] Mining failed: ${mineResult.message}`);
+        continue;
+      }
 
-        // Reduce asteroid mass
-        this.currentTarget.mass -= minedAmount;
+      // Convert to yields
+      for (const [oreType, amount] of mineResult.oreYield) {
+        if (amount > 0) {
+          const value = (MiningSystem.ORE_VALUES.get(oreType) || 0) * amount;
+          const purity = 0.5 + Math.random() * 0.5; // 50-100% purity
 
-        if (this.currentTarget.mass <= 0) {
-          this.currentTarget.depleted = true;
-          this.stopMining();
-          console.log('[MINING] Asteroid depleted');
+          yields.push({
+            oreType,
+            quantity: amount,
+            value,
+            purity
+          });
+
+          // Add to refinery
+          this.refinery.currentLoad += amount;
         }
+      }
+
+      // Check if asteroid depleted
+      if (mineResult.depleted) {
+        this.stopMining();
+        console.log('[MINING] Asteroid depleted');
       }
 
       // Laser degradation
       laser.condition -= 0.00001 * deltaTime;
+    }
+
+    // Update fleet AI if in NPC mode
+    if (this.mode === MiningMode.NPC && this.shipId && this.fleetAI) {
+      this.fleetAI.updateMinerStatus(
+        this.shipId,
+        'MINING',
+        this.refinery.currentLoad
+      );
     }
 
     return yields;
@@ -339,7 +450,7 @@ export class MiningSystem {
 
     // Distribute processed ore (simplified)
     if (this.currentTarget) {
-      for (const [oreType, percentage] of this.currentTarget.composition) {
+      for (const [oreType, percentage] of this.currentTarget.originalComposition) {
         const amount = pureOre * percentage;
         processed.set(oreType, amount);
 
@@ -469,19 +580,60 @@ export class MiningSystem {
   }
 
   /**
+   * NPC delivery to refinery station
+   */
+  public deliverToStation(stationId: string): {
+    success: boolean;
+    delivered: Map<CommodityType, number>;
+    message: string;
+  } {
+    if (!this.shipId || !this.fleetAI) {
+      return {
+        success: false,
+        delivered: new Map(),
+        message: 'Not in NPC mode or fleet AI not linked'
+      };
+    }
+
+    const commodities = this.transferAllCommodities();
+
+    // Convert commodities back to ore for delivery
+    const oreDelivery = new Map<OreType, number>();
+    for (const [commodity, amount] of commodities) {
+      // Find corresponding ore type
+      for (const [oreType, commodityType] of ORE_TO_COMMODITY_MAP) {
+        if (commodityType === commodity) {
+          const existing = oreDelivery.get(oreType) || 0;
+          oreDelivery.set(oreType, existing + amount);
+        }
+      }
+    }
+
+    const result = this.fleetAI.deliverOre(this.shipId, stationId, oreDelivery);
+
+    return {
+      success: result.success,
+      delivered: commodities,
+      message: result.message
+    };
+  }
+
+  /**
    * Get mining status
    */
   public getMiningStatus(): string {
     const lines: string[] = [];
 
     lines.push('=== MINING STATUS ===');
+    lines.push(`Mode: ${this.mode}${this.shipId ? ` (Ship: ${this.shipId})` : ''}`);
     lines.push(`Mining: ${this.miningActive ? 'ACTIVE' : 'INACTIVE'}`);
 
     if (this.currentTarget) {
       lines.push('');
       lines.push(`Target: ${this.currentTarget.id}`);
-      lines.push(`Mass remaining: ${(this.currentTarget.mass / 1000).toFixed(0)}t`);
+      lines.push(`Mass remaining: ${(this.currentTarget.currentMass / 1000).toFixed(0)}t (${(this.currentTarget.currentMass / this.currentTarget.originalMass * 100).toFixed(0)}%)`);
       lines.push(`Depleted: ${this.currentTarget.depleted ? 'YES' : 'NO'}`);
+      lines.push(`Active miners: ${this.currentTarget.activeMiners.size}`);
     }
 
     lines.push('');
@@ -519,86 +671,9 @@ export class MiningSystem {
     return lines.join('\n');
   }
 
-  // Private methods
-  private generateAsteroid(nearPosition: Vector3): Asteroid {
-    const id = `asteroid_${Math.random().toString(36).substr(2, 9)}`;
-
-    // Random position near player
-    const position: Vector3 = {
-      x: nearPosition.x + (Math.random() - 0.5) * 50000,
-      y: nearPosition.y + (Math.random() - 0.5) * 50000,
-      z: nearPosition.z + (Math.random() - 0.5) * 50000
-    };
-
-    // Random mass
-    const mass = Math.random() * 1000000 + 100000; // 100t - 1000t
-
-    // Random composition
-    const composition = new Map<OreType, number>();
-
-    // Common ores
-    composition.set('IRON', Math.random() * 0.4 + 0.2); // 20-60%
-    composition.set('NICKEL', Math.random() * 0.2 + 0.05); // 5-25%
-    composition.set('WATER_ICE', Math.random() * 0.3); // 0-30%
-
-    // Rare ores (small chance)
-    if (Math.random() > 0.7) {
-      composition.set('TITANIUM', Math.random() * 0.1);
-    }
-    if (Math.random() > 0.85) {
-      composition.set('PLATINUM', Math.random() * 0.05);
-    }
-    if (Math.random() > 0.95) {
-      composition.set('RARE_EARTHS', Math.random() * 0.02);
-    }
-    if (Math.random() > 0.99) {
-      composition.set('EXOTIC_MATTER', Math.random() * 0.001);
-    }
-
-    // Calculate value
-    let value = 0;
-    for (const [ore, percentage] of composition) {
-      const oreValue = MiningSystem.ORE_VALUES.get(ore) || 0;
-      value += (mass * percentage) * oreValue;
-    }
-
-    return {
-      id,
-      position,
-      mass,
-      composition,
-      value,
-      depleted: false,
-      discovered: false
-    };
-  }
-
-  private extractOre(amount: number, efficiency: number): MiningYield | null {
-    if (!this.currentTarget) return null;
-
-    // Random ore type based on composition
-    const roll = Math.random();
-    let cumulative = 0;
-
-    for (const [oreType, percentage] of this.currentTarget.composition) {
-      cumulative += percentage;
-      if (roll < cumulative) {
-        const actualYield = amount * efficiency;
-        const purity = 0.5 + Math.random() * 0.5; // 50-100% purity
-        const value = (MiningSystem.ORE_VALUES.get(oreType) || 0) * actualYield * purity;
-
-        return {
-          oreType,
-          quantity: actualYield,
-          value,
-          purity
-        };
-      }
-    }
-
-    return null;
-  }
-
+  /**
+   * Calculate distance between two points
+   */
   private calculateDistance(pos1: Vector3, pos2: Vector3): number {
     const dx = pos1.x - pos2.x;
     const dy = pos1.y - pos2.y;

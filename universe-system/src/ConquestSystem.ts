@@ -1353,6 +1353,239 @@ export class ConquestSystem {
 
     return lines.join('\n');
   }
+
+  // ====================================================================
+  // SAVE/LOAD SUPPORT
+  // ====================================================================
+
+  /**
+   * Serialize system state for saving
+   */
+  serialize(): import('./SaveFileFormat').ConquestSystemState {
+    // Serialize active sieges
+    const activeSieges = Array.from(this.activeSieges.values()).map(siege => ({
+      id: siege.id,
+      attackerFaction: siege.attackerFaction,
+      defenderFaction: siege.defenderFaction,
+      targetId: siege.targetId,
+      targetName: siege.targetName,
+      targetType: siege.targetType,
+      targetLocation: { ...siege.targetLocation },
+      attackingForce: siege.attackingForce,
+      defendingForce: siege.defendingForce,
+      baseDefenseRating: siege.baseDefenseRating,
+      currentDefenseStrength: siege.currentDefenseStrength,
+      structuralIntegrity: siege.structuralIntegrity,
+      siegeStarted: siege.siegeStarted,
+      siegeDuration: siege.siegeDuration,
+      bombardmentIntensity: siege.bombardmentIntensity,
+      civilianCasualties: siege.civilianCasualties,
+      populationMorale: siege.populationMorale,
+      evacuees: siege.evacuees,
+      defenderSupplies: siege.defenderSupplies,
+      attackerLogistics: siege.attackerLogistics,
+      estimatedDaysToCapture: siege.estimatedDaysToCapture,
+      captureProgress: siege.captureProgress,
+      status: siege.status,
+      outcome: siege.outcome,
+      endedAt: siege.endedAt,
+      battleEvents: siege.battleEvents.map(event => ({ ...event }))
+    }));
+
+    // Serialize occupations
+    const occupations = Array.from(this.occupations.values()).map(occ => ({
+      id: occ.id,
+      territoryId: occ.territoryId,
+      territoryName: occ.territoryName,
+      territoryType: occ.territoryType,
+      originalOwner: occ.originalOwner,
+      occupier: occ.occupier,
+      garrisonSize: occ.garrisonSize,
+      requiredGarrison: occ.requiredGarrison,
+      garrisonStrength: occ.garrisonStrength,
+      population: occ.population,
+      resistanceLevel: occ.resistanceLevel,
+      collaborationLevel: occ.collaborationLevel,
+      loyaltyToOccupier: occ.loyaltyToOccupier,
+      controlLevel: occ.controlLevel,
+      stabilityIndex: occ.stabilityIndex,
+      resourceExtraction: occ.resourceExtraction,
+      occupationCost: occ.occupationCost,
+      economicProductivity: occ.economicProductivity,
+      occupationStarted: occ.occupationStarted,
+      daysSinceOccupation: occ.daysSinceOccupation,
+      insurgentAttacks: occ.insurgentAttacks,
+      lastAttackTimestamp: occ.lastAttackTimestamp,
+      insurgentStrength: occ.insurgentStrength,
+      pacificationLevel: occ.pacificationLevel,
+      heartsAndMinds: occ.heartsAndMinds,
+      represionLevel: occ.represionLevel,
+      liberationAttempts: occ.liberationAttempts,
+      liberationProgress: occ.liberationProgress,
+      status: occ.status
+    }));
+
+    // Serialize conquest history
+    const conquestHistory = this.conquestHistory.map(record => {
+      const serialized: import('./SaveFileFormat').SerializedConquestRecord = {
+        timestamp: record.timestamp,
+        type: record.type,
+        attacker: record.attacker,
+        defender: record.defender,
+        target: record.target,
+        outcome: record.outcome,
+        duration: record.duration
+      };
+
+      if (record.consequences) {
+        serialized.consequences = {
+          territoryTransferred: record.consequences.territoryTransferred,
+          newOwner: record.consequences.newOwner,
+          oldOwner: record.consequences.oldOwner,
+          militaryCasualties: Array.from(record.consequences.militaryCasualties.entries()).map(([faction, casualties]) => ({ faction, casualties })),
+          civilianCasualties: record.consequences.civilianCasualties,
+          infrastructureDamage: record.consequences.infrastructureDamage,
+          economicLoss: record.consequences.economicLoss,
+          productionLoss: record.consequences.productionLoss,
+          refugees: record.consequences.refugees,
+          populationLoss: record.consequences.populationLoss,
+          populationMoraleChange: record.consequences.populationMoraleChange,
+          reputationChange: Array.from(record.consequences.reputationChange.entries()).map(([faction, change]) => ({ faction, change })),
+          warCrimesCommitted: record.consequences.warCrimesCommitted,
+          strategicValue: record.consequences.strategicValue,
+          borderChange: record.consequences.borderChange,
+          controllingPower: record.consequences.controllingPower
+        };
+      }
+
+      return serialized;
+    });
+
+    return {
+      activeSieges,
+      occupations,
+      conquestHistory
+    };
+  }
+
+  /**
+   * Deserialize and restore system state
+   */
+  deserialize(state: import('./SaveFileFormat').ConquestSystemState): void {
+    console.log('[ConquestSystem] Deserializing state...');
+
+    // Clear existing state
+    this.activeSieges.clear();
+    this.occupations.clear();
+    this.conquestHistory = [];
+
+    // Restore active sieges
+    for (const serializedSiege of state.activeSieges) {
+      const siege: SiegeOperation = {
+        id: serializedSiege.id,
+        attackerFaction: serializedSiege.attackerFaction,
+        defenderFaction: serializedSiege.defenderFaction,
+        targetId: serializedSiege.targetId,
+        targetName: serializedSiege.targetName,
+        targetType: serializedSiege.targetType,
+        targetLocation: { ...serializedSiege.targetLocation },
+        attackingForce: serializedSiege.attackingForce,
+        defendingForce: serializedSiege.defendingForce,
+        baseDefenseRating: serializedSiege.baseDefenseRating,
+        currentDefenseStrength: serializedSiege.currentDefenseStrength,
+        structuralIntegrity: serializedSiege.structuralIntegrity,
+        siegeStarted: serializedSiege.siegeStarted,
+        siegeDuration: serializedSiege.siegeDuration,
+        bombardmentIntensity: serializedSiege.bombardmentIntensity,
+        civilianCasualties: serializedSiege.civilianCasualties,
+        populationMorale: serializedSiege.populationMorale,
+        evacuees: serializedSiege.evacuees,
+        defenderSupplies: serializedSiege.defenderSupplies,
+        attackerLogistics: serializedSiege.attackerLogistics,
+        estimatedDaysToCapture: serializedSiege.estimatedDaysToCapture,
+        captureProgress: serializedSiege.captureProgress,
+        status: serializedSiege.status,
+        outcome: serializedSiege.outcome,
+        endedAt: serializedSiege.endedAt,
+        battleEvents: serializedSiege.battleEvents.map(event => ({ ...event }))
+      };
+      this.activeSieges.set(siege.id, siege);
+    }
+
+    // Restore occupations
+    for (const serializedOcc of state.occupations) {
+      const occupation: OccupationState = {
+        id: serializedOcc.id,
+        territoryId: serializedOcc.territoryId,
+        territoryName: serializedOcc.territoryName,
+        territoryType: serializedOcc.territoryType,
+        originalOwner: serializedOcc.originalOwner,
+        occupier: serializedOcc.occupier,
+        garrisonSize: serializedOcc.garrisonSize,
+        requiredGarrison: serializedOcc.requiredGarrison,
+        garrisonStrength: serializedOcc.garrisonStrength,
+        population: serializedOcc.population,
+        resistanceLevel: serializedOcc.resistanceLevel,
+        collaborationLevel: serializedOcc.collaborationLevel,
+        loyaltyToOccupier: serializedOcc.loyaltyToOccupier,
+        controlLevel: serializedOcc.controlLevel,
+        stabilityIndex: serializedOcc.stabilityIndex,
+        resourceExtraction: serializedOcc.resourceExtraction,
+        occupationCost: serializedOcc.occupationCost,
+        economicProductivity: serializedOcc.economicProductivity,
+        occupationStarted: serializedOcc.occupationStarted,
+        daysSinceOccupation: serializedOcc.daysSinceOccupation,
+        insurgentAttacks: serializedOcc.insurgentAttacks,
+        lastAttackTimestamp: serializedOcc.lastAttackTimestamp,
+        insurgentStrength: serializedOcc.insurgentStrength,
+        pacificationLevel: serializedOcc.pacificationLevel,
+        heartsAndMinds: serializedOcc.heartsAndMinds,
+        represionLevel: serializedOcc.represionLevel,
+        liberationAttempts: serializedOcc.liberationAttempts,
+        liberationProgress: serializedOcc.liberationProgress,
+        status: serializedOcc.status
+      };
+      this.occupations.set(occupation.id, occupation);
+    }
+
+    // Restore conquest history
+    this.conquestHistory = state.conquestHistory.map(serialized => {
+      const record: ConquestRecord = {
+        timestamp: serialized.timestamp,
+        type: serialized.type,
+        attacker: serialized.attacker,
+        defender: serialized.defender,
+        target: serialized.target,
+        outcome: serialized.outcome,
+        duration: serialized.duration
+      };
+
+      if (serialized.consequences) {
+        record.consequences = {
+          territoryTransferred: serialized.consequences.territoryTransferred,
+          newOwner: serialized.consequences.newOwner,
+          oldOwner: serialized.consequences.oldOwner,
+          militaryCasualties: new Map(serialized.consequences.militaryCasualties.map(({ faction, casualties }) => [faction, casualties])),
+          civilianCasualties: serialized.consequences.civilianCasualties,
+          infrastructureDamage: serialized.consequences.infrastructureDamage,
+          economicLoss: serialized.consequences.economicLoss,
+          productionLoss: serialized.consequences.productionLoss,
+          refugees: serialized.consequences.refugees,
+          populationLoss: serialized.consequences.populationLoss,
+          populationMoraleChange: serialized.consequences.populationMoraleChange,
+          reputationChange: new Map(serialized.consequences.reputationChange.map(({ faction, change }) => [faction, change])),
+          warCrimesCommitted: serialized.consequences.warCrimesCommitted,
+          strategicValue: serialized.consequences.strategicValue,
+          borderChange: serialized.consequences.borderChange,
+          controllingPower: serialized.consequences.controllingPower
+        };
+      }
+
+      return record;
+    });
+
+    console.log(`[ConquestSystem] Restored ${this.activeSieges.size} sieges, ${this.occupations.size} occupations, ${this.conquestHistory.length} history records`);
+  }
 }
 
 interface ConquestRecord {
