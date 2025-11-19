@@ -15,6 +15,9 @@ import { SevenSegmentDisplay } from '../ui/components/seven-segment-display';
 import { AnalogGauge } from '../ui/components/analog-gauge';
 import { AsciiBox } from '../ui/components/ascii-box';
 import { Controls } from '../ui/components/controls';
+import { SpaceRenderer, SpaceScene } from '../rendering/space-renderer';
+import { VisualEffects } from '../rendering/visual-effects';
+import { PerformanceMonitor } from '../utils/performance-monitor';
 
 type GameMode = 'FLIGHT' | 'DOCKED' | 'MISSION_BOARD' | 'CREW_ROSTER' |
                 'RESEARCH_LAB' | 'INTEL_BROKER' | 'CARGO_HOLD' | 'TRAVEL_MAP';
@@ -45,10 +48,17 @@ export class SpaceGame extends Game {
   private asciiBox: AsciiBox;
   private controls: Controls;
 
+  // Rendering components
+  private spaceRenderer: SpaceRenderer;
+  private visualEffects: VisualEffects;
+  private perfMonitor: PerformanceMonitor;
+
   // UI State
   private selectedMenuIndex: number = 0;
   private scrollOffset: number = 0;
   private showHelp: boolean = false;
+  private showTrajectory: boolean = true;
+  private showPerfStats: boolean = false;
 
   // Nearby contacts for UI
   private nearbyContacts: ShipContact[] = [];
@@ -71,6 +81,11 @@ export class SpaceGame extends Game {
     });
     this.asciiBox = new AsciiBox();
     this.controls = new Controls();
+
+    // Initialize rendering components
+    this.spaceRenderer = new SpaceRenderer(renderer.ctx, renderer.palette);
+    this.visualEffects = new VisualEffects(renderer.ctx, renderer.palette);
+    this.perfMonitor = new PerformanceMonitor();
 
     // Initialize universe
     this.orchestrator = new UniverseOrchestrator();
@@ -98,11 +113,18 @@ export class SpaceGame extends Game {
   }
 
   protected update(dt: number): void {
+    // Start frame timing
+    const frameStart = this.perfMonitor.startFrame();
+
     this.input.update();
 
     // Global controls
     if (this.input.isKeyJustPressed('h')) {
       this.showHelp = !this.showHelp;
+    }
+
+    if (this.input.isKeyJustPressed('f3')) {
+      this.showPerfStats = !this.showPerfStats;
     }
 
     if (this.input.isKeyJustPressed('escape')) {
@@ -113,7 +135,8 @@ export class SpaceGame extends Game {
       return; // Don't process other input when help is shown
     }
 
-    // Update player systems
+    // Update player systems with timing
+    let perfStart = this.perfMonitor.startUpdate('player');
     this.nearbyContacts = this.getNearbyShips();
     this.player.update(dt, this.nearbyContacts.map(c => ({
       id: c.id,
@@ -122,6 +145,12 @@ export class SpaceGame extends Game {
       faction: c.faction,
       hostile: c.hostile
     })));
+    this.perfMonitor.endUpdate('player', perfStart);
+
+    // Update universe systems with timing
+    perfStart = this.perfMonitor.startUpdate('universe');
+    this.orchestrator.update(dt);
+    this.perfMonitor.endUpdate('universe', perfStart);
 
     // Mode-specific input
     switch (this.mode) {
@@ -150,6 +179,9 @@ export class SpaceGame extends Game {
         this.handleTravelMapInput();
         break;
     }
+
+    // End frame timing
+    this.perfMonitor.endFrame(frameStart);
   }
 
   protected render(): void {
@@ -195,12 +227,13 @@ export class SpaceGame extends Game {
     renderer.applyScanlines();
     renderer.applyGlow();
 
-    // FPS counter
-    ctx.fillStyle = palette.secondary;
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`FPS: ${this.getFPS()}`, renderer.width - 10, 10);
+    // Performance stats
+    if (this.showPerfStats) {
+      this.perfMonitor.renderStats(ctx, 10, renderer.height - 220, palette);
+    } else {
+      // Just show FPS
+      this.perfMonitor.renderMini(ctx, renderer.width - 10, 10, palette);
+    }
   }
 
   // ===== INPUT HANDLERS =====
@@ -236,6 +269,17 @@ export class SpaceGame extends Game {
         this.player.requestDocking();
         this.mode = 'DOCKED';
       }
+    }
+
+    // View controls
+    if (this.input.isKeyJustPressed('[')) {
+      this.spaceRenderer.zoomOut();
+    }
+    if (this.input.isKeyJustPressed(']')) {
+      this.spaceRenderer.zoomIn();
+    }
+    if (this.input.isKeyJustPressed('v')) {
+      this.showTrajectory = !this.showTrajectory;
     }
 
     // Menu access (when docked)
@@ -432,6 +476,13 @@ export class SpaceGame extends Game {
     const state = this.player.getState();
     const combatState = this.player.getCombatState();
 
+    // Render 3D space scene first (background)
+    this.renderSpaceScene();
+
+    // Update visual effects
+    this.visualEffects.update(Date.now());
+
+    // Then draw UI overlays on top
     // Title
     ctx.fillStyle = palette.accent;
     ctx.font = 'bold 20px monospace';
@@ -1198,6 +1249,50 @@ export class SpaceGame extends Game {
       ctx.fillText(line, leftX + 30, helpY);
       helpY += 18;
     }
+  }
+
+  private renderSpaceScene(): void {
+    const renderer = this.getRenderer();
+    const combatState = this.player.getCombatState();
+
+    // Build scene data from game state
+    const scene: SpaceScene = {
+      spacecraft: {
+        position: this.playerShip.position,
+        rotation: this.playerShip.attitude.yaw || 0,
+        engineFiring: this.playerShip.isMainEngineOn(),
+        name: 'PLAYER'
+      },
+      celestialBodies: this.currentSystem.planets.map(planet => ({
+        position: planet.position,
+        radius: planet.radius,
+        name: planet.name,
+        type: 'planet' as const,
+        atmosphere: planet.atmosphere ? { density: planet.atmosphere.density } : undefined
+      })),
+      stations: this.currentSystem.stations.map(station => ({
+        position: station.position,
+        name: station.name,
+        faction: station.faction
+      })),
+      npcShips: this.orchestrator.getAllNPCShips().map(ship => ({
+        position: ship.position,
+        heading: ship.heading || 0,
+        hostile: ship.hostile || false,
+        name: ship.name
+      })),
+      hazards: [], // TODO: Add hazards from game world
+      targetedContact: combatState.currentTarget ? {
+        position: combatState.currentTarget.position || { x: 0, y: 0, z: 0 },
+        name: combatState.currentTarget.name,
+        distance: combatState.currentTarget.distance
+      } : null,
+      showTrajectory: this.showTrajectory,
+      trajectory: [] // TODO: Get trajectory from navigation system
+    };
+
+    // Render the space scene
+    this.spaceRenderer.render(scene, renderer.width, renderer.height);
   }
 
   // ===== HELPER METHODS =====
