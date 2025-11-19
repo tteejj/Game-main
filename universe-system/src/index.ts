@@ -252,6 +252,20 @@ export {
   DynamicEventSystem
 } from './DynamicEventSystem';
 
+// Universe Event System - Central Event Bus for 4X Systems
+export {
+  EventBus,
+  EventLogger,
+  UniverseEventType,
+  EventPriority,
+  UniverseEvent,
+  EventCallback,
+  EventFilter,
+  EventStats,
+  getGlobalEventBus,
+  resetGlobalEventBus
+} from './UniverseEventSystem';
+
 // Universe State Manager
 export {
   PlayerShip,
@@ -436,6 +450,36 @@ export {
   CompletedResearch
 } from './ResearchSystem';
 
+// Construction System - Station Building
+export {
+  ConstructionSystem,
+  ConstructionProject,
+  ConstructionProjectType,
+  ConstructionCompleteEvent,
+  StationCreatedEvent
+} from './ConstructionSystem';
+
+export {
+  StationCreationIntegration,
+  StationCreationResult
+} from './StationCreationIntegration';
+
+export {
+  ConquestSystem,
+  SiegeOperation,
+  SiegeStatus,
+  SiegeOutcome,
+  BattleEvent,
+  OccupationState,
+  OccupationStatus,
+  ConquestConsequences,
+  ConquestEventListener,
+  TerritoryCapturEvent,
+  TerritoryLiberationEvent,
+  SiegeStartEvent,
+  SiegeEndEvent
+} from './ConquestSystem';
+
 // Phase 4: Storytelling Systems
 export {
   NewsGenerationEngine,
@@ -526,3 +570,29 @@ export {
   IntegratedNPCShip,
   UniverseConfig as IntegratedUniverseConfig
 } from './integration/IntegratedUniverseOrchestrator';
+
+// ====================================================================
+// CHRONICLE SYSTEM - Advanced Narrative Generation & Event Tracking
+// ====================================================================
+
+// Main Chronicle System
+export {
+  ChronicleSystem,
+  HistoricalEventExtended,
+  EventRelationship,
+  RelationshipType,
+  Chronicle,
+  TurningPoint,
+  EventChain,
+  ChainType,
+  EventFilter,
+  NarrativeStyle
+} from './ChronicleSystem';
+
+// Integration with Simulation
+export {
+  EnhancedSimulationController,
+  ChronicleEventSubscriber,
+  ChronicleUIManager,
+  ChronicleConfig
+} from './ChronicleSystem.integration';

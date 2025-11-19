@@ -6,6 +6,8 @@
 
 import { CommodityType, CommodityCategory, getCommodity } from './economy/commodity';
 import { OreType } from './MiningSystem';
+import { EconomySystem } from './EconomySystem';
+import { ProductionEconomyBridge, ProductionEventType } from './ProductionEconomyBridge';
 
 /**
  * Production recipe - defines how to transform inputs into outputs
@@ -529,10 +531,28 @@ export class RecipeDatabase {
 export class ManufacturingSystem {
   private facilities: Map<string, ManufacturingFacility> = new Map();
   private jobIdCounter: number = 0;
+  private economySystem: EconomySystem | null = null;
+  private economyBridge: ProductionEconomyBridge | null = null;
 
   constructor() {
     // Initialize recipe database
     RecipeDatabase.initialize();
+  }
+
+  /**
+   * Link to economy system for market integration
+   */
+  linkEconomySystem(economySystem: EconomySystem): void {
+    this.economySystem = economySystem;
+    this.economyBridge = new ProductionEconomyBridge(economySystem, this);
+    console.log('[MANUFACTURING] Linked to economy system - production will now affect markets');
+  }
+
+  /**
+   * Get economy bridge for external access
+   */
+  getEconomyBridge(): ProductionEconomyBridge | null {
+    return this.economyBridge;
   }
 
   /**
@@ -611,16 +631,30 @@ export class ManufacturingSystem {
       };
     }
 
-    // Check inputs available in inventory
-    for (const [commodity, amount] of recipe.inputs) {
-      const available = facility.inventory.get(commodity) || 0;
-      const required = amount * batchSize;
-      if (available < required) {
-        const commodityInfo = getCommodity(commodity);
+    // Check inputs available (market + inventory)
+    if (this.economyBridge && this.economySystem) {
+      // Economy-integrated mode: Check market availability
+      const validation = this.economyBridge.validateProduction(facility.stationId, recipe.inputs);
+      if (!validation.valid) {
+        console.log(`[MANUFACTURING] Production blocked - resource shortage:`);
+        validation.details.forEach(detail => console.log(`  ${detail}`));
         return {
           success: false,
-          message: `Insufficient ${commodityInfo.name}: need ${required}kg, have ${available}kg`
+          message: validation.message
         };
+      }
+    } else {
+      // Legacy mode: Check facility inventory only
+      for (const [commodity, amount] of recipe.inputs) {
+        const available = facility.inventory.get(commodity) || 0;
+        const required = amount * batchSize;
+        if (available < required) {
+          const commodityInfo = getCommodity(commodity);
+          return {
+            success: false,
+            message: `Insufficient ${commodityInfo.name}: need ${required}kg, have ${available}kg`
+          };
+        }
       }
     }
 
@@ -632,10 +666,29 @@ export class ManufacturingSystem {
       };
     }
 
-    // Consume inputs from inventory
-    for (const [commodity, amount] of recipe.inputs) {
-      const current = facility.inventory.get(commodity) || 0;
-      facility.inventory.set(commodity, current - (amount * batchSize));
+    // Consume inputs
+    if (this.economyBridge && this.economySystem) {
+      // Economy-integrated mode: Purchase from market
+      const consumeResult = this.economyBridge.consumeInputs(
+        facility.stationId,
+        facilityId,
+        new Map(Array.from(recipe.inputs).map(([c, amt]) => [c, amt * batchSize]))
+      );
+
+      if (!consumeResult.success) {
+        return {
+          success: false,
+          message: `Failed to acquire inputs: ${consumeResult.message}`
+        };
+      }
+
+      console.log(`[MANUFACTURING] Consumed inputs from market: ${consumeResult.cost.toFixed(0)} credits`);
+    } else {
+      // Legacy mode: Consume from facility inventory
+      for (const [commodity, amount] of recipe.inputs) {
+        const current = facility.inventory.get(commodity) || 0;
+        facility.inventory.set(commodity, current - (amount * batchSize));
+      }
     }
 
     // Create job
@@ -717,16 +770,44 @@ export class ManufacturingSystem {
     // Calculate actual output based on efficiency
     const totalEfficiency = job.recipe.efficiency * facility.efficiency * facility.condition;
 
+    const outputs = new Map<CommodityType, number>();
     for (const [commodity, amount] of job.recipe.outputs) {
       const actualOutput = amount * totalEfficiency;
       job.outputsProduced.set(commodity, actualOutput);
+      outputs.set(commodity, actualOutput);
+    }
 
-      // Add to facility inventory
-      const current = facility.inventory.get(commodity) || 0;
-      facility.inventory.set(commodity, current + actualOutput);
+    // Produce outputs
+    if (this.economyBridge && this.economySystem) {
+      // Economy-integrated mode: Sell to market
+      const produceResult = this.economyBridge.produceOutputs(
+        facility.stationId,
+        facility.id,
+        outputs
+      );
 
-      const commodityInfo = getCommodity(commodity);
-      console.log(`[MANUFACTURING] Produced ${actualOutput.toFixed(1)}kg ${commodityInfo.name}`);
+      if (produceResult.success) {
+        console.log(`[MANUFACTURING] Produced outputs to market: ${produceResult.revenue.toFixed(0)} credits revenue`);
+      } else {
+        console.log(`[MANUFACTURING] ${produceResult.message}`);
+      }
+
+      // Emit completion event
+      if (this.economyBridge) {
+        for (const [commodity, amount] of outputs) {
+          const commodityInfo = getCommodity(commodity);
+          console.log(`[MANUFACTURING] Produced ${amount.toFixed(1)}kg ${commodityInfo.name}`);
+        }
+      }
+    } else {
+      // Legacy mode: Add to facility inventory
+      for (const [commodity, amount] of outputs) {
+        const current = facility.inventory.get(commodity) || 0;
+        facility.inventory.set(commodity, current + amount);
+
+        const commodityInfo = getCommodity(commodity);
+        console.log(`[MANUFACTURING] Produced ${amount.toFixed(1)}kg ${commodityInfo.name}`);
+      }
     }
 
     console.log(`[MANUFACTURING] Job ${job.id} completed: ${job.recipe.name}`);

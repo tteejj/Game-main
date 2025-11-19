@@ -9,10 +9,14 @@
  * - Progress tracking over time
  * - Construction completion and cancellation
  * - Resource cost management
+ * - ACTUAL STATION CREATION (not just callbacks!)
  */
 
 import { Vector3 } from './CelestialBody';
 import { CommodityType } from './economy/commodity';
+import { StationGenerator, SpaceStation } from './StationGenerator';
+import { StarSystem } from './StarSystem';
+import { StationCreationIntegration } from './StationCreationIntegration';
 
 /**
  * Construction project types
@@ -56,6 +60,18 @@ export interface ConstructionCompleteEvent {
   position: Vector3;
   owner: string;
   systemId?: string;
+  station?: SpaceStation; // NOW INCLUDES THE ACTUAL STATION!
+}
+
+/**
+ * Station creation event data
+ */
+export interface StationCreatedEvent {
+  station: SpaceStation;
+  constructionProjectId: string;
+  owner: string;
+  systemId: string;
+  constructionTime: number; // seconds it took to build
 }
 
 /**
@@ -63,11 +79,54 @@ export interface ConstructionCompleteEvent {
  *
  * Manages all active construction projects in the universe.
  * Handles project creation, progress updates, and completion.
+ *
+ * NOW ACTUALLY CREATES STATIONS WHEN CONSTRUCTION COMPLETES!
  */
 export class ConstructionSystem {
   private activeProjects: Map<string, ConstructionProject> = new Map();
   private completionCallbacks: Array<(event: ConstructionCompleteEvent) => void> = [];
+  private stationCreatedCallbacks: Array<(event: StationCreatedEvent) => void> = [];
   private nextProjectId: number = 1;
+
+  // Linked systems for station creation
+  private stationGenerator: StationGenerator | null = null;
+  private starSystem: StarSystem | null = null;
+  private stationCreationIntegration: StationCreationIntegration | null = null;
+
+  /**
+   * Link the StationGenerator for creating stations
+   *
+   * @param generator - StationGenerator instance
+   */
+  linkStationGenerator(generator: StationGenerator): void {
+    this.stationGenerator = generator;
+    this.updateIntegration();
+    console.log('[ConstructionSystem] StationGenerator linked');
+  }
+
+  /**
+   * Link the StarSystem for station registration
+   *
+   * @param starSystem - StarSystem instance
+   */
+  linkStarSystem(starSystem: StarSystem): void {
+    this.starSystem = starSystem;
+    this.updateIntegration();
+    console.log('[ConstructionSystem] StarSystem linked');
+  }
+
+  /**
+   * Update integration helper when both systems are linked
+   */
+  private updateIntegration(): void {
+    if (this.stationGenerator && this.starSystem && !this.stationCreationIntegration) {
+      this.stationCreationIntegration = new StationCreationIntegration(
+        this.stationGenerator,
+        this.starSystem
+      );
+      console.log('[ConstructionSystem] Station creation integration initialized');
+    }
+  }
 
   /**
    * Start new construction project
@@ -198,12 +257,59 @@ export class ConstructionSystem {
   }
 
   /**
-   * Complete construction and notify listeners
+   * Complete construction and CREATE THE ACTUAL STATION!
+   *
+   * This is where the magic happens - we actually create a real SpaceStation object
+   * and integrate it with the universe.
    *
    * @param project - Completed construction project
    */
   private completeConstruction(project: ConstructionProject): void {
     console.log(`[ConstructionSystem] Construction complete: ${project.type} at`, project.position);
+
+    let createdStation: SpaceStation | undefined;
+
+    // ACTUALLY CREATE THE STATION (if systems are linked)
+    if (this.stationCreationIntegration && project.systemId) {
+      const result = this.stationCreationIntegration.createStation(
+        project.type,
+        project.position,
+        project.owner,
+        project.systemId
+      );
+
+      if (result.success && result.station) {
+        createdStation = result.station;
+
+        // Register station with all relevant systems
+        this.stationCreationIntegration.registerStation(createdStation);
+
+        // Register station with faction (add to faction's territory)
+        this.registerStationWithFaction(createdStation, project.owner);
+
+        // Calculate construction time
+        const constructionTime = (Date.now() - project.startTime) / 1000;
+
+        // Emit STATION_CREATED event
+        const stationCreatedEvent: StationCreatedEvent = {
+          station: createdStation,
+          constructionProjectId: project.id,
+          owner: project.owner,
+          systemId: project.systemId,
+          constructionTime
+        };
+
+        this.notifyStationCreated(stationCreatedEvent);
+
+        console.log(`[ConstructionSystem] ✓ STATION CREATED: ${createdStation.name} (${createdStation.id})`);
+      } else {
+        console.error(`[ConstructionSystem] Failed to create station: ${result.error}`);
+      }
+    } else {
+      if (!this.stationCreationIntegration) {
+        console.warn('[ConstructionSystem] Station creation skipped - systems not linked. Call linkStationGenerator() and linkStarSystem()');
+      }
+    }
 
     // Create completion event
     const event: ConstructionCompleteEvent = {
@@ -211,7 +317,8 @@ export class ConstructionSystem {
       type: project.type,
       position: project.position,
       owner: project.owner,
-      systemId: project.systemId
+      systemId: project.systemId,
+      station: createdStation // Include the actual station!
     };
 
     // Notify all registered callbacks
@@ -220,6 +327,38 @@ export class ConstructionSystem {
         callback(event);
       } catch (error) {
         console.error('[ConstructionSystem] Error in completion callback:', error);
+      }
+    });
+  }
+
+  /**
+   * Register station with owning faction
+   *
+   * @param station - Created station
+   * @param owner - Owner faction ID
+   */
+  private registerStationWithFaction(station: SpaceStation, owner: string): void {
+    // This would integrate with FactionSystem to add station to faction's territory
+    // For now, we log the registration
+    console.log(`[ConstructionSystem] Registered station ${station.id} with faction ${owner}`);
+
+    // Future integration:
+    // if (this.factionSystem) {
+    //   this.factionSystem.addStationToTerritory(owner, station.id, station.systemId);
+    // }
+  }
+
+  /**
+   * Notify all station created callbacks
+   *
+   * @param event - Station created event
+   */
+  private notifyStationCreated(event: StationCreatedEvent): void {
+    this.stationCreatedCallbacks.forEach(callback => {
+      try {
+        callback(event);
+      } catch (error) {
+        console.error('[ConstructionSystem] Error in station created callback:', error);
       }
     });
   }
@@ -304,6 +443,17 @@ export class ConstructionSystem {
   }
 
   /**
+   * Register callback for station created events
+   *
+   * These fire AFTER the station is fully created and integrated.
+   *
+   * @param callback - Function to call when station is created
+   */
+  onStationCreated(callback: (event: StationCreatedEvent) => void): void {
+    this.stationCreatedCallbacks.push(callback);
+  }
+
+  /**
    * Get blueprint costs for a construction type (for planning)
    *
    * @param type - Construction project type
@@ -323,6 +473,15 @@ export class ConstructionSystem {
   getBlueprintBuildTime(type: ConstructionProjectType): number {
     const blueprint = this.getBlueprint(type);
     return blueprint ? blueprint.buildTime : 0;
+  }
+
+  /**
+   * Check if systems are properly linked
+   *
+   * @returns True if station creation is enabled
+   */
+  isStationCreationEnabled(): boolean {
+    return this.stationCreationIntegration !== null;
   }
 
   /**

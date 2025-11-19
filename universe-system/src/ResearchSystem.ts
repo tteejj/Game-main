@@ -1047,4 +1047,253 @@ export class ResearchSystem {
 
     return distribution;
   }
+
+  /**
+   * Apply bonuses to a ship based on faction's completed technologies
+   * This modifies the ship's stats directly
+   */
+  applyBonusesToShip(ship: any, factionId: string): void {
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+    const techIds = this.getCompletedResearch(factionId).map(cr => cr.techId);
+
+    // Import and use TechnologyEffectApplicator
+    const { TechnologyEffectApplicator } = require('./TechnologyEffectApplicator');
+    const applicator = new TechnologyEffectApplicator();
+    applicator.applyBonusesToShip(ship, bonuses, techIds);
+  }
+
+  /**
+   * Apply bonuses to a station based on faction's completed technologies
+   * This modifies the station's capabilities directly
+   */
+  applyBonusesToStation(station: any, factionId: string): void {
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+    const techIds = this.getCompletedResearch(factionId).map(cr => cr.techId);
+
+    // Import and use TechnologyEffectApplicator
+    const { TechnologyEffectApplicator } = require('./TechnologyEffectApplicator');
+    const applicator = new TechnologyEffectApplicator();
+    applicator.applyBonusesToStation(station, bonuses, techIds);
+  }
+
+  /**
+   * Apply bonuses to a faction based on completed technologies
+   * This modifies faction capabilities directly
+   */
+  applyBonusesToFaction(faction: any, factionId: string): void {
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+    const techIds = this.getCompletedResearch(factionId).map(cr => cr.techId);
+
+    // Import and use TechnologyEffectApplicator
+    const { TechnologyEffectApplicator } = require('./TechnologyEffectApplicator');
+    const applicator = new TechnologyEffectApplicator();
+    applicator.applyBonusesToFaction(faction, bonuses, techIds);
+  }
+
+  /**
+   * Get ship template with tech upgrades applied
+   * This returns a new ship configuration without modifying the original
+   */
+  getShipTemplate(shipType: string, factionId: string): {
+    baseStats: any;
+    bonuses: TechUnlocks;
+    upgradedStats: any;
+  } {
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+
+    // Base stats vary by ship type
+    const baseStats = this.getBaseShipStats(shipType);
+
+    // Calculate upgraded stats
+    const upgradedStats = this.calculateUpgradedShipStats(baseStats, bonuses);
+
+    return {
+      baseStats,
+      bonuses,
+      upgradedStats
+    };
+  }
+
+  /**
+   * Get base ship stats before tech bonuses
+   */
+  private getBaseShipStats(shipType: string): any {
+    // These match the VesselPresets from vessel-physics
+    const baseStats: any = {
+      cargoCapacity: 0,
+      maxAcceleration: 0,
+      maxVelocity: 0,
+      weaponDamage: 0,
+      weaponRange: 0,
+      shieldStrength: 0,
+      hullPoints: 1.0,
+      fuelCapacity: 1000,
+      sensorRange: 10000
+    };
+
+    switch (shipType) {
+      case 'CARGO_FREIGHTER':
+        baseStats.cargoCapacity = 1000;
+        baseStats.maxAcceleration = 5;
+        baseStats.maxVelocity = 100;
+        baseStats.fuelCapacity = 5000;
+        break;
+
+      case 'CARGO_SHUTTLE':
+        baseStats.cargoCapacity = 50;
+        baseStats.maxAcceleration = 15;
+        baseStats.maxVelocity = 150;
+        baseStats.fuelCapacity = 1000;
+        break;
+
+      case 'MINING_VESSEL':
+        baseStats.cargoCapacity = 200;
+        baseStats.maxAcceleration = 8;
+        baseStats.maxVelocity = 80;
+        baseStats.fuelCapacity = 2000;
+        break;
+
+      case 'PATROL_SHIP':
+        baseStats.cargoCapacity = 0;
+        baseStats.maxAcceleration = 25;
+        baseStats.maxVelocity = 250;
+        baseStats.weaponDamage = 100;
+        baseStats.weaponRange = 5000;
+        baseStats.shieldStrength = 500;
+        baseStats.fuelCapacity = 3000;
+        break;
+
+      case 'PASSENGER_LINER':
+        baseStats.cargoCapacity = 0;
+        baseStats.maxAcceleration = 10;
+        baseStats.maxVelocity = 120;
+        baseStats.fuelCapacity = 4000;
+        break;
+
+      case 'PIRATE':
+        baseStats.cargoCapacity = 100;
+        baseStats.maxAcceleration = 30;
+        baseStats.maxVelocity = 280;
+        baseStats.weaponDamage = 120;
+        baseStats.weaponRange = 4500;
+        baseStats.shieldStrength = 300;
+        baseStats.fuelCapacity = 2500;
+        break;
+
+      case 'RESEARCH':
+        baseStats.cargoCapacity = 0;
+        baseStats.maxAcceleration = 12;
+        baseStats.maxVelocity = 140;
+        baseStats.sensorRange = 50000;
+        baseStats.fuelCapacity = 6000;
+        break;
+
+      case 'SALVAGE':
+        baseStats.cargoCapacity = 150;
+        baseStats.maxAcceleration = 10;
+        baseStats.maxVelocity = 100;
+        baseStats.fuelCapacity = 3000;
+        break;
+
+      default:
+        baseStats.maxAcceleration = 10;
+        baseStats.maxVelocity = 100;
+        baseStats.fuelCapacity = 2000;
+    }
+
+    return baseStats;
+  }
+
+  /**
+   * Calculate upgraded ship stats with tech bonuses applied
+   */
+  private calculateUpgradedShipStats(baseStats: any, bonuses: TechUnlocks): any {
+    const upgraded = { ...baseStats };
+
+    // Apply multipliers
+    if (bonuses.weaponDamage) upgraded.weaponDamage *= bonuses.weaponDamage;
+    if (bonuses.weaponRange) upgraded.weaponRange *= bonuses.weaponRange;
+    if (bonuses.engineSpeed) {
+      upgraded.maxAcceleration *= bonuses.engineSpeed;
+      upgraded.maxVelocity *= bonuses.engineSpeed;
+    }
+    if (bonuses.fuelEfficiency) upgraded.fuelCapacity *= bonuses.fuelEfficiency;
+    if (bonuses.shieldStrength) upgraded.shieldStrength *= bonuses.shieldStrength;
+    if (bonuses.hullPoints) upgraded.hullPoints *= bonuses.hullPoints;
+    if (bonuses.sensorRange) upgraded.sensorRange *= bonuses.sensorRange;
+    if (bonuses.economicOutput) upgraded.cargoCapacity *= bonuses.economicOutput;
+    if (bonuses.miningEfficiency) upgraded.cargoCapacity *= bonuses.miningEfficiency;
+
+    return upgraded;
+  }
+
+  /**
+   * Check if faction has access to a ship type
+   */
+  hasShipTypeUnlocked(factionId: string, shipType: string): boolean {
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+    if (!bonuses.newShipTypes) return true; // All base types available
+
+    // Check if this is a special ship type that needs unlocking
+    const specialTypes = ['CAPITAL_SHIP', 'DREADNOUGHT', 'CARRIER', 'BATTLECRUISER'];
+    if (specialTypes.includes(shipType)) {
+      return bonuses.newShipTypes.includes(shipType.toLowerCase());
+    }
+
+    return true; // Regular ships always available
+  }
+
+  /**
+   * Get all unlocked ship types for a faction
+   */
+  getUnlockedShipTypes(factionId: string): string[] {
+    const baseTypes = [
+      'CARGO_FREIGHTER',
+      'CARGO_SHUTTLE',
+      'MINING_VESSEL',
+      'PATROL_SHIP',
+      'PASSENGER_LINER',
+      'PIRATE',
+      'RESEARCH',
+      'SALVAGE'
+    ];
+
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+    const unlockedTypes = [...baseTypes];
+
+    if (bonuses.newShipTypes) {
+      for (const shipType of bonuses.newShipTypes) {
+        const upperType = shipType.toUpperCase();
+        if (!unlockedTypes.includes(upperType)) {
+          unlockedTypes.push(upperType);
+        }
+      }
+    }
+
+    return unlockedTypes;
+  }
+
+  /**
+   * Get all unlocked weapon types for a faction
+   */
+  getUnlockedWeaponTypes(factionId: string): string[] {
+    const baseWeapons = ['BALLISTIC', 'LASER'];
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+
+    if (!bonuses.newWeaponTypes) return baseWeapons;
+
+    return [...baseWeapons, ...bonuses.newWeaponTypes.map(w => w.toUpperCase())];
+  }
+
+  /**
+   * Get all unlocked building types for a faction
+   */
+  getUnlockedBuildingTypes(factionId: string): string[] {
+    const baseBuildings = ['HABITAT', 'FACTORY', 'WAREHOUSE'];
+    const bonuses = this.calculateCumulativeBonuses(factionId);
+
+    if (!bonuses.newBuildingTypes) return baseBuildings;
+
+    return [...baseBuildings, ...bonuses.newBuildingTypes.map(b => b.toUpperCase())];
+  }
 }

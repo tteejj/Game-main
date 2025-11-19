@@ -483,7 +483,10 @@ export class FactionResearchAI {
   onResearchComplete(
     faction: Faction,
     completedResearch: CompletedResearch,
-    currentTime: number
+    currentTime: number,
+    factionShips?: any[],
+    factionStations?: any[],
+    manufacturingSystem?: any
   ): void {
     const tech = TechTree.getTechnology(completedResearch.techId);
     if (!tech) return;
@@ -493,44 +496,48 @@ export class FactionResearchAI {
       `[ResearchAI] ${faction.name} completed research: ${tech.name} (Tier ${tech.tier})`
     );
 
-    // Apply faction-level bonuses (this would integrate with faction stats)
-    this.applyResearchBonuses(faction, completedResearch.bonusesApplied);
+    // Apply faction-level bonuses using ResearchSystem
+    this.researchSystem.applyBonusesToFaction(faction, faction.id);
+    console.log(`[ResearchAI] Applied faction-level bonuses to ${faction.name}`);
+
+    // Update all faction ships with new bonuses
+    if (factionShips && factionShips.length > 0) {
+      console.log(`[ResearchAI] Updating ${factionShips.length} ships with new tech bonuses...`);
+      for (const ship of factionShips) {
+        try {
+          this.researchSystem.applyBonusesToShip(ship, faction.id);
+        } catch (error) {
+          console.error(`[ResearchAI] Failed to apply bonuses to ship ${ship.id}:`, error);
+        }
+      }
+      console.log(`[ResearchAI] Ship upgrades complete`);
+    }
+
+    // Update all faction stations with new bonuses
+    if (factionStations && factionStations.length > 0) {
+      console.log(`[ResearchAI] Updating ${factionStations.length} stations with new tech bonuses...`);
+      for (const station of factionStations) {
+        try {
+          this.researchSystem.applyBonusesToStation(station, faction.id);
+        } catch (error) {
+          console.error(`[ResearchAI] Failed to apply bonuses to station ${station.id}:`, error);
+        }
+      }
+      console.log(`[ResearchAI] Station upgrades complete`);
+    }
+
+    // Enable newly unlocked manufacturing recipes
+    if (manufacturingSystem && tech.unlocks.newBuildingTypes) {
+      this.enableNewManufacturingRecipes(faction, tech, manufacturingSystem);
+    }
 
     // Clear cooldown to immediately consider next research
     this.lastDecisionTime.set(faction.id, currentTime - this.decisionCooldown);
+
+    // Log summary of what was unlocked
+    this.logResearchUnlocks(faction, tech);
   }
 
-  /**
-   * Apply research bonuses to faction capabilities
-   * This integrates with the faction system to modify faction stats
-   */
-  private applyResearchBonuses(faction: Faction, bonuses: any): void {
-    // Military bonuses
-    if (bonuses.weaponDamage || bonuses.weaponRange || bonuses.weaponAccuracy) {
-      const militaryBoost = ((bonuses.weaponDamage || 1) +
-                            (bonuses.weaponRange || 1) +
-                            (bonuses.weaponAccuracy || 1)) / 3;
-      faction.military *= militaryBoost;
-    }
-
-    // Economic bonuses
-    if (bonuses.economicOutput || bonuses.tradeBonus || bonuses.miningEfficiency) {
-      const economicBoost = ((bonuses.economicOutput || 1) +
-                            (bonuses.tradeBonus || 1) +
-                            (bonuses.miningEfficiency || 1)) / 3;
-      faction.economy *= economicBoost;
-    }
-
-    // Technology level increase
-    const completedCount = this.researchSystem.getCompletedResearch(faction.id).length;
-    faction.technology = Math.min(10, Math.floor(completedCount / 6) + 1);
-
-    // Influence boost from advanced tech
-    if (bonuses.specialAbilities) {
-      faction.influence += bonuses.specialAbilities.length * 2;
-      faction.influence = Math.min(100, faction.influence);
-    }
-  }
 
   /**
    * Evaluate faction state from faction and game data
@@ -597,5 +604,196 @@ export class FactionResearchAI {
    */
   forceResearch(factionId: string, techId: string, currentTime: number): boolean {
     return this.researchSystem.startResearch(factionId, techId, currentTime);
+  }
+
+  /**
+   * Enable newly unlocked manufacturing recipes at faction stations
+   */
+  private enableNewManufacturingRecipes(
+    faction: Faction,
+    tech: Technology,
+    manufacturingSystem: any
+  ): void {
+    if (!tech.unlocks.newBuildingTypes) return;
+
+    console.log(
+      `[ResearchAI] Enabling new manufacturing capabilities for ${faction.name}:`,
+      tech.unlocks.newBuildingTypes
+    );
+
+    // Get all unlocked building types
+    const unlockedBuildings = this.researchSystem.getUnlockedBuildingTypes(faction.id);
+
+    // Map building types to facility types and recipes
+    for (const building of tech.unlocks.newBuildingTypes) {
+      const facilityType = this.mapBuildingToFacilityType(building);
+      if (facilityType) {
+        console.log(`[ResearchAI] ${faction.name} can now build ${facilityType} facilities`);
+        // The actual facility creation would happen when stations are built/upgraded
+        // This just logs the capability
+      }
+
+      // Check if this unlocks any specific recipes
+      const unlockedRecipes = this.getRecipesUnlockedByBuilding(building);
+      if (unlockedRecipes.length > 0) {
+        console.log(
+          `[ResearchAI] ${faction.name} unlocked ${unlockedRecipes.length} new production recipes`
+        );
+      }
+    }
+  }
+
+  /**
+   * Map building type to manufacturing facility type
+   */
+  private mapBuildingToFacilityType(building: string): string | null {
+    const mapping: { [key: string]: string } = {
+      'automated_factory': 'FACTORY',
+      'shield_generator': 'ELECTRONICS_PLANT',
+      'point_defense_grid': 'FACTORY',
+      'orbital_ring': 'SHIPYARD',
+      'space_elevator': 'FACTORY',
+      'mega_shipyard': 'SHIPYARD',
+      'dyson_sphere': 'REFINERY',
+      'stellar_forge': 'FOUNDRY'
+    };
+
+    return mapping[building] || null;
+  }
+
+  /**
+   * Get production recipes unlocked by a building type
+   */
+  private getRecipesUnlockedByBuilding(building: string): string[] {
+    const recipeMapping: { [key: string]: string[] } = {
+      'automated_factory': ['manufacture_machinery', 'manufacture_tools'],
+      'shield_generator': ['manufacture_shield_generators'],
+      'mega_shipyard': ['manufacture_ship_components'],
+      'dyson_sphere': ['produce_fusion_pellets'],
+      'stellar_forge': ['produce_carbon_fiber']
+    };
+
+    return recipeMapping[building] || [];
+  }
+
+  /**
+   * Log summary of research unlocks
+   */
+  private logResearchUnlocks(faction: Faction, tech: Technology): void {
+    console.log(`\n=== ${faction.name} RESEARCH COMPLETE: ${tech.name} ===`);
+
+    const bonuses = tech.unlocks;
+    const changes: string[] = [];
+
+    // Multiplier bonuses
+    if (bonuses.weaponDamage) changes.push(`Weapon Damage: +${((bonuses.weaponDamage - 1) * 100).toFixed(0)}%`);
+    if (bonuses.weaponRange) changes.push(`Weapon Range: +${((bonuses.weaponRange - 1) * 100).toFixed(0)}%`);
+    if (bonuses.weaponAccuracy) changes.push(`Weapon Accuracy: +${((bonuses.weaponAccuracy - 1) * 100).toFixed(0)}%`);
+    if (bonuses.engineSpeed) changes.push(`Engine Speed: +${((bonuses.engineSpeed - 1) * 100).toFixed(0)}%`);
+    if (bonuses.fuelEfficiency) changes.push(`Fuel Efficiency: +${((bonuses.fuelEfficiency - 1) * 100).toFixed(0)}%`);
+    if (bonuses.jumpRange) changes.push(`Jump Range: +${((bonuses.jumpRange - 1) * 100).toFixed(0)}%`);
+    if (bonuses.economicOutput) changes.push(`Economic Output: +${((bonuses.economicOutput - 1) * 100).toFixed(0)}%`);
+    if (bonuses.tradeBonus) changes.push(`Trade Bonus: +${((bonuses.tradeBonus - 1) * 100).toFixed(0)}%`);
+    if (bonuses.miningEfficiency) changes.push(`Mining Efficiency: +${((bonuses.miningEfficiency - 1) * 100).toFixed(0)}%`);
+    if (bonuses.shieldStrength) changes.push(`Shield Strength: +${((bonuses.shieldStrength - 1) * 100).toFixed(0)}%`);
+    if (bonuses.armorRating) changes.push(`Armor Rating: +${((bonuses.armorRating - 1) * 100).toFixed(0)}%`);
+    if (bonuses.hullPoints) changes.push(`Hull Points: +${((bonuses.hullPoints - 1) * 100).toFixed(0)}%`);
+    if (bonuses.sensorRange) changes.push(`Sensor Range: +${((bonuses.sensorRange - 1) * 100).toFixed(0)}%`);
+    if (bonuses.stealthRating) changes.push(`Stealth Rating: +${((bonuses.stealthRating - 1) * 100).toFixed(0)}%`);
+    if (bonuses.researchSpeed) changes.push(`Research Speed: +${((bonuses.researchSpeed - 1) * 100).toFixed(0)}%`);
+
+    // Unlocks
+    if (bonuses.newShipTypes) {
+      changes.push(`NEW SHIPS: ${bonuses.newShipTypes.join(', ')}`);
+    }
+    if (bonuses.newWeaponTypes) {
+      changes.push(`NEW WEAPONS: ${bonuses.newWeaponTypes.join(', ')}`);
+    }
+    if (bonuses.newBuildingTypes) {
+      changes.push(`NEW BUILDINGS: ${bonuses.newBuildingTypes.join(', ')}`);
+    }
+    if (bonuses.specialAbilities) {
+      changes.push(`SPECIAL ABILITIES: ${bonuses.specialAbilities.join(', ')}`);
+    }
+
+    if (changes.length > 0) {
+      console.log('BONUSES APPLIED:');
+      for (const change of changes) {
+        console.log(`  - ${change}`);
+      }
+    }
+
+    // Show cumulative progress
+    const completed = this.researchSystem.getCompletedResearch(faction.id);
+    const tierProgress = this.researchSystem.getTechProgress(faction.id);
+    console.log(`\nTOTAL RESEARCH: ${completed.length} technologies completed`);
+    console.log(`TIER PROGRESS: T1:${tierProgress[1]} T2:${tierProgress[2]} T3:${tierProgress[3]} T4:${tierProgress[4]} T5:${tierProgress[5]}`);
+    console.log('==========================================\n');
+  }
+
+  /**
+   * Update all ships for a faction with latest tech bonuses
+   * Use this when ships need to be retroactively upgraded
+   */
+  updateAllFactionShips(faction: Faction, ships: any[]): void {
+    console.log(`[ResearchAI] Retroactively applying tech bonuses to ${ships.length} ships...`);
+    for (const ship of ships) {
+      try {
+        this.researchSystem.applyBonusesToShip(ship, faction.id);
+      } catch (error) {
+        console.error(`[ResearchAI] Failed to apply bonuses to ship ${ship.id}:`, error);
+      }
+    }
+    console.log(`[ResearchAI] Ship tech upgrade complete`);
+  }
+
+  /**
+   * Update all stations for a faction with latest tech bonuses
+   */
+  updateAllFactionStations(faction: Faction, stations: any[]): void {
+    console.log(`[ResearchAI] Retroactively applying tech bonuses to ${stations.length} stations...`);
+    for (const station of stations) {
+      try {
+        this.researchSystem.applyBonusesToStation(station, faction.id);
+      } catch (error) {
+        console.error(`[ResearchAI] Failed to apply bonuses to station ${station.id}:`, error);
+      }
+    }
+    console.log(`[ResearchAI] Station tech upgrade complete`);
+  }
+
+  /**
+   * Get tech-modified ship template for spawning new ships
+   */
+  getUpgradedShipTemplate(faction: Faction, shipType: string): any {
+    return this.researchSystem.getShipTemplate(shipType, faction.id);
+  }
+
+  /**
+   * Check if faction can build a specific ship type
+   */
+  canBuildShipType(faction: Faction, shipType: string): boolean {
+    return this.researchSystem.hasShipTypeUnlocked(faction.id, shipType);
+  }
+
+  /**
+   * Get all ship types available to faction
+   */
+  getAvailableShipTypes(faction: Faction): string[] {
+    return this.researchSystem.getUnlockedShipTypes(faction.id);
+  }
+
+  /**
+   * Get all weapon types available to faction
+   */
+  getAvailableWeaponTypes(faction: Faction): string[] {
+    return this.researchSystem.getUnlockedWeaponTypes(faction.id);
+  }
+
+  /**
+   * Get faction's cumulative research bonuses
+   */
+  getFactionBonuses(faction: Faction): any {
+    return this.researchSystem.calculateCumulativeBonuses(faction.id);
   }
 }
