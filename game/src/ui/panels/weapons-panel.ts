@@ -5,6 +5,7 @@
  */
 
 import { SpacecraftAdapter } from '../../spacecraft-adapter';
+import { PlayerShipIntegration } from '../../../../universe-system/src/PlayerShipIntegration';
 
 export class WeaponsPanel {
     private ctx: CanvasRenderingContext2D;
@@ -20,10 +21,21 @@ export class WeaponsPanel {
     private ewSystemActive: boolean = false;
     private countermeasuresArmed: boolean = false;
 
+    // Player integration for combat
+    private playerIntegration: PlayerShipIntegration | null = null;
+
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;
         this.palette = palette;
         this.spacecraft = spacecraft;
+    }
+
+    /**
+     * Set player integration for combat system
+     */
+    setPlayerIntegration(integration: PlayerShipIntegration): void {
+        this.playerIntegration = integration;
+        console.log('✅ Weapons panel connected to player combat system');
     }
 
     handleInput(key: string): void {
@@ -65,17 +77,37 @@ export class WeaponsPanel {
                 }
                 break;
             case 't':
-                // Cycle targets
-                const targets = this.spacecraft.getWeaponsTargets();
-                if (targets.length > 0) {
-                    this.selectedTargetIndex = (this.selectedTargetIndex + 1) % targets.length;
+                // Cycle targets using PlayerShipIntegration
+                if (this.playerIntegration) {
+                    this.playerIntegration.cycleTargets();
+                    const combatState = this.playerIntegration.getCombatState();
+                    if (combatState.currentTarget) {
+                        this.selectedTargetIndex = 0;
+                        console.log(`Target: ${combatState.currentTarget.name} @ ${Math.floor(combatState.currentTarget.distance)}km`);
+                    }
+                } else {
+                    // Fallback to spacecraft targets
+                    const targets = this.spacecraft.getWeaponsTargets();
+                    if (targets.length > 0) {
+                        this.selectedTargetIndex = (this.selectedTargetIndex + 1) % targets.length;
+                    }
                 }
                 break;
             case 'f':
                 // Fire selected weapon (only if safety off)
                 if (!this.weaponsSafetyOn) {
-                    this.spacecraft.fireWeapon(this.selectedWeaponIndex, this.selectedTargetIndex);
-                    console.log('Weapon fired');
+                    if (this.playerIntegration) {
+                        // Use player integration combat system
+                        const result = this.playerIntegration.firePrimaryWeapon();
+                        console.log(`Weapon fired: ${result.hit ? 'HIT' : 'MISS'}`);
+                        if (result.hit && result.damage) {
+                            console.log(`  Damage: ${result.damage.totalDamage} HP`);
+                        }
+                    } else {
+                        // Fallback to spacecraft weapons
+                        this.spacecraft.fireWeapon(this.selectedWeaponIndex, this.selectedTargetIndex);
+                        console.log('Weapon fired');
+                    }
                 }
                 break;
             case 'e':
@@ -119,11 +151,28 @@ export class WeaponsPanel {
     render(): void {
         const ctx = this.ctx;
         const weaponsState = this.spacecraft.getWeaponsState();
-        const targets = this.spacecraft.getWeaponsTargets();
+
+        // Get targets from combat system if available
+        let targets: any[];
+        let inCombat = false;
+        if (this.playerIntegration) {
+            const combatState = this.playerIntegration.getCombatState();
+            targets = combatState.currentTarget ? [combatState.currentTarget] : [];
+            inCombat = combatState.inCombat;
+        } else {
+            targets = this.spacecraft.getWeaponsTargets();
+        }
 
         ctx.font = 'bold 20px "Courier New"';
         ctx.fillStyle = this.palette.info;
         ctx.fillText('WEAPONS', 40, 40);
+
+        // Combat status indicator
+        if (inCombat) {
+            ctx.fillStyle = this.palette.danger;
+            ctx.font = 'bold 16px "Courier New"';
+            ctx.fillText('⚠ COMBAT', 1000, 40);
+        }
 
         ctx.font = '14px "Courier New"';
 

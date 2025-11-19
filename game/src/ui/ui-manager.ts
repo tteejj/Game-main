@@ -9,14 +9,16 @@ import { EngineeringPanel } from './panels/engineering-panel';
 import { NavigationPanel } from './panels/navigation-panel';
 import { LifeSupportPanel } from './panels/lifesupport-panel';
 import { WeaponsPanel } from './panels/weapons-panel';
+import { OperationsPanel } from './panels/operations-panel';
 import { FactionPanel } from './panels/faction-panel';
 import { TradingPanel } from './panels/trading-panel';
 import { HUD } from './hud';
 import { AlertSystem, AlertDisplay, AlertPriority, AlertCategory } from './alert-system';
 import { NPCShipMonitor, NPCShipContact } from './npc-ship-monitor';
 import { NPCShip } from '../../../universe-system/src/npc-traffic/npc-ship';
+import { PlayerShipIntegration } from '../../../universe-system/src/PlayerShipIntegration';
 
-export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel;
+export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel | OperationsPanel;
 
 export class UIManager {
     private canvas: HTMLCanvasElement;
@@ -39,6 +41,9 @@ export class UIManager {
     public factionPanel: FactionPanel | null = null;
     public tradingPanel: TradingPanel | null = null;
     private starSystem: any = null;
+
+    // Player integration
+    private playerIntegration: PlayerShipIntegration | null = null;
 
     // Color palette (green monochrome by default)
     palette = {
@@ -81,6 +86,30 @@ export class UIManager {
 
         // Start rendering
         this.startRenderLoop();
+    }
+
+    /**
+     * Set player integration and initialize Operations panel (Station 6)
+     */
+    setPlayerIntegration(integration: PlayerShipIntegration): void {
+        this.playerIntegration = integration;
+
+        // Add Operations panel as Station 6
+        const operationsPanel = new OperationsPanel(
+            this.ctx,
+            this.palette,
+            this.spacecraft,
+            integration
+        );
+        this.stations.push(operationsPanel);
+
+        // Connect weapons panel to player integration for combat
+        const weaponsPanel = this.stations[4] as WeaponsPanel;
+        if (weaponsPanel && typeof (weaponsPanel as any).setPlayerIntegration === 'function') {
+            (weaponsPanel as any).setPlayerIntegration(integration);
+        }
+
+        console.log('✅ Operations panel (Station 6) initialized');
     }
 
     /**

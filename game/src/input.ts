@@ -23,8 +23,8 @@ export class InputManager {
         const key = e.key;
         this.keysPressed.add(key);
 
-        // Station switching (F1-F5 keys)
-        if (key === 'F1' || key === 'F2' || key === 'F3' || key === 'F4' || key === 'F5') {
+        // Station switching (F1-F6 keys)
+        if (key === 'F1' || key === 'F2' || key === 'F3' || key === 'F4' || key === 'F5' || key === 'F6') {
             const stationNum = parseInt(key.substring(1)); // Extract number from F1, F2, etc.
             if (this.onStationSwitch) {
                 this.onStationSwitch(stationNum);
