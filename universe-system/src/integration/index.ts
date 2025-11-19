@@ -16,6 +16,11 @@ export { UniverseAwareAI, UniverseDecisionContext, UniverseDecision, NavigationA
 export { FactionAI, FactionStrategy, FactionGoal, Territory, Fleet, FleetMission, StrategicAction } from './FactionAI';
 export { IntegratedUniverseOrchestrator, IntegratedNPCShip, UniverseConfig } from './IntegratedUniverseOrchestrator';
 
+// Awesome features - Live dashboard, NPC interactions, event cascades
+export { UniverseDashboard, DashboardConfig, DashboardEvent } from './UniverseDashboard';
+export { NPCInteractionManager, Interaction, InteractionType, CombatEncounter, TradeEncounter, CombatTactic } from './NPCInteractions';
+export { EventCascadeSystem, CascadeRule, CascadeChain, CascadeTriggerCondition, CascadeEventTemplate } from './EventCascadeSystem';
+
 // Re-export commonly used types for convenience
 export { ShipType, ShipStatus } from '../npc-traffic/npc-ship';
 export { PersonalityTraits } from '../entity-ai/ExtendedNPCMemory';

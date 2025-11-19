@@ -16,6 +16,9 @@ import { UniverseOrchestrator, EntityRegistration } from '../UniverseOrchestrato
 import { UniverseContextProvider, UniverseContext } from './UniverseContextProvider';
 import { UniverseAwareAI, UniverseDecisionContext } from './UniverseAwareAI';
 import { FactionAI, FactionStrategy, Territory } from './FactionAI';
+import { UniverseDashboard, LiveEvent } from './UniverseDashboard';
+import { NPCInteractionManager, Interaction, InteractionType } from './NPCInteractions';
+import { EventCascadeSystem, CascadeChain } from './EventCascadeSystem';
 
 import { NPCShip, ShipType, ShipStatus } from '../npc-traffic/npc-ship';
 import { Vector3 as Vector3Class } from '../../../physics-modules/src/Vector3';
@@ -36,8 +39,12 @@ export interface UniverseConfig {
   systemSeed?: number;
   enableDynamicEvents?: boolean;
   enableFactionAI?: boolean;
+  enableDashboard?: boolean;
+  enableNPCInteractions?: boolean;
+  enableEventCascades?: boolean;
   npcUpdateFrequency?: number; // Updates per second
   factionUpdateFrequency?: number; // Updates per second
+  dashboardUpdateFrequency?: number; // Updates per second
 }
 
 /**
@@ -48,6 +55,11 @@ export class IntegratedUniverseOrchestrator {
   private starSystem: StarSystem;
   private baseOrchestrator: UniverseOrchestrator;
   private contextProvider: UniverseContextProvider;
+
+  // AWESOME NEW FEATURES
+  public dashboard: UniverseDashboard;
+  private interactionManager: NPCInteractionManager;
+  private cascadeSystem: EventCascadeSystem;
 
   // NPCs
   private integratedShips: Map<string, IntegratedNPCShip> = new Map();
@@ -74,43 +86,122 @@ export class IntegratedUniverseOrchestrator {
     this.config = {
       enableDynamicEvents: true,
       enableFactionAI: true,
+      enableDashboard: true,
+      enableNPCInteractions: true,
+      enableEventCascades: true,
       npcUpdateFrequency: 10, // 10 updates per second
       factionUpdateFrequency: 0.1, // Once per 10 seconds
+      dashboardUpdateFrequency: 2, // 2 updates per second
       ...config
     };
 
-    console.log('[INTEGRATED ORCHESTRATOR] Initialized');
+    // Initialize AWESOME features
+    this.dashboard = new UniverseDashboard({
+      updateFrequency: this.config.dashboardUpdateFrequency!,
+      colorEnabled: true,
+      showNPCDetails: true,
+      showFactionDetails: true,
+      showPerformance: true
+    });
+
+    this.interactionManager = new NPCInteractionManager();
+    this.cascadeSystem = new EventCascadeSystem();
+
+    console.log('[INTEGRATED ORCHESTRATOR] Initialized with AWESOME features!');
+    console.log('  ✓ Real-time Dashboard');
+    console.log('  ✓ NPC-to-NPC Interactions (combat, trade, communication)');
+    console.log('  ✓ Event Cascade System (emergent storytelling)');
   }
 
   /**
    * Main update loop
    */
   public update(deltaTime: number): void {
+    const startTime = Date.now();
+
     this.time += deltaTime;
     this.updateCounter++;
 
     // Update base orchestrator
     this.baseOrchestrator.update(deltaTime);
 
-    // Update NPCs (throttled)
+    // ========================================================================
+    // UPDATE NPCs (throttled)
+    // ========================================================================
     const npcUpdateInterval = 1.0 / this.config.npcUpdateFrequency!;
     if (this.time % npcUpdateInterval < deltaTime) {
       this.updateNPCs(deltaTime);
     }
 
-    // Update faction AIs (throttled more)
+    // ========================================================================
+    // UPDATE NPC INTERACTIONS (combat, trade, communication)
+    // ========================================================================
+    if (this.config.enableNPCInteractions) {
+      const ships = Array.from(this.integratedShips.values());
+      const interactions = this.interactionManager.update(deltaTime, ships);
+
+      // Record interaction events
+      for (const interaction of interactions) {
+        this.recordInteractionEvent(interaction);
+      }
+    }
+
+    // ========================================================================
+    // UPDATE EVENT CASCADES (emergent storytelling)
+    // ========================================================================
+    if (this.config.enableEventCascades) {
+      const cascadedEvents = this.cascadeSystem.update(deltaTime);
+
+      // Record cascaded events
+      for (const event of cascadedEvents) {
+        this.baseOrchestrator.recordEvent(event);
+
+        // Dashboard event
+        if (this.config.enableDashboard) {
+          this.dashboard.recordEvent({
+            timestamp: event.timestamp,
+            type: event.type,
+            severity: event.severity,
+            description: event.description,
+            participants: event.participants,
+            cascadedFrom: event.data?.cascadedFrom,
+            triggeredEvents: []
+          });
+        }
+      }
+    }
+
+    // ========================================================================
+    // UPDATE FACTION AIs (throttled more)
+    // ========================================================================
     const factionUpdateInterval = 1.0 / this.config.factionUpdateFrequency!;
     if (this.time % factionUpdateInterval < deltaTime) {
       this.updateFactions(deltaTime);
     }
 
-    // Generate dynamic events
+    // ========================================================================
+    // GENERATE DYNAMIC EVENTS
+    // ========================================================================
     if (this.config.enableDynamicEvents && Math.random() < 0.001) {
       this.generateDynamicEvent();
     }
 
-    // Update star system (traffic, hazards, etc.)
+    // ========================================================================
+    // UPDATE STAR SYSTEM (traffic, hazards, etc.)
+    // ========================================================================
     this.starSystem.update(deltaTime);
+
+    // ========================================================================
+    // UPDATE DASHBOARD
+    // ========================================================================
+    if (this.config.enableDashboard) {
+      const dashboardUpdateInterval = 1.0 / this.config.dashboardUpdateFrequency!;
+      if (this.time % dashboardUpdateInterval < deltaTime) {
+        const updateTime = Date.now() - startTime;
+        this.dashboard.update(this);
+        // Auto-render dashboard would go here if in interactive mode
+      }
+    }
   }
 
   /**
@@ -437,6 +528,23 @@ export class IntegratedUniverseOrchestrator {
 
     this.baseOrchestrator.recordEvent(event);
 
+    // Feed into cascade system
+    if (this.config.enableEventCascades) {
+      this.cascadeSystem.processEvent(event, this.time);
+    }
+
+    // Dashboard event
+    if (this.config.enableDashboard) {
+      this.dashboard.recordEvent({
+        timestamp: event.timestamp,
+        type: event.type,
+        severity: event.severity,
+        description: event.description,
+        participants: event.participants,
+        triggeredEvents: []
+      });
+    }
+
     // React to event - notify nearby NPCs
     this.notifyNearbyNPCs(event);
 
@@ -543,6 +651,90 @@ export class IntegratedUniverseOrchestrator {
     }
   }
 
+  /**
+   * Record interaction event
+   */
+  private recordInteractionEvent(interaction: Interaction): void {
+    const event: HistoricalEvent = {
+      id: interaction.id,
+      timestamp: interaction.timestamp,
+      type: interaction.type,
+      severity: this.getInteractionSeverity(interaction),
+      category: this.getInteractionCategory(interaction),
+      location: interaction.location,
+      participants: [interaction.initiator, interaction.target],
+      description: this.describeInteraction(interaction),
+      data: interaction.data,
+      consequences: [],
+      witnessed: true,
+      priority: 5,
+      tags: ['interaction', interaction.type.toLowerCase()]
+    };
+
+    this.baseOrchestrator.recordEvent(event);
+
+    // Feed into cascade system
+    if (this.config.enableEventCascades) {
+      this.cascadeSystem.processEvent(event, this.time);
+    }
+
+    // Dashboard event
+    if (this.config.enableDashboard) {
+      this.dashboard.recordEvent({
+        timestamp: event.timestamp,
+        type: event.type,
+        severity: event.severity,
+        description: event.description,
+        participants: event.participants,
+        triggeredEvents: []
+      });
+    }
+  }
+
+  private getInteractionSeverity(interaction: Interaction): number {
+    switch (interaction.type) {
+      case InteractionType.COMBAT: return 8;
+      case InteractionType.DISTRESS: return 7;
+      case InteractionType.WARNING: return 5;
+      case InteractionType.TRADE: return 3;
+      case InteractionType.COMMUNICATION: return 2;
+      default: return 3;
+    }
+  }
+
+  private getInteractionCategory(interaction: Interaction): string {
+    switch (interaction.type) {
+      case InteractionType.COMBAT: return 'MILITARY';
+      case InteractionType.TRADE: return 'ECONOMIC';
+      case InteractionType.ALLIANCE: return 'POLITICAL';
+      case InteractionType.DISTRESS: return 'HUMANITARIAN';
+      default: return 'SOCIAL';
+    }
+  }
+
+  private describeInteraction(interaction: Interaction): string {
+    const initiatorShip = this.integratedShips.get(interaction.initiator);
+    const targetShip = this.integratedShips.get(interaction.target);
+
+    const initiatorName = initiatorShip?.ship.name || interaction.initiator;
+    const targetName = targetShip?.ship.name || interaction.target;
+
+    switch (interaction.type) {
+      case InteractionType.COMBAT:
+        return `${initiatorName} engaged ${targetName} in combat`;
+      case InteractionType.TRADE:
+        return `${initiatorName} traded with ${targetName}`;
+      case InteractionType.DISTRESS:
+        return `${initiatorName} sent distress call to ${targetName}`;
+      case InteractionType.ALLIANCE:
+        return `${initiatorName} formed alliance with ${targetName}`;
+      case InteractionType.COMMUNICATION:
+        return `${initiatorName} communicated with ${targetName}`;
+      default:
+        return `${initiatorName} interacted with ${targetName}`;
+    }
+  }
+
   private recordShipEvent(ship: NPCShip, type: string, severity: number, description: string): void {
     const event: HistoricalEvent = {
       id: `ship_event_${ship.id}_${Date.now()}`,
@@ -561,6 +753,23 @@ export class IntegratedUniverseOrchestrator {
     };
 
     this.baseOrchestrator.recordEvent(event);
+
+    // Feed into cascade system
+    if (this.config.enableEventCascades) {
+      this.cascadeSystem.processEvent(event, this.time);
+    }
+
+    // Dashboard event
+    if (this.config.enableDashboard) {
+      this.dashboard.recordEvent({
+        timestamp: event.timestamp,
+        type: event.type,
+        severity: event.severity,
+        description: event.description,
+        participants: event.participants,
+        triggeredEvents: []
+      });
+    }
   }
 
   private getRandomLocation(): { x: number; y: number; z: number } {
@@ -689,5 +898,70 @@ export class IntegratedUniverseOrchestrator {
     lines.push('═'.repeat(80));
 
     return lines.join('\n');
+  }
+
+  // ====================================================================
+  // AWESOME FEATURE ACCESSORS
+  // ====================================================================
+
+  /**
+   * Get interaction manager stats
+   */
+  public getInteractionStats() {
+    return this.interactionManager.getStats();
+  }
+
+  /**
+   * Get active combat encounters
+   */
+  public getActiveCombat() {
+    return this.interactionManager.getActiveCombat();
+  }
+
+  /**
+   * Get recent interactions
+   */
+  public getRecentInteractions(count: number = 20) {
+    return this.interactionManager.getRecentInteractions(count);
+  }
+
+  /**
+   * Get cascade system stats
+   */
+  public getCascadeStats() {
+    return this.cascadeSystem.getStats();
+  }
+
+  /**
+   * Get active cascade chains
+   */
+  public getActiveCascades() {
+    return this.cascadeSystem.getActiveCascades();
+  }
+
+  /**
+   * Get recent cascade chains
+   */
+  public getRecentCascades(count: number = 10) {
+    return this.cascadeSystem.getRecentChains(count);
+  }
+
+  /**
+   * Render dashboard to console
+   */
+  public renderDashboard(): void {
+    if (this.config.enableDashboard) {
+      this.dashboard.render();
+    }
+  }
+
+  /**
+   * Get dashboard stats
+   */
+  public getDashboardStats() {
+    if (this.config.enableDashboard) {
+      return this.dashboard.getStats();
+    }
+    return null;
   }
 }

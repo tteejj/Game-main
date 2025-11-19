@@ -8,7 +8,9 @@
     "build": "tsc",
     "demo": "ts-node src/examples.ts",
     "demo:full": "ts-node --transpile-only demo-runner.ts",
-    "test": "node dist/examples.js"
+    "test": "node dist/examples.js",
+    "example:integrated": "ts-node examples/fully-integrated-test.ts",
+    "example:live": "ts-node examples/epic-universe-live.ts"
   },
   "keywords": [
     "procedural-generation",
