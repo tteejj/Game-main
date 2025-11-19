@@ -333,6 +333,8 @@ export class Game {
             // Skip if same faction
             if (pirate.faction === victim.faction) return;
 
+            const stolenCargo = Math.floor(Math.random() * 50000) + 10000;
+
             this.starSystem.processDiplomaticEvent({
                 type: 'PIRATE_RAID',
                 category: 'MILITARY',
@@ -341,10 +343,15 @@ export class Game {
                 attackerFaction: pirate.faction,
                 victimFaction: victim.faction,
                 casualties: Math.floor(Math.random() * 5) + 1,
-                stolenCargo: Math.floor(Math.random() * 50000) + 10000,
+                stolenCargo: stolenCargo,
                 location: pirate.position,
                 description: `${pirate.faction} raided ${victim.faction} vessel`
             });
+
+            // Disrupt supply chain - raids reduce trade flow
+            const commodities = ['FUEL', 'FOOD', 'ELECTRONICS'];
+            const commodity = commodities[Math.floor(Math.random() * commodities.length)];
+            this.starSystem.disruptSupplyChain(commodity, 'PIRATE_RAID', 3600, 0.15); // 1hr, 15% impact
 
             console.log(`☠️  Background event: ${pirate.faction} pirate raid on ${victim.faction}`);
 
@@ -358,6 +365,9 @@ export class Game {
             if (trader1.faction === trader2.faction) return;
 
             const tradeValue = Math.floor(Math.random() * 100000) + 20000;
+            const tradeCommodities = ['FUEL', 'FOOD', 'WATER', 'ELECTRONICS', 'WEAPONS'];
+            const tradeCommodity = tradeCommodities[Math.floor(Math.random() * tradeCommodities.length)];
+            const tradeVolume = Math.floor(Math.random() * 1000) + 100;
 
             this.starSystem.processDiplomaticEvent({
                 type: 'TRADE_COMPLETED',
@@ -370,6 +380,15 @@ export class Game {
                 location: trader1.position,
                 description: `${trader1.faction} traded with ${trader2.faction}`
             });
+
+            // Actually move commodities between economies
+            this.starSystem.processEconomicTrade(
+                trader1.faction,
+                trader2.faction,
+                tradeCommodity,
+                tradeVolume,
+                tradeValue
+            );
 
             console.log(`📦 Background event: ${trader1.faction} traded with ${trader2.faction} (${tradeValue} credits)`);
 
@@ -394,8 +413,16 @@ export class Game {
                 description: `${combatant1.faction} engaged in combat with ${combatant2.faction}`
             });
 
+            // Combat disrupts supply chains - military action blocks trade routes
+            const combatCommodities = ['FUEL', 'FOOD', 'WEAPONS'];
+            const combatCommodity = combatCommodities[Math.floor(Math.random() * combatCommodities.length)];
+            this.starSystem.disruptSupplyChain(combatCommodity, 'MILITARY_COMBAT', 7200, 0.25); // 2hr, 25% impact
+
             console.log(`⚔️  Background event: ${combatant1.faction} combat with ${combatant2.faction}`);
         }
+
+        // Check if economic crises might trigger wars
+        this.starSystem.checkEconomicWarTriggers();
     }
 
     /**

@@ -10,6 +10,7 @@ import { NavigationPanel } from './panels/navigation-panel';
 import { LifeSupportPanel } from './panels/lifesupport-panel';
 import { WeaponsPanel } from './panels/weapons-panel';
 import { FactionPanel } from './panels/faction-panel';
+import { TradingPanel } from './panels/trading-panel';
 import { HUD } from './hud';
 import { AlertSystem, AlertDisplay, AlertPriority, AlertCategory } from './alert-system';
 import { NPCShipMonitor, NPCShipContact } from './npc-ship-monitor';
@@ -36,6 +37,7 @@ export class UIManager {
 
     // Faction diplomacy panel
     public factionPanel: FactionPanel | null = null;
+    public tradingPanel: TradingPanel | null = null;
     private starSystem: any = null;
 
     // Color palette (green monochrome by default)
@@ -103,6 +105,31 @@ export class UIManager {
             }
         }
 
+        // Check for trading panel toggle (T key)
+        if (key === 't' || key === 'T') {
+            if (this.tradingPanel) {
+                this.tradingPanel.toggle();
+                return;
+            }
+        }
+
+        // If trading panel is open, handle its controls
+        if (this.tradingPanel && this.tradingPanel.isVisible()) {
+            if (key === 'ArrowUp') {
+                this.tradingPanel.selectPrevious();
+                return;
+            } else if (key === 'ArrowDown') {
+                this.tradingPanel.selectNext();
+                return;
+            } else if (key === 'b' || key === 'B') {
+                this.tradingPanel.buySelected();
+                return;
+            } else if (key === 's' || key === 'S') {
+                this.tradingPanel.sellSelected();
+                return;
+            }
+        }
+
         // Pass to active station
         const activeStation = this.stations[this.activeStationIndex];
         if (activeStation && typeof activeStation.handleInput === 'function') {
@@ -154,7 +181,15 @@ export class UIManager {
             580,  // Height
             starSystem
         );
-        console.log('✅ Faction panel initialized');
+        // Initialize trading panel
+        this.tradingPanel = new TradingPanel(
+            20,  // Left side of screen
+            50,  // Top margin
+            540,  // Width
+            500,  // Height
+            starSystem
+        );
+        console.log('✅ Faction and trading panels initialized');
     }
 
     /**
@@ -196,6 +231,11 @@ export class UIManager {
         // Render faction panel (if visible)
         if (this.factionPanel && this.factionPanel.isVisible()) {
             this.factionPanel.render(this.ctx);
+        }
+
+        // Render trading panel (if visible)
+        if (this.tradingPanel && this.tradingPanel.isVisible()) {
+            this.tradingPanel.render(this.ctx);
         }
 
         // Render HUD overlay (on top of everything)

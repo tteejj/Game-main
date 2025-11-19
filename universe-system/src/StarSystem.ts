@@ -37,6 +37,7 @@ import {
 } from './poi';
 import { Vector3 as Vector3Class } from '../../physics-modules/src/Vector3';
 import { FactionDiplomacyEngine } from './faction-dynamics/FactionDiplomacyEngine';
+import { FactionEconomicNeeds } from './faction-dynamics/FactionEconomicNeeds';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -88,6 +89,7 @@ export class StarSystem {
   public hazardSystem: HazardSystem;
   public position: Vector3;
   public factionDiplomacy: FactionDiplomacyEngine;
+  public economicNeeds: FactionEconomicNeeds;
 
   // INTEGRATED UNIVERSE - Complete living universe orchestration
   public integratedOrchestrator: any; // Will be set after initialization
@@ -135,6 +137,7 @@ export class StarSystem {
     this.communicationsManager = new CommunicationsManager(this.relayNetwork);
     this.poiManager = new POIManager();
     this.factionDiplomacy = new FactionDiplomacyEngine();
+    this.economicNeeds = new FactionEconomicNeeds();
 
     // Generate the star
     this.star = this.generateStar(config.starClass);
@@ -1067,6 +1070,20 @@ export class StarSystem {
 
     // Update faction diplomacy (process relationship decay, trends, automatic events)
     this.factionDiplomacy.update(deltaTime);
+
+    // Update faction economies (production, consumption, supply chains)
+    this.updateFactionEconomies(deltaTime);
+  }
+
+  /**
+   * Update all faction economies
+   */
+  private updateFactionEconomies(deltaTime: number): void {
+    const factionIds = ['UNITED_EARTH', 'MARS_FEDERATION', 'BELT_ALLIANCE', 'OUTER_COLONIES', 'INDEPENDENT'];
+
+    for (const factionId of factionIds) {
+      this.economicNeeds.update(factionId, deltaTime);
+    }
   }
 
   /**
@@ -1089,6 +1106,91 @@ export class StarSystem {
    */
   getFactionRelationship(factionA: string, factionB: string): any {
     return this.factionDiplomacy.getRelationship(factionA, factionB);
+  }
+
+  /**
+   * Disrupt supply chain due to war/piracy/etc
+   */
+  public disruptSupplyChain(
+    commodity: string,
+    cause: string,
+    duration: number,
+    impactPercentage: number
+  ): void {
+    // Find affected supply chains
+    const chainId = `${commodity}_supply`;
+    this.economicNeeds.disruptSupplyChain(chainId, cause, duration, impactPercentage);
+
+    console.log(`⚠️  Supply chain disrupted: ${commodity} (${(impactPercentage * 100).toFixed(0)}% impact for ${(duration / 3600).toFixed(1)}h)`);
+  }
+
+  /**
+   * Check if economic crisis would trigger war
+   */
+  public checkEconomicWarTriggers(): void {
+    const factionIds = ['UNITED_EARTH', 'MARS_FEDERATION', 'BELT_ALLIANCE', 'OUTER_COLONIES'];
+
+    for (const factionId of factionIds) {
+      const economy = this.economicNeeds.getFactionEconomy(factionId);
+
+      // Check each critical resource
+      for (const [commodity, need] of economy.criticalResources) {
+        if (need.inCrisis) {
+          // Check if any other faction has this resource
+          for (const targetFaction of factionIds) {
+            if (targetFaction === factionId) continue;
+
+            if (this.economicNeeds.wouldGoToWarForResource(factionId, commodity, targetFaction)) {
+              console.log(`🚨 ${factionId} considering war with ${targetFaction} over ${commodity}!`);
+
+              // Fire diplomatic event
+              this.processDiplomaticEvent({
+                type: 'ECONOMIC_CRISIS',
+                category: 'ECONOMIC',
+                timestamp: Date.now() / 1000,
+                severity: 9,
+                factionA: factionId,
+                factionB: targetFaction,
+                commodity: commodity,
+                description: `${factionId} in crisis over ${commodity} shortage`
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Process trade - update market supply/demand
+   */
+  public processEconomicTrade(
+    buyerFaction: string,
+    sellerFaction: string,
+    commodity: string,
+    volume: number,
+    price: number
+  ): void {
+    // Update faction economies
+    const buyerEconomy = this.economicNeeds.getFactionEconomy(buyerFaction);
+    const sellerEconomy = this.economicNeeds.getFactionEconomy(sellerFaction);
+
+    // Add to buyer's stock
+    const buyerNeed = buyerEconomy.criticalResources.get(commodity);
+    if (buyerNeed) {
+      buyerNeed.currentStock += volume;
+      buyerNeed.imports += volume;
+    }
+
+    // Remove from seller's stock
+    const sellerSurplus = sellerEconomy.surplusResources.get(commodity) || 0;
+    sellerEconomy.surplusResources.set(commodity, Math.max(0, sellerSurplus - volume));
+
+    // Update trade balance
+    buyerEconomy.tradeBalance -= price;
+    sellerEconomy.tradeBalance += price;
+
+    console.log(`💰 Economic trade: ${buyerFaction} ← ${volume} ${commodity} ← ${sellerFaction} (${price} credits)`);
   }
 
   /**
