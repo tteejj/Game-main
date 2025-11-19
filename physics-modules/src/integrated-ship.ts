@@ -419,7 +419,7 @@ export class IntegratedShip {
   }
 
   /**
-   * Emit event (PUBLIC so external systems can emit events)
+   * Emit event - Public to allow subsystems (e.g., weapons) and external systems to emit events
    */
   public emit(event: string, ...args: any[]): void {
     const listeners = this.eventListeners.get(event);

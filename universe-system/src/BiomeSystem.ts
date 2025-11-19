@@ -334,7 +334,8 @@ export class BiomeSystem {
           medicinal: true,
           toxic: false,
           bioluminescent: true,
-          color: '#FF69B4'propagation: 'SEEDS'
+          color: '#FF69B4',
+          propagation: 'SEEDS'
         }
       ],
       fauna: [

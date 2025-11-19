@@ -566,6 +566,270 @@ export class FactionEconomicNeeds {
   }
 
   // ====================================================================
+  // SOPHISTICATED ECONOMIC ALGORITHMS
+  // ====================================================================
+
+  /**
+   * Build multi-tier supply chain model
+   */
+  public buildSupplyChain(commodity: string): { commodity: string; tiers: string[][] } {
+    const chain = {
+      commodity,
+      tiers: [] as string[][]
+    };
+
+    // Tier 0: Raw materials
+    chain.tiers[0] = this.getRawMaterials(commodity);
+
+    // Tier 1: Processed materials
+    chain.tiers[1] = chain.tiers[0].flatMap(raw =>
+      this.getProcessedFrom(raw)
+    );
+
+    // Tier 2: Components
+    chain.tiers[2] = chain.tiers[1].flatMap(processed =>
+      this.getComponentsFrom(processed)
+    );
+
+    // Final tier: Finished product
+    chain.tiers[3] = [commodity];
+
+    return chain;
+  }
+
+  /**
+   * Get raw materials for commodity
+   */
+  private getRawMaterials(commodity: string): string[] {
+    const materials: Record<string, string[]> = {
+      'WEAPONS': ['METAL_ORE', 'RARE_MINERALS'],
+      'FUEL': ['HYDROGEN', 'HELIUM'],
+      'ELECTRONICS': ['SILICON', 'RARE_EARTH'],
+      'FOOD': ['WATER', 'ORGANIC_MATTER'],
+      'MEDICINE': ['CHEMICALS', 'ORGANIC_MATTER']
+    };
+    return materials[commodity] || [];
+  }
+
+  /**
+   * Get processed materials from raw
+   */
+  private getProcessedFrom(raw: string): string[] {
+    const processed: Record<string, string[]> = {
+      'METAL_ORE': ['STEEL', 'ALLOYS'],
+      'SILICON': ['WAFERS', 'CHIPS'],
+      'HYDROGEN': ['DEUTERIUM'],
+      'CHEMICALS': ['PHARMACEUTICALS']
+    };
+    return processed[raw] || [raw];
+  }
+
+  /**
+   * Get components from processed materials
+   */
+  private getComponentsFrom(processed: string): string[] {
+    const components: Record<string, string[]> = {
+      'STEEL': ['HULL_PLATES'],
+      'CHIPS': ['PROCESSORS'],
+      'PHARMACEUTICALS': ['MEDICINE']
+    };
+    return components[processed] || [processed];
+  }
+
+  /**
+   * Calculate supply disruption impact with cascading effects
+   */
+  public calculateDisruptionImpact(
+    disruption: { commodity: string; severity: number },
+    factionId: string
+  ): {
+    directImpact: number;
+    cascadeImpact: number;
+    totalImpact: number;
+    affectedSectors: string[];
+  } {
+    let totalImpact = disruption.severity;
+    const affectedSectors: string[] = [];
+
+    // Get dependent commodities
+    const dependents = this.getDependentCommodities(disruption.commodity);
+
+    for (const dependent of dependents) {
+      const dependence = this.getDependenceStrength(dependent, disruption.commodity);
+      const cascadeEffect = disruption.severity * dependence * 0.7; // 70% pass-through
+      totalImpact += cascadeEffect;
+      affectedSectors.push(dependent);
+    }
+
+    return {
+      directImpact: disruption.severity,
+      cascadeImpact: totalImpact - disruption.severity,
+      totalImpact,
+      affectedSectors
+    };
+  }
+
+  /**
+   * Get commodities that depend on this one
+   */
+  private getDependentCommodities(commodity: string): string[] {
+    const dependencies: Record<string, string[]> = {
+      'FUEL': ['SHIPPING', 'MANUFACTURING', 'POWER'],
+      'FOOD': ['POPULATION', 'MORALE'],
+      'WEAPONS': ['MILITARY', 'SECURITY'],
+      'ELECTRONICS': ['MANUFACTURING', 'COMMUNICATIONS']
+    };
+    return dependencies[commodity] || [];
+  }
+
+  /**
+   * Get dependence strength (0-1)
+   */
+  private getDependenceStrength(dependent: string, commodity: string): number {
+    // Critical dependencies have higher strength
+    if (dependent === 'POPULATION' && commodity === 'FOOD') return 1.0;
+    if (dependent === 'MILITARY' && commodity === 'WEAPONS') return 0.9;
+    if (dependent === 'SHIPPING' && commodity === 'FUEL') return 0.95;
+    return 0.5;
+  }
+
+  /**
+   * Calculate market price using supply/demand dynamics
+   */
+  public calculateMarketPrice(
+    commodity: string,
+    location: string,
+    basePrice: number
+  ): number {
+    const supply = this.getSupply(commodity, location);
+    const demand = this.getDemand(commodity, location);
+
+    // Price elasticity - logarithmic response
+    const supplyDemandRatio = supply / Math.max(1, demand);
+
+    let priceMultiplier = 1;
+
+    if (supplyDemandRatio < 1) {
+      // Shortage: price increases exponentially
+      priceMultiplier = 1 / supplyDemandRatio;
+      priceMultiplier = Math.min(priceMultiplier, 5.0); // Cap at 5x
+    } else {
+      // Surplus: price decreases logarithmically
+      priceMultiplier = 1 / Math.sqrt(supplyDemandRatio);
+      priceMultiplier = Math.max(priceMultiplier, 0.2); // Floor at 20%
+    }
+
+    return basePrice * priceMultiplier;
+  }
+
+  /**
+   * Get supply at location
+   */
+  private getSupply(commodity: string, location: string): number {
+    // Simplified - would integrate with actual economy
+    return 1000 + Math.random() * 500;
+  }
+
+  /**
+   * Get demand at location
+   */
+  private getDemand(commodity: string, location: string): number {
+    // Simplified - would integrate with actual economy
+    return 1000 + Math.random() * 500;
+  }
+
+  /**
+   * Predict price elasticity for commodity
+   */
+  public predictPriceElasticity(commodity: string): {
+    elasticity: number;
+    description: string;
+  } {
+    // Necessities are inelastic, luxuries are elastic
+    const elasticities: Record<string, number> = {
+      'FOOD': 0.3,        // Inelastic - must buy regardless of price
+      'WATER': 0.2,       // Very inelastic
+      'FUEL': 0.4,        // Somewhat inelastic
+      'MEDICINE': 0.35,   // Inelastic
+      'WEAPONS': 0.7,     // Elastic
+      'LUXURY_GOODS': 1.5 // Very elastic
+    };
+
+    const elasticity = elasticities[commodity] || 0.8;
+
+    let description = '';
+    if (elasticity < 0.5) {
+      description = 'Inelastic - demand stable regardless of price';
+    } else if (elasticity < 1.0) {
+      description = 'Somewhat elastic - moderate price sensitivity';
+    } else {
+      description = 'Elastic - high price sensitivity';
+    }
+
+    return { elasticity, description };
+  }
+
+  /**
+   * Simulate economic shock propagation
+   */
+  public simulateEconomicShock(
+    factionId: string,
+    shockType: 'PRICE_SPIKE' | 'SUPPLY_CUT' | 'DEMAND_CRASH',
+    commodity: string,
+    magnitude: number
+  ): {
+    immediateImpact: number;
+    weekOneImpact: number;
+    monthOneImpact: number;
+    recoveryTime: number; // days
+  } {
+    const economy = this.getFactionEconomy(factionId);
+    let immediateImpact = 0;
+    let weekOneImpact = 0;
+    let monthOneImpact = 0;
+    let recoveryTime = 0;
+
+    switch (shockType) {
+      case 'PRICE_SPIKE':
+        // Immediate: budget strain
+        immediateImpact = magnitude * 10;
+        // Week 1: consumption reduction, rationing
+        weekOneImpact = magnitude * 7;
+        // Month 1: market adjustment, substitution
+        monthOneImpact = magnitude * 3;
+        recoveryTime = 30 + magnitude * 10;
+        break;
+
+      case 'SUPPLY_CUT':
+        // Immediate: shortage panic
+        immediateImpact = magnitude * 15;
+        // Week 1: cascading shortages
+        weekOneImpact = magnitude * 12;
+        // Month 1: supply chain reorganization
+        monthOneImpact = magnitude * 8;
+        recoveryTime = 45 + magnitude * 15;
+        break;
+
+      case 'DEMAND_CRASH':
+        // Immediate: inventory buildup
+        immediateImpact = magnitude * 5;
+        // Week 1: production cuts
+        weekOneImpact = magnitude * 8;
+        // Month 1: unemployment rises
+        monthOneImpact = magnitude * 10;
+        recoveryTime = 60 + magnitude * 20;
+        break;
+    }
+
+    return {
+      immediateImpact,
+      weekOneImpact,
+      monthOneImpact,
+      recoveryTime
+    };
+  }
+
+  // ====================================================================
   // PUBLIC API
   // ====================================================================
 
