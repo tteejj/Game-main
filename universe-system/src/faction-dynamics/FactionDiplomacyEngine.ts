@@ -336,6 +336,10 @@ export class FactionDiplomacyEngine {
         interactions.push(...this.processTradeCompleted(event, factionsInvolved));
         break;
 
+      case 'DOCKING_COMPLETED':
+        interactions.push(...this.processDockingCompleted(event, factionsInvolved));
+        break;
+
       case 'RESCUE':
         interactions.push(...this.processRescue(event, factionsInvolved));
         break;
@@ -894,6 +898,52 @@ export class FactionDiplomacyEngine {
         (relationship.diplomaticCapital || 0) + baseImpact * 0.5
       );
     }
+
+    return interactions;
+  }
+
+  private processDockingCompleted(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Docking improves relationships through peaceful cooperation
+    const dockingShip = (event as any).factionA || factions[0];
+    const stationFaction = (event as any).factionB || factions[1];
+
+    const relationship = this.getRelationship(dockingShip, stationFaction);
+
+    // Base impact - peaceful docking is a positive but minor interaction
+    let baseImpact = 1.5;
+
+    // First docking with a faction is more significant
+    const dockingHistory = relationship.recentInteractions.filter(
+      i => i.description?.includes('docked') || i.description?.includes('Docking')
+    );
+    if (dockingHistory.length === 0) {
+      baseImpact *= 1.5; // First contact matters
+    }
+
+    // Docking with hostile/tense factions is a diplomatic breakthrough
+    if (relationship.status === 'HOSTILE' || relationship.status === 'TENSE') {
+      baseImpact *= 2.5; // Significant peace gesture
+    }
+
+    // Docking shows trust - increases diplomatic capital
+    relationship.diplomaticCapital = Math.min(100,
+      (relationship.diplomaticCapital || 0) + baseImpact * 0.3
+    );
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'PEACEFUL_CONTACT',
+      factionA: dockingShip,
+      factionB: stationFaction,
+      impact: baseImpact,
+      description: event.description || `${dockingShip} docked peacefully with ${stationFaction} station`,
+      witnesses: [],
+      eventContext: event
+    });
 
     return interactions;
   }

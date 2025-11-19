@@ -203,8 +203,15 @@ export class NavigationPanel {
                 console.log('Attempting capture...');
                 break;
             case 'h':
-                this.spacecraft.completeHardDock();
-                console.log('Completing hard dock...');
+                const dockSuccess = this.spacecraft.completeHardDock();
+                if (dockSuccess) {
+                    console.log('Completing hard dock...');
+                    // Trigger diplomatic event for successful docking
+                    const game = (window as any).game;
+                    if (game && game.processDockingSuccess) {
+                        game.processDockingSuccess();
+                    }
+                }
                 break;
             case 'u':
                 this.spacecraft.undock('port_fwd');

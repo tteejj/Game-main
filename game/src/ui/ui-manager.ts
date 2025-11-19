@@ -9,6 +9,7 @@ import { EngineeringPanel } from './panels/engineering-panel';
 import { NavigationPanel } from './panels/navigation-panel';
 import { LifeSupportPanel } from './panels/lifesupport-panel';
 import { WeaponsPanel } from './panels/weapons-panel';
+import { FactionPanel } from './panels/faction-panel';
 import { HUD } from './hud';
 import { AlertSystem, AlertDisplay, AlertPriority, AlertCategory } from './alert-system';
 import { NPCShipMonitor, NPCShipContact } from './npc-ship-monitor';
@@ -32,6 +33,10 @@ export class UIManager {
     public npcMonitor: NPCShipMonitor;
     public npcContacts: NPCShipContact[] = [];
     private npcShips: NPCShip[] = [];
+
+    // Faction diplomacy panel
+    public factionPanel: FactionPanel | null = null;
+    private starSystem: any = null;
 
     // Color palette (green monochrome by default)
     palette = {
@@ -90,6 +95,15 @@ export class UIManager {
      * Handle input for active station
      */
     handleInput(key: string): void {
+        // Check for faction panel toggle (F key)
+        if (key === 'f' || key === 'F') {
+            if (this.factionPanel) {
+                this.factionPanel.toggle();
+                return;
+            }
+        }
+
+        // Pass to active station
         const activeStation = this.stations[this.activeStationIndex];
         if (activeStation && typeof activeStation.handleInput === 'function') {
             activeStation.handleInput(key);
@@ -128,6 +142,22 @@ export class UIManager {
     }
 
     /**
+     * Set star system and initialize faction panel
+     */
+    setStarSystem(starSystem: any): void {
+        this.starSystem = starSystem;
+        // Initialize faction panel
+        this.factionPanel = new FactionPanel(
+            this.canvas.width - 560,  // Right side of screen
+            50,  // Top margin
+            540,  // Width
+            580,  // Height
+            starSystem
+        );
+        console.log('✅ Faction panel initialized');
+    }
+
+    /**
      * Start the render loop
      */
     private startRenderLoop(): void {
@@ -161,6 +191,11 @@ export class UIManager {
         const activeStation = this.stations[this.activeStationIndex];
         if (activeStation) {
             activeStation.render();
+        }
+
+        // Render faction panel (if visible)
+        if (this.factionPanel && this.factionPanel.isVisible()) {
+            this.factionPanel.render(this.ctx);
         }
 
         // Render HUD overlay (on top of everything)

@@ -103,7 +103,126 @@ export class Game {
         this.setupCommunications();
         console.log('✅ Communications network initialized');
 
+        // Initialize faction diplomacy with starting relationships
+        this.initializeDiplomacy();
+        console.log('✅ Faction diplomacy initialized');
+
         console.log('🚀 All systems ready!');
+    }
+
+    /**
+     * Initialize faction diplomacy with starting relationships
+     */
+    private initializeDiplomacy(): void {
+        // Set up some trade agreements
+        this.starSystem.factionDiplomacy.signTreaty(
+            ['UNITED_EARTH', 'MARS_FEDERATION'],
+            'FREE_TRADE',
+            ['Open trade routes', 'No tariffs on basic goods'],
+            0  // Permanent
+        );
+
+        this.starSystem.factionDiplomacy.signTreaty(
+            ['BELT_ALLIANCE', 'INDEPENDENT'],
+            'NON_AGGRESSION_PACT',
+            ['No military action', 'Respect territorial boundaries'],
+            0
+        );
+
+        // Start player as neutral with everyone except UNITED_EARTH (cordial)
+        const playerEarth = this.starSystem.getFactionRelationship('PLAYER', 'UNITED_EARTH');
+        playerEarth.relationshipValue = 30;  // Cordial
+        playerEarth.status = 'CORDIAL';
+
+        // Set up some existing tensions
+        const earthBelt = this.starSystem.getFactionRelationship('UNITED_EARTH', 'BELT_ALLIANCE');
+        earthBelt.relationshipValue = -40;  // Tense
+        earthBelt.status = 'TENSE';
+        earthBelt.territorialDisputes = 3;  // Disputed asteroid claims
+
+        console.log('  └─ Created 2 treaties');
+        console.log('  └─ Set initial faction standings');
+    }
+
+    /**
+     * Process successful docking with nearest station/NPC
+     * Improves diplomatic relations through peaceful cooperation
+     */
+    public processDockingSuccess(): void {
+        const shipPos = this.spacecraft.getPosition();
+
+        // Find nearest station
+        let nearestStation = null;
+        let nearestDist = Infinity;
+        for (const station of this.starSystem.stations) {
+            const dx = station.position.x - shipPos.x;
+            const dy = station.position.y - shipPos.y;
+            const dz = station.position.z - shipPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestStation = station;
+            }
+        }
+
+        // If within docking range, process diplomatic event
+        if (nearestStation && nearestDist < 1000) {
+            const stationFaction = nearestStation.faction || 'INDEPENDENT';
+
+            this.starSystem.processDiplomaticEvent({
+                type: 'DOCKING_COMPLETED',
+                category: 'ECONOMIC',
+                timestamp: Date.now() / 1000,
+                severity: 2,
+                factionA: 'PLAYER',
+                factionB: stationFaction,
+                location: shipPos,
+                description: `Player successfully docked at ${nearestStation.name}`
+            });
+
+            console.log(`🔗 Docked with ${nearestStation.name} (${stationFaction})`);
+        }
+    }
+
+    /**
+     * Process trade transaction
+     * Improves diplomatic relations through economic cooperation
+     */
+    public processTradeTransaction(value: number, commodity?: string): void {
+        const shipPos = this.spacecraft.getPosition();
+
+        // Find nearest station
+        let nearestStation = null;
+        let nearestDist = Infinity;
+        for (const station of this.starSystem.stations) {
+            const dx = station.position.x - shipPos.x;
+            const dy = station.position.y - shipPos.y;
+            const dz = station.position.z - shipPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestStation = station;
+            }
+        }
+
+        // If within trading range, process diplomatic event
+        if (nearestStation && nearestDist < 1000) {
+            const stationFaction = nearestStation.faction || 'INDEPENDENT';
+
+            this.starSystem.processDiplomaticEvent({
+                type: 'TRADE_COMPLETED',
+                category: 'ECONOMIC',
+                timestamp: Date.now() / 1000,
+                severity: Math.min(5, Math.floor(value / 1000)),
+                factionA: 'PLAYER',
+                factionB: stationFaction,
+                tradeVolume: value,
+                location: shipPos,
+                description: commodity ? `Traded ${commodity} worth ${value} credits` : `Trade worth ${value} credits`
+            });
+
+            console.log(`💰 Trade completed with ${nearestStation.name} (${stationFaction}): ${value} credits`);
+        }
     }
 
     /**
@@ -629,6 +748,18 @@ export class Game {
                 // Check hull integrity
                 const hullIntegrity = this.spacecraft.getHullIntegrity();
                 console.log(`   └─ Hull integrity: ${hullIntegrity.toFixed(1)}%`);
+
+                // ===== DIPLOMACY: Process collision as hostile incident =====
+                this.starSystem.processDiplomaticEvent({
+                    type: 'COMBAT_STARTED',
+                    category: 'MILITARY',
+                    timestamp: Date.now() / 1000,
+                    severity: Math.min(10, Math.floor(relSpeed / 10)),
+                    attackerFaction: 'PLAYER',
+                    defenderFaction: npc.faction,
+                    casualties: Math.floor(damagePercent / 10),
+                    location: shipPos
+                });
 
                 if (hullIntegrity <= 0) {
                     console.log('💀 CRITICAL HULL FAILURE - Mission Failed');
