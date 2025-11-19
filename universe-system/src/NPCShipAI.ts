@@ -1,6 +1,7 @@
 /**
  * NPCShipAI.ts
  * Intelligent NPC ship behaviors with state machines and decision-making
+ * NOW INTEGRATED WITH: NPCPersonalitySystem, ExtendedNPCMemory, NPCGoalSystem
  */
 
 import { Vector3, CelestialBody } from './CelestialBody';
@@ -24,6 +25,13 @@ import {
   ActionPlan
 } from './entity-ai/NPCGoalSystem';
 import { AdaptiveAI, ExpertiseDomain } from './entity-ai/AdaptiveAI';
+import {
+  NPCPersonalitySystem,
+  NPCPersonality,
+  Mood,
+  GameEvent,
+  Situation
+} from './NPCPersonalitySystem';
 
 export type ShipType = 'TRADER' | 'MINER' | 'PIRATE' | 'PATROL' | 'COURIER' | 'EXPLORER' | 'PASSENGER';
 export type ShipState = 'IDLE' | 'TRAVELING' | 'DOCKING' | 'DOCKED' | 'TRADING' | 'MINING' | 'ATTACKING' | 'FLEEING' | 'PATROLLING';
@@ -67,6 +75,7 @@ export interface NPCShip {
   extendedMemory: ExtendedNPCMemory;  // New sophisticated memory system
   goalSystem: NPCGoalSystem;  // Goal-based planning and decision making
   adaptiveAI: AdaptiveAI;     // Learning system for skill progression and strategy evolution
+  npcPersonality: NPCPersonality;  // Deep personality from NPCPersonalitySystem
   emotionalState: {           // Current emotional state
     stress: number;           // 0-10
     satisfaction: number;     // -10 to +10
@@ -109,13 +118,17 @@ export interface NavigationPath {
 
 /**
  * NPC Ship AI Controller
+ * NOW WITH DEEP PERSONALITY INTEGRATION
  */
 export class NPCShipAI {
   private ships: Map<string, NPCShip> = new Map();
   private nextShipId = 0;
 
+  // INTEGRATED: Single personality system manages all NPCs
+  private personalitySystem: NPCPersonalitySystem = new NPCPersonalitySystem();
+
   /**
-   * Create a new NPC ship
+   * Create a new NPC ship with full personality integration
    */
   createShip(
     type: ShipType,
@@ -153,6 +166,12 @@ export class NPCShipAI {
     // Create adaptive AI (learning and skill progression)
     const adaptiveAI = new AdaptiveAI(extendedMemory, goalSystem);
 
+    // INTEGRATED: Generate deep personality using NPCPersonalitySystem
+    const npcPersonality = this.personalitySystem.generateNPC(shipId, Math.random() * 1000000);
+
+    // Sync deep personality traits with simple personality
+    this.syncPersonalityTraits(npcPersonality, personality);
+
     const ship: NPCShip = {
       id: shipId,
       name: this.generateShipName(type, faction),
@@ -166,6 +185,7 @@ export class NPCShipAI {
       fuel: stats.fuelCapacity,
       credits: this.getStartingCredits(type),
       personality,
+      npcPersonality,  // INTEGRATED: Deep personality
       memory: {
         visitedStations: new Set(),
         knownThreats: new Map(),
@@ -178,17 +198,29 @@ export class NPCShipAI {
       goalSystem,
       adaptiveAI,
       emotionalState: {
-        stress: 0,
+        stress: npcPersonality.stress * 10,
         satisfaction: 0,
         fear: 0
       }
     };
 
-    // Generate initial goals based on ship type
+    // Generate initial goals based on ship type and personality
     this.generateInitialGoals(ship);
 
     this.ships.set(ship.id, ship);
     return ship;
+  }
+
+  /**
+   * Sync NPCPersonality traits with simple ShipPersonality
+   */
+  private syncPersonalityTraits(npcPersonality: NPCPersonality, shipPersonality: ShipPersonality): void {
+    // Map complex personality to simple personality
+    shipPersonality.aggression = (npcPersonality.traits.ruthlessness + (1 - npcPersonality.traits.agreeableness)) / 2;
+    shipPersonality.greed = npcPersonality.traits.greed;
+    shipPersonality.caution = (npcPersonality.traits.neuroticism + (1 - npcPersonality.traits.courage)) / 2;
+    shipPersonality.curiosity = (npcPersonality.traits.curiosity + npcPersonality.traits.openness) / 2;
+    shipPersonality.loyalty = (npcPersonality.traits.honor + (1 - npcPersonality.traits.greed)) / 2;
   }
 
   /**
@@ -207,7 +239,7 @@ export class NPCShipAI {
   }
 
   /**
-   * Update individual ship AI
+   * Update individual ship AI with personality integration
    */
   private updateShip(
     ship: NPCShip,
@@ -217,12 +249,18 @@ export class NPCShipAI {
     playerShip?: { position: Vector3; faction: string; id: string },
     factionSystem?: FactionSystem
   ): void {
+    // INTEGRATED: Update personality system
+    this.personalitySystem.update(ship.id, deltaTime);
+
+    // Sync emotional state from personality
+    this.syncEmotionalState(ship);
+
     // Fuel consumption
     const speed = this.magnitude(ship.velocity);
     const fuelConsumption = 0.001 * speed * deltaTime; // Simplified
     ship.fuel = Math.max(0, ship.fuel - fuelConsumption);
 
-    // Check for threats
+    // Check for threats (personality affects threat perception)
     if (playerShip) {
       this.evaluateThreat(ship, playerShip);
     }
@@ -231,14 +269,15 @@ export class NPCShipAI {
     const context = this.buildGoalContext(ship, stations, celestialBodies, playerShip);
     const goalAction = ship.goalSystem.update(deltaTime, context);
 
+    // INTEGRATED: Use personality-driven decision making
     // If goal system has an action, execute it (goal-driven behavior)
-    // Otherwise fall back to state machine (legacy behavior)
+    // Otherwise use personality-driven state machine
     if (goalAction && goalAction.status !== 'FAILED') {
       ship.currentGoalAction = goalAction;
       this.executeGoalAction(ship, goalAction, stations, celestialBodies);
     } else {
-      // Fall back to state machine for behaviors not yet goal-driven
-      this.executeStateMachine(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
+      // INTEGRATED: Personality-driven state machine
+      this.executePersonalityDrivenBehavior(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
     }
 
     // Skill decay: skills atrophy without practice (1% per day after 7 days)
@@ -248,6 +287,190 @@ export class NPCShipAI {
     ship.position.x += ship.velocity.x * deltaTime;
     ship.position.y += ship.velocity.y * deltaTime;
     ship.position.z += ship.velocity.z * deltaTime;
+  }
+
+  /**
+   * INTEGRATED: Sync emotional state from personality mood
+   */
+  private syncEmotionalState(ship: NPCShip): void {
+    const npcPersonality = ship.npcPersonality;
+
+    // Map mood to emotional state
+    switch (npcPersonality.mood) {
+      case Mood.TERRIFIED:
+        ship.emotionalState.fear = 9;
+        ship.emotionalState.stress = 9;
+        break;
+      case Mood.ANGRY:
+        ship.emotionalState.stress = 7;
+        ship.emotionalState.satisfaction = -5;
+        break;
+      case Mood.DEPRESSED:
+        ship.emotionalState.satisfaction = -8;
+        ship.emotionalState.stress = 5;
+        break;
+      case Mood.HAPPY:
+      case Mood.ECSTATIC:
+        ship.emotionalState.satisfaction = 7;
+        ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - 1);
+        break;
+      case Mood.CONTENT:
+        ship.emotionalState.satisfaction = 3;
+        break;
+      case Mood.UNEASY:
+        ship.emotionalState.stress = 5;
+        ship.emotionalState.fear = 4;
+        break;
+    }
+
+    // Update stress from personality
+    ship.emotionalState.stress = npcPersonality.stress * 10;
+  }
+
+  /**
+   * INTEGRATED: Execute personality-driven behavior instead of simple state machine
+   */
+  private executePersonalityDrivenBehavior(
+    ship: NPCShip,
+    deltaTime: number,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[],
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
+  ): void {
+    // Build situation for personality system
+    const situation: Situation = {
+      location: 'space',
+      hostiles: playerShip && ship.threat === playerShip.id ? 1 : 0,
+      reward: ship.route ? ship.route.profit / 1000 : 0,
+      interestPoint: ship.currentTarget
+    };
+
+    // INTEGRATED: Use personality system to make decision
+    const personalityAction = this.personalitySystem.makeDecision(ship.id, situation);
+
+    // Convert personality action to ship behavior
+    if (personalityAction) {
+      this.executePersonalityAction(ship, personalityAction, stations, celestialBodies, playerShip, factionSystem);
+    } else {
+      // Fall back to state machine if personality doesn't decide
+      this.executeStateMachine(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
+    }
+  }
+
+  /**
+   * INTEGRATED: Execute action from personality system
+   */
+  private executePersonalityAction(
+    ship: NPCShip,
+    action: any,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[],
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
+  ): void {
+    switch (action.type) {
+      case 'flee':
+        ship.state = 'FLEEING';
+        if (playerShip) {
+          this.reactToEvent(ship, {
+            type: 'combat',
+            description: 'Fleeing from threat',
+            participants: [ship.id, playerShip.id],
+            significance: 0.6
+          });
+        }
+        break;
+
+      case 'investigate':
+        ship.state = 'TRAVELING';
+        if (action.parameters.has('target')) {
+          ship.currentTarget = action.parameters.get('target');
+        }
+        break;
+
+      case 'pursue_goal':
+        // Let goal system handle this
+        ship.state = 'IDLE';
+        break;
+
+      case 'socialize':
+        // Stay idle but could interact with nearby ships
+        ship.state = 'IDLE';
+        break;
+
+      case 'idle':
+      default:
+        ship.state = 'IDLE';
+        break;
+    }
+  }
+
+  /**
+   * INTEGRATED: React to event using personality system
+   */
+  private reactToEvent(ship: NPCShip, event: GameEvent): void {
+    // Record event in personality system
+    this.personalitySystem.reactToEvent(ship.id, event);
+
+    // Also record in extended memory
+    const experienceType = this.mapEventToExperienceType(event.type);
+    const emotionalImpact = this.calculateEmotionalImpactFromEvent(ship, event);
+
+    this.recordExperience(
+      ship,
+      experienceType,
+      event.description,
+      emotionalImpact,
+      event.significance * 10,
+      event.participants
+    );
+  }
+
+  /**
+   * Map event type to experience type
+   */
+  private mapEventToExperienceType(eventType: string): ExperienceType {
+    const mapping: Record<string, ExperienceType> = {
+      'combat': 'COMBAT_VICTORY',
+      'success': 'SUCCESSFUL_TRADE',
+      'failure': 'FAILURE',
+      'discovery': 'DISCOVERY',
+      'disaster': 'NEAR_DEATH'
+    };
+    return (mapping[eventType] as ExperienceType) || 'FIRST_TIME';
+  }
+
+  /**
+   * Calculate emotional impact from event based on personality
+   */
+  private calculateEmotionalImpactFromEvent(ship: NPCShip, event: GameEvent): number {
+    const personality = ship.npcPersonality;
+    let impact = 0;
+
+    switch (event.type) {
+      case 'success':
+        impact = 5;
+        break;
+      case 'failure':
+        impact = -5;
+        break;
+      case 'combat':
+        // Aggressive personalities enjoy combat
+        impact = personality.traits.ruthlessness > 0.7 ? 3 : -3;
+        break;
+      case 'discovery':
+        // Curious personalities love discovery
+        impact = personality.traits.curiosity * 10;
+        break;
+      case 'disaster':
+        impact = -10;
+        break;
+      default:
+        impact = 0;
+    }
+
+    return impact;
   }
 
   /**
@@ -448,18 +671,24 @@ export class NPCShipAI {
   }
 
   /**
-   * Handle IDLE state - decide what to do
+   * INTEGRATED: Handle IDLE state with personality-driven decisions
    */
   private handleIdleState(
     ship: NPCShip,
     stations: Map<string, SpaceStation>,
     factionSystem?: FactionSystem
   ): void {
+    const personality = ship.npcPersonality;
+
+    // INTEGRATED: Personality affects behavior choices
     switch (ship.type) {
       case 'TRADER':
-        // Find profitable trade route (considers faction economic needs)
+        // Greedy traders prioritize profit
+        const greedBonus = personality.traits.greed;
         const bestRoute = this.findBestTradeRoute(ship, stations, factionSystem);
-        if (bestRoute) {
+
+        // Cautious traders verify routes more carefully
+        if (bestRoute && (personality.traits.caution < 0.5 || bestRoute.profit > 500)) {
           ship.route = bestRoute;
           ship.currentTarget = bestRoute.fromStation;
           ship.state = 'TRAVELING';
@@ -471,16 +700,14 @@ export class NPCShipAI {
         break;
 
       case 'PATROL':
-        // Start patrol route
         ship.state = 'PATROLLING';
         break;
 
       case 'MINER':
-        // Mine resources faction needs (if faction system available)
+        // Conscientious miners are more systematic
         if (factionSystem && ship.faction) {
           try {
             const economy = factionSystem.getFactionEconomy(ship.faction);
-            // Find most critical mineral need
             let mostCritical = { commodity: 'iron', urgency: 0 };
             for (const [commodity, need] of economy.criticalResources) {
               if ((commodity === 'iron' || commodity === 'rare_earth' || commodity === 'uranium') &&
@@ -491,10 +718,8 @@ export class NPCShipAI {
                 }
               }
             }
-            // Store target resource in ship memory for MINING state
             (ship as any).targetResource = mostCritical.commodity;
           } catch (e) {
-            // Faction economy not ready, mine default resource
             (ship as any).targetResource = 'iron';
           }
         }
@@ -502,26 +727,27 @@ export class NPCShipAI {
         break;
 
       case 'PIRATE':
-        // Look for targets
-        if (Math.random() < ship.personality.aggression) {
+        // INTEGRATED: Aggression and courage determine pirate behavior
+        if (Math.random() < (personality.traits.ruthlessness + (1 - personality.traits.neuroticism)) / 2) {
           ship.state = 'PATROLLING';
         }
         break;
 
       case 'EXPLORER':
-        // Random exploration
-        ship.destination = this.generateRandomDestination(ship.position, 1e9);
-        ship.state = 'TRAVELING';
+        // INTEGRATED: Curiosity drives exploration
+        if (personality.traits.curiosity > 0.5) {
+          ship.destination = this.generateRandomDestination(ship.position, 1e9);
+          ship.state = 'TRAVELING';
+        }
         break;
 
       default:
-        // Stay idle
         break;
     }
   }
 
   /**
-   * Handle TRAVELING state - navigate to destination
+   * Handle TRAVELING state
    */
   private handleTravelingState(
     ship: NPCShip,
@@ -545,6 +771,15 @@ export class NPCShipAI {
       ship.destination = this.generateRandomDestination(ship.position, 1e8);
       ship.currentTarget = undefined;
       ship.route = undefined;
+
+      // React to trauma trigger
+      this.reactToEvent(ship, {
+        type: 'disaster',
+        description: 'Trauma triggered at this location',
+        participants: [ship.id],
+        significance: 0.8
+      });
+
       // Traumatized ships return to idle after fleeing from trigger
       if (Math.random() < 0.3) {
         ship.state = 'IDLE';
@@ -678,7 +913,9 @@ export class NPCShipAI {
       ship.state = 'TRADING';
     } else {
       // Stay docked for a bit, then leave
-      if (Math.random() < 0.01) { // 1% chance per update to leave
+      // INTEGRATED: Patience affects how long they stay
+      const leaveChance = ship.npcPersonality.traits.neuroticism > 0.7 ? 0.02 : 0.01;
+      if (Math.random() < leaveChance) {
         ship.currentTarget = undefined;
         ship.state = 'IDLE';
       }
@@ -741,9 +978,9 @@ export class NPCShipAI {
         }
       }
 
-      // Record successful trade experience
+      // INTEGRATED: React to successful trade
       const emotionalImpact = Math.min(10, profit / 500); // Higher profit = better feeling
-      const intensity = profit > 1000 ? 7 : 5; // Very profitable trades are more memorable
+      const intensity = profit > 1000 ? 7 : 5;
 
       this.recordExperience(
         ship,
@@ -753,6 +990,13 @@ export class NPCShipAI {
         intensity,
         ship.route ? [ship.route.fromStation, ship.route.toStation] : []
       );
+
+      this.reactToEvent(ship, {
+        type: 'success',
+        description: `Successful trade: ${profit.toFixed(0)} credits`,
+        participants: [ship.id],
+        significance: Math.min(1.0, profit / 2000)
+      });
 
       // Update profitable routes memory
       if (profit > 0 && ship.route) {
@@ -825,7 +1069,7 @@ export class NPCShipAI {
           factionSystem.reportCombat(ship.faction, playerShip.faction, severity);
           ship.memory.lastCombatReport = now;
 
-          // Record combat experience
+          // INTEGRATED: Record combat experience with personality reaction
           this.recordExperience(
             ship,
             'COMBAT_VICTORY',
@@ -834,6 +1078,13 @@ export class NPCShipAI {
             6,
             [playerShip.id]
           );
+
+          this.reactToEvent(ship, {
+            type: 'combat',
+            description: `Combat with ${playerShip.faction} ship`,
+            participants: [ship.id, playerShip.id],
+            significance: 0.7
+          });
 
           // Record learning outcome for adaptive AI (successful combat engagement)
           const combatReward = severity * 3; // Higher severity = more impressive victory
@@ -860,6 +1111,13 @@ export class NPCShipAI {
           9,  // Highly memorable
           [playerShip.id]
         );
+
+        this.reactToEvent(ship, {
+          type: 'disaster',
+          description: `Nearly destroyed by ${playerShip.faction}`,
+          participants: [ship.id, playerShip.id],
+          significance: 0.9
+        });
 
         // Record learning outcome for adaptive AI (combat failure)
         const defeatPenalty = -(100 - ship.stats.hullStrength) / 10; // More damage = worse failure
@@ -901,6 +1159,14 @@ export class NPCShipAI {
         10,  // Maximum intensity - will never forget
         [playerShip.id]
       );
+
+      this.reactToEvent(ship, {
+        type: 'disaster',
+        description: 'Near-death escape',
+        participants: [ship.id, playerShip.id],
+        significance: 1.0
+      });
+
       // Update threat memory
       ship.memory.knownThreats.set(playerShip.id, Date.now() / 1000);
     }
@@ -925,6 +1191,13 @@ export class NPCShipAI {
           7,
           [playerShip.id]
         );
+
+        this.reactToEvent(ship, {
+          type: 'success',
+          description: 'Escaped threat',
+          participants: [ship.id],
+          significance: 0.6
+        });
 
         // Record learning outcome for adaptive AI (successful escape)
         const escapeReward = 5; // Successful survival is rewarding
@@ -1000,7 +1273,7 @@ export class NPCShipAI {
   }
 
   /**
-   * Evaluate threat from another ship
+   * INTEGRATED: Evaluate threat with personality-based perception
    */
   private evaluateThreat(
     ship: NPCShip,
@@ -1018,31 +1291,44 @@ export class NPCShipAI {
       return;
     }
 
-    // Threat level calculation
+    // INTEGRATED: Personality affects threat perception
+    const personality = ship.npcPersonality;
     let threatLevel = 0;
 
     if (ship.type === 'PIRATE') {
-      // Pirates see everyone as potential targets
-      threatLevel = ship.personality.aggression;
+      // INTEGRATED: Ruthlessness and courage determine pirate aggression
+      threatLevel = (personality.traits.ruthlessness + personality.traits.courage) / 2;
 
       if (ship.cargo.length > 0 || ship.credits > 10000) {
         // Valuable target
         threatLevel += 0.3;
       }
 
-      if (threatLevel > 0.6) {
+      // Cautious pirates are more selective
+      if (personality.traits.neuroticism < 0.3 && threatLevel > 0.6) {
         ship.threat = otherShip.id;
         ship.state = 'ATTACKING';
       }
     } else {
       // Non-pirates fear pirates
       if (otherShip.faction === 'PIRATE') {
-        threatLevel = 0.8;
+        // INTEGRATED: Neuroticism affects fear response
+        threatLevel = 0.5 + personality.traits.neuroticism * 0.5;
       }
 
-      if (ship.personality.caution * threatLevel > 0.5) {
+      // INTEGRATED: Caution threshold for fleeing
+      const cautionThreshold = 0.3 + personality.traits.neuroticism * 0.4;
+      if (threatLevel > cautionThreshold) {
         ship.threat = otherShip.id;
         ship.state = 'FLEEING';
+
+        // React to threat
+        this.reactToEvent(ship, {
+          type: 'combat',
+          description: `Detected threat: ${otherShip.faction}`,
+          participants: [ship.id, otherShip.id],
+          significance: 0.5
+        });
       }
     }
 
@@ -1050,13 +1336,15 @@ export class NPCShipAI {
   }
 
   /**
-   * Find best trade route for ship
+   * INTEGRATED: Find best trade route with personality influence
    */
   private findBestTradeRoute(
     ship: NPCShip,
     stations: Map<string, SpaceStation>,
     factionSystem?: FactionSystem
   ): TradeRoute | null {
+    const personality = ship.npcPersonality;
+
     // Check memory first (but deprioritize if faction needs exist)
     if (ship.memory.profitableRoutes.length > 0 && !factionSystem) {
       const route = ship.memory.profitableRoutes[0];
@@ -1109,10 +1397,19 @@ export class NPCShipAI {
           // Base profit (distance-based)
           let score = Math.max(0, 1000 - distance / 1e6);
 
+          // INTEGRATED: Greed affects route selection
+          score *= (0.5 + personality.traits.greed * 0.5);
+
+          // INTEGRATED: Risk-taking affects distance preference
+          if (personality.traits.courage > 0.7) {
+            score *= 1.2; // Brave traders go further
+          }
+
           // Massive bonus for critical faction needs
           const urgency = urgentDemand.get(commodity) || 0;
           if (urgency > 0) {
-            score += urgency * 50; // Up to 5000x multiplier for crisis goods
+            // INTEGRATED: Honor affects willingness to help faction
+            score += urgency * 50 * (0.5 + personality.traits.honor * 0.5);
           }
 
           // Bonus for trading with friendly factions

@@ -1,10 +1,13 @@
 /**
  * MiningSystem - Mine asteroids and celestial bodies for resources
  * Mining lasers, extraction efficiency, ore types, refining
+ * Integrates with ManufacturingSystem to convert ore into tradeable commodities
  */
 
 import { Vector3 } from './CelestialBody';
 import { UniverseOrchestrator } from './UniverseOrchestrator';
+import { CommodityType } from './economy/commodity';
+import { ORE_TO_COMMODITY_MAP } from './ManufacturingSystem';
 
 export type OreType =
   | 'IRON'
@@ -66,6 +69,16 @@ export interface RefineryBay {
   waste: number;
 }
 
+/**
+ * Refined ore ready for economy integration
+ * Maps ore types to commodity types for trading
+ */
+export interface RefinedCommodities {
+  commodities: Map<CommodityType, number>; // commodity type -> kg
+  totalValue: number; // estimated credits
+  refinedAt: number; // timestamp
+}
+
 export class MiningSystem {
   private orchestrator: UniverseOrchestrator;
   private miningLasers: MiningLaser[] = [];
@@ -73,6 +86,9 @@ export class MiningSystem {
 
   private currentTarget: Asteroid | null = null;
   private miningActive: boolean = false;
+
+  // Track refined commodities ready for market
+  private refinedCommodities: Map<CommodityType, number> = new Map();
 
   private static readonly ORE_VALUES: Map<OreType, number> = new Map([
     ['IRON', 5],
@@ -298,15 +314,18 @@ export class MiningSystem {
 
   /**
    * Process ore in refinery
+   * Now converts ore to economy commodities
    */
   public processOre(duration: number): {
     processed: Map<OreType, number>;
     waste: number;
+    commodities: Map<CommodityType, number>; // New: economy-ready commodities
   } {
     if (this.refinery.currentLoad === 0) {
       return {
         processed: new Map(),
-        waste: 0
+        waste: 0,
+        commodities: new Map()
       };
     }
 
@@ -314,6 +333,7 @@ export class MiningSystem {
 
     // Simulated processing - would track actual ore types
     const processed = new Map<OreType, number>();
+    const commodities = new Map<CommodityType, number>();
     const pureOre = processAmount * this.refinery.refineryEfficiency;
     const waste = processAmount * (1 - this.refinery.refineryEfficiency);
 
@@ -325,6 +345,16 @@ export class MiningSystem {
 
         const existing = this.refinery.processedOre.get(oreType) || 0;
         this.refinery.processedOre.set(oreType, existing + amount);
+
+        // Convert to commodity type for economy integration
+        const commodityType = ORE_TO_COMMODITY_MAP.get(oreType);
+        if (commodityType) {
+          const existingCommodity = this.refinedCommodities.get(commodityType) || 0;
+          this.refinedCommodities.set(commodityType, existingCommodity + amount);
+
+          const commodityAmount = commodities.get(commodityType) || 0;
+          commodities.set(commodityType, commodityAmount + amount);
+        }
       }
     }
 
@@ -333,14 +363,23 @@ export class MiningSystem {
 
     console.log(`[REFINERY] Processed ${processAmount.toFixed(1)}kg ore -> ${pureOre.toFixed(1)}kg refined, ${waste.toFixed(1)}kg waste`);
 
+    // Log commodity conversion
+    if (commodities.size > 0) {
+      console.log('[REFINERY] Converted to commodities:');
+      for (const [commodity, amount] of commodities) {
+        console.log(`  ${commodity}: ${amount.toFixed(1)}kg`);
+      }
+    }
+
     return {
       processed,
-      waste
+      waste,
+      commodities
     };
   }
 
   /**
-   * Sell processed ore
+   * Sell processed ore (legacy method - for direct sale)
    */
   public sellProcessedOre(): {
     credits: number;
@@ -356,6 +395,8 @@ export class MiningSystem {
     }
 
     this.refinery.processedOre.clear();
+    // Also clear refined commodities when selling directly
+    this.refinedCommodities.clear();
 
     console.log(`[MINING] Sold processed ore for ${totalCredits.toFixed(0)} credits`);
 
@@ -363,6 +404,68 @@ export class MiningSystem {
       credits: totalCredits,
       sold
     };
+  }
+
+  /**
+   * Export refined commodities for economy/manufacturing use
+   * Returns commodities without clearing inventory (for transfer to station/facility)
+   */
+  public getRefinedCommodities(): Map<CommodityType, number> {
+    return new Map(this.refinedCommodities);
+  }
+
+  /**
+   * Transfer refined commodities to a station/facility
+   * Clears the specified amount from inventory
+   */
+  public transferCommodities(
+    commodity: CommodityType,
+    amount: number
+  ): { success: boolean; transferred: number; message: string } {
+    const available = this.refinedCommodities.get(commodity) || 0;
+
+    if (available < amount) {
+      return {
+        success: false,
+        transferred: 0,
+        message: `Insufficient ${commodity}: requested ${amount}kg, have ${available.toFixed(1)}kg`
+      };
+    }
+
+    this.refinedCommodities.set(commodity, available - amount);
+
+    // Also reduce from processedOre (find matching ore type)
+    for (const [oreType, commodityType] of ORE_TO_COMMODITY_MAP) {
+      if (commodityType === commodity) {
+        const oreAmount = this.refinery.processedOre.get(oreType) || 0;
+        this.refinery.processedOre.set(oreType, Math.max(0, oreAmount - amount));
+      }
+    }
+
+    console.log(`[MINING] Transferred ${amount.toFixed(1)}kg of ${commodity}`);
+
+    return {
+      success: true,
+      transferred: amount,
+      message: `Transferred ${amount.toFixed(1)}kg of ${commodity}`
+    };
+  }
+
+  /**
+   * Transfer all refined commodities (for bulk station delivery)
+   */
+  public transferAllCommodities(): Map<CommodityType, number> {
+    const transferred = new Map(this.refinedCommodities);
+
+    console.log('[MINING] Transferring all refined commodities:');
+    for (const [commodity, amount] of transferred) {
+      console.log(`  ${commodity}: ${amount.toFixed(1)}kg`);
+    }
+
+    this.refinedCommodities.clear();
+    this.refinery.processedOre.clear();
+
+    return transferred;
   }
 
   /**
@@ -401,6 +504,15 @@ export class MiningSystem {
       for (const [ore, qty] of this.refinery.processedOre) {
         const value = (MiningSystem.ORE_VALUES.get(ore) || 0) * qty;
         lines.push(`    ${ore}: ${qty.toFixed(1)}kg (${value.toFixed(0)} credits)`);
+      }
+    }
+
+    // Show refined commodities ready for economy
+    if (this.refinedCommodities.size > 0) {
+      lines.push('');
+      lines.push('Refined Commodities (Market-Ready):');
+      for (const [commodity, qty] of this.refinedCommodities) {
+        lines.push(`    ${commodity}: ${qty.toFixed(1)}kg`);
       }
     }
 

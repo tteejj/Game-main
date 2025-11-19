@@ -1,0 +1,403 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    COMPLETE PRODUCTION CHAIN FLOW                            ║
+║                Asteroid → Ore → Metal → Goods → Market                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 1: ASTEROID MINING                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    🪨 Asteroid Field
+       │
+       │ MiningSystem.scanForAsteroids()
+       ├─→ asteroid_xyz (Iron 45%, Ice 30%, Rare Earth 5%)
+       │
+       │ MiningSystem.targetAsteroid()
+       │ MiningSystem.startMining(1000kW)
+       │
+       │ [Mining Laser Active - 10kg/s]
+       │ ├─→ Heat management (0-100%)
+       │ ├─→ Efficiency tracking (60%)
+       │ └─→ Asteroid mass reduction
+       │
+       │ MiningSystem.update(deltaTime) [60 seconds]
+       ├─→ Raw ore extracted: 600kg
+       │   ├─→ IRON: 270kg (45%)
+       │   ├─→ ICE: 180kg (30%)
+       │   └─→ RARE_EARTHS: 30kg (5%)
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 2: ON-SHIP REFINING                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    🚀 Player Ship - Refinery Bay
+       │
+       │ Raw ore in hold: 600kg
+       │
+       │ MiningSystem.processOre(30 seconds)
+       │ ├─→ Refinery efficiency: 70%
+       │ ├─→ Processing rate: 5kg/s
+       │ └─→ Waste generation: 30%
+       │
+       ├─→ Processed: 420kg refined
+       ├─→ Waste: 180kg
+       │
+       │ Commodity Conversion (ORE_TO_COMMODITY_MAP):
+       ├─→ IRON → METALLIC_ORE: 189kg
+       ├─→ ICE → ICE: 126kg
+       └─→ RARE_EARTHS → RARE_EARTH: 21kg
+       │
+       │ MiningSystem.getRefinedCommodities()
+       └─→ Map<CommodityType, number> {
+             METALLIC_ORE: 189kg,
+             ICE: 126kg,
+             RARE_EARTH: 21kg
+           }
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 3: STATION DOCKING & TRANSFER                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    🏭 Space Station "Alpha Trade Hub"
+       │
+       │ Ship docks at station
+       │
+       │ ProductionChainManager.transferOreToRefinery(
+       │   stationId: "station-alpha",
+       │   refineryId: "refinery-001"
+       │ )
+       │
+       │ Transfer process:
+       ├─→ MiningSystem.transferAllCommodities()
+       │   └─→ Clears ship's refined commodity inventory
+       │
+       ├─→ ManufacturingSystem.addToInventory()
+       │   └─→ Adds to station refinery inventory
+       │
+       └─→ Result: 336kg transferred to station refinery
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 4: STATION REFINING (Tier 1 Production)                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    🏭 Station Refinery (Tech Level 5)
+       │
+       │ Inventory:
+       │ ├─→ METALLIC_ORE: 189kg
+       │ ├─→ ICE: 126kg
+       │ └─→ RARE_EARTH: 21kg
+       │
+       │ RECIPE: refine_metallic_ore_to_steel
+       │ ├─→ Input: 189kg METALLIC_ORE
+       │ ├─→ Time: 1 hour (3600s)
+       │ ├─→ Efficiency: 70%
+       │ ├─→ Power: 500kW
+       │ └─→ Output: 132kg STEEL
+       │
+       │ ManufacturingSystem.startProduction(
+       │   facilityId: "refinery-001",
+       │   recipeId: "refine_metallic_ore_to_steel"
+       │ )
+       │
+       │ Job created: job-001
+       │ ├─→ Status: PROCESSING
+       │ ├─→ Progress: 0 → 100%
+       │ └─→ ETA: 1 hour
+       │
+       │ ManufacturingSystem.update(deltaTime) [3600 seconds]
+       │
+       ├─→ Job complete!
+       └─→ Inventory updated:
+           ├─→ METALLIC_ORE: 0kg (consumed)
+           └─→ STEEL: 132kg (produced)
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 5A: ADVANCED MANUFACTURING (Tier 2-3)                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    🏭 Electronics Plant (Tech Level 5)
+       │
+       │ Refine RARE_EARTH to SILICON:
+       │ ├─→ Input: 21kg RARE_EARTH
+       │ ├─→ Time: 4 hours
+       │ └─→ Output: 8.4kg SILICON
+       │
+       │ Refine METALLIC_ORE to COPPER:
+       │ ├─→ Input: 100kg METALLIC_ORE (from another mining run)
+       │ ├─→ Time: 1.5 hours
+       │ └─→ Output: 60kg COPPER
+       │
+       │ RECIPE: manufacture_electronics
+       │ ├─→ Inputs:
+       │ │   ├─→ SILICON: 8kg
+       │ │   ├─→ COPPER: 60kg
+       │ │   └─→ RARE_EARTH: 21kg
+       │ ├─→ Time: 3 hours
+       │ ├─→ Efficiency: 85%
+       │ └─→ Output: 75kg ELECTRONICS
+       │
+       │ ManufacturingSystem.startProduction(
+       │   facilityId: "electronics-plant-001",
+       │   recipeId: "manufacture_electronics"
+       │ )
+       │
+       └─→ 75kg ELECTRONICS produced
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 5B: COMPLEX MANUFACTURING (Tier 4)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    🏭 Factory (Tech Level 5)
+       │
+       │ RECIPE: manufacture_machinery
+       │ ├─→ Inputs:
+       │ │   ├─→ STEEL: 132kg
+       │ │   ├─→ ALUMINUM: 50kg (from another production line)
+       │ │   └─→ ELECTRONICS: 75kg
+       │ ├─→ Time: 4 hours
+       │ ├─→ Efficiency: 85%
+       │ └─→ Output: 180kg MACHINERY
+       │
+       │ ManufacturingSystem.startProduction(
+       │   facilityId: "factory-001",
+       │   recipeId: "manufacture_machinery"
+       │ )
+       │
+       └─→ 180kg MACHINERY produced
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 6: MARKET TRADING                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    💰 Station Market
+       │
+       │ Available for sale:
+       │ ├─→ STEEL: 132kg
+       │ ├─→ ELECTRONICS: 75kg
+       │ └─→ MACHINERY: 180kg
+       │
+       │ ProductionChainManager.transferGoodsToMarket(
+       │   facilityId: "factory-001",
+       │   stationId: "station-alpha",
+       │   commodity: CommodityType.MACHINERY,
+       │   amount: 180kg
+       │ )
+       │
+       │ Market transaction:
+       │ ├─→ Remove from facility inventory
+       │ ├─→ EconomySystem.executeTrade()
+       │ │   ├─→ Supply increases (180kg)
+       │ │   ├─→ Demand decreases
+       │ │   └─→ Price adjusts dynamically
+       │ │
+       │ ├─→ Market price: 500 credits/ton
+       │ └─→ Sale value: 180kg × 500 = 90,000 credits
+       │
+       └─→ Credits earned: 90,000
+       │
+       ▼
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ STAGE 7: STATISTICS & REPORTING                                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    📊 Production Chain Statistics
+       │
+       │ ProductionChainManager.getProductionReport()
+       │
+       └─→ Production Chain Report:
+           │
+           ├─→ Mining:
+           │   ├─→ Raw ore extracted: 600kg
+           │   └─→ Ore types: IRON, ICE, RARE_EARTH
+           │
+           ├─→ Refining:
+           │   ├─→ Ore refined: 336kg
+           │   ├─→ Waste: 180kg
+           │   └─→ Efficiency: 56%
+           │
+           ├─→ Manufacturing:
+           │   ├─→ Jobs completed: 5
+           │   ├─→ Goods produced: 387kg
+           │   └─→ Production time: 13.5 hours
+           │
+           ├─→ Trading:
+           │   ├─→ Commodities sold: 387kg
+           │   └─→ Credits earned: 127,500
+           │
+           └─→ Value Analysis:
+               ├─→ Raw material value: ~15,000 credits
+               ├─→ Final sale value: 127,500 credits
+               └─→ Value added: 112,500 credits (750% markup!)
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         FULL CHAIN SUMMARY                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Input:
+  • 1 Iron-rich asteroid (45% Iron, 30% Ice, 5% Rare Earth)
+  • Time: ~13.5 hours total
+  • Power: ~5,000 kWh consumed
+
+Process:
+  Stage 1: Mining (1 hour)           → 600kg raw ore
+  Stage 2: On-ship refining (30 min) → 336kg commodities
+  Stage 3: Transfer (instant)        → Station receives materials
+  Stage 4: Station refining (8 hours)→ 132kg STEEL, 8kg SILICON, 60kg COPPER
+  Stage 5: Manufacturing (4 hours)   → 180kg MACHINERY
+  Stage 6: Market sale (instant)     → 127,500 credits
+
+Output:
+  • Credits earned: 127,500
+  • Value added: 112,500 (750% markup)
+  • Jobs completed: 5
+  • Facilities used: 3
+
+Efficiency:
+  • Overall chain efficiency: 65%
+  • Value per kg raw: 212 credits
+  • Production rate: 28.7kg goods/hour
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    SYSTEM ARCHITECTURE                                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌──────────────────┐
+│  MiningSystem    │ Extracts raw ore from asteroids
+│                  │ • Mining lasers
+│  - scanAsteroids │ • Heat management
+│  - targetAsteroid│ • On-ship refining
+│  - startMining   │ • Ore → Commodities
+│  - processOre    │
+│  - transfer...   │
+└────────┬─────────┘
+         │ Refined Commodities
+         │ (Map<CommodityType, number>)
+         ▼
+┌──────────────────┐
+│ Manufacturing    │ Processes materials through production chains
+│ System           │ • 30+ recipes
+│                  │ • 8 facility types
+│  - createFacility│ • Job queue management
+│  - addToInventory│ • Efficiency simulation
+│  - startProduction
+│  - update        │
+└────────┬─────────┘
+         │ Manufactured Goods
+         │ (Map<CommodityType, number>)
+         ▼
+┌──────────────────┐
+│ EconomySystem    │ Manages market prices and trading
+│                  │ • Supply/demand dynamics
+│  - registerStation│ • Price fluctuation
+│  - executeTrade  │ • Trade routes
+│  - getMarket     │ • Economic zones
+│  - update        │
+└────────┬─────────┘
+         │ Credits & Market Updates
+         ▼
+┌──────────────────┐
+│ ProductionChain  │ Orchestrates full production workflows
+│ Manager          │ • Automated transfers
+│                  │ • Statistics tracking
+│  - transferOre...│ • Profitability analysis
+│  - transferGoods │ • Optimal chains
+│  - executeChain  │
+│  - getReport     │
+└──────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    RECIPE DEPENDENCY TREE                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+RAW MATERIALS (Mined from asteroids)
+    │
+    ├─→ METALLIC_ORE
+    │   ├─→ STEEL ────────┬─→ MACHINERY ──┬─→ SHIP_COMPONENTS
+    │   │                 ├─→ TOOLS       │
+    │   │                 └─→ CONSTRUCTION│
+    │   │                                  │
+    │   └─→ COPPER ───────→ ELECTRONICS ──┘
+    │
+    ├─→ ROCKY_ORE
+    │   ├─→ ALUMINUM ─────→ MACHINERY ────→ SHIP_COMPONENTS
+    │   └─→ TITANIUM ─────→ TOOLS, WEAPONS, SHIP_COMPONENTS
+    │
+    ├─→ RARE_EARTH
+    │   ├─→ SILICON ──────┬─→ ELECTRONICS ─→ MACHINERY, COMPUTER_SYSTEMS
+    │   │                 └─→ CARBON_FIBER ─→ SHIP_COMPONENTS
+    │   └─→ Direct use ───→ ELECTRONICS, SENSORS
+    │
+    ├─→ ICE
+    │   └─→ WATER + OXYGEN
+    │       ├─→ HYDROGEN_FUEL ─→ FUSION_PELLETS
+    │       └─→ FOOD
+    │
+    ├─→ URANIUM ──────────→ WEAPONS, SHIELD_GENERATORS, FUSION_PELLETS
+    │
+    └─→ PLATINUM ─────────→ JEWELRY
+
+COMPLEXITY LEVELS:
+  Level 1: Raw → Refined (1 step)
+  Level 2: Refined → Advanced (2 steps)
+  Level 3: Advanced → Manufactured (3 steps)
+  Level 4: Complex → Ship Components (4 steps)
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         FILE STRUCTURE                                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+/universe-system/
+  │
+  ├── src/
+  │   ├── MiningSystem.ts ★ MODIFIED
+  │   │   └─→ Integrated with economy commodities
+  │   │
+  │   ├── ManufacturingSystem.ts ★ NEW (857 lines)
+  │   │   ├─→ ProductionRecipe interface
+  │   │   ├─→ ManufacturingFacility interface
+  │   │   ├─→ ProductionJob interface
+  │   │   ├─→ RecipeDatabase class (30+ recipes)
+  │   │   └─→ ManufacturingSystem class
+  │   │
+  │   ├── EconomyIntegration.ts ★ NEW (485 lines)
+  │   │   ├─→ ProductionChainStats interface
+  │   │   ├─→ ProductionChainManager class
+  │   │   └─→ StationProductionAutomation class
+  │   │
+  │   └── economy/
+  │       └── commodity.ts (existing, used)
+  │
+  ├── tests/
+  │   └── ProductionChainTests.ts ★ NEW (730 lines)
+  │       ├─→ testCase1_MiningToCommodities()
+  │       ├─→ testCase2_RefiningChain()
+  │       ├─→ testCase3_ManufacturingChain()
+  │       ├─→ testCase4_CompleteChainWithTrade()
+  │       └─→ testCase5_ComplexManufacturing()
+  │
+  ├── PRODUCTION_CHAIN_README.md ★ NEW (500+ lines)
+  ├── PRODUCTION_CHAIN_QUICKSTART.md ★ NEW (400+ lines)
+  ├── TASK_3_IMPLEMENTATION_SUMMARY.md ★ NEW
+  └── PRODUCTION_CHAIN_FLOW.txt ★ NEW (this file)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            END OF FLOW DIAGRAM
+═══════════════════════════════════════════════════════════════════════════════
