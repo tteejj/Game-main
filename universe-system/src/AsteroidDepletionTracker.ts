@@ -97,6 +97,31 @@ export class AsteroidDepletionTracker {
   }
 
   /**
+   * Initialize asteroid fields from game asteroids
+   */
+  public initializeAsteroidFields(asteroids: any[]): void {
+    console.log(`[MINING] Initializing ${asteroids.length} asteroids for depletion tracking`);
+
+    // Group asteroids by region/cluster for the pre-populated fields
+    asteroids.forEach((asteroid, index) => {
+      const fieldId = index < asteroids.length / 3 ? 'main_belt' :
+                     index < 2 * asteroids.length / 3 ? 'prometheus_cluster' :
+                     'kuiper_ice_field';
+
+      this.registerAsteroid(fieldId, asteroid.id, {
+        iron: Math.random() > 0.5 ? Math.floor(Math.random() * 10000) + 5000 : 0,
+        nickel: Math.random() > 0.5 ? Math.floor(Math.random() * 5000) + 2000 : 0,
+        rareEarth: Math.random() > 0.3 ? Math.floor(Math.random() * 2000) + 500 : 0,
+        exoticMaterials: Math.random() > 0.8 ? Math.floor(Math.random() * 1000) + 100 : 0,
+        waterIce: fieldId === 'kuiper_ice_field' ? Math.floor(Math.random() * 15000) + 8000 : 0,
+        volatiles: fieldId === 'kuiper_ice_field' ? Math.floor(Math.random() * 8000) + 4000 : 0
+      });
+    });
+
+    console.log(`[MINING] Registered ${asteroids.length} asteroids across 3 fields`);
+  }
+
+  /**
    * Initialize default asteroid fields for the system
    */
   private initializeDefaultFields(): void {

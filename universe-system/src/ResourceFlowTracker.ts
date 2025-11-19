@@ -249,8 +249,21 @@ export class ResourceFlowTracker {
   private queryCount: number = 0;
   private totalQueryTime: number = 0;
 
+  // Manufacturing system integration
+  private manufacturingSystem: any = null;
+
   constructor(maxAgeHours: number = 24) {
     this.maxAgeHours = maxAgeHours;
+  }
+
+  /**
+   * Link manufacturing system for automatic flow tracking
+   */
+  public trackManufacturingSystem(manufacturingSystem: any): void {
+    this.manufacturingSystem = manufacturingSystem;
+    console.log(`[RESOURCE FLOW] Now tracking manufacturing system`);
+
+    // Note: Actual tracking happens via recordFlow() calls from manufacturing events
   }
 
   /**

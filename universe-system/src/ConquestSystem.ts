@@ -289,6 +289,21 @@ export class ConquestSystem {
   }
 
   /**
+   * Link to StarSystem for automatic station/city registry
+   */
+  public linkStarSystem(starSystem: any): void {
+    // Link stations
+    if (starSystem.stations) {
+      this.linkStations(starSystem.stations);
+    }
+
+    // Link cities if available (may not be present in all systems)
+    if (starSystem.cities) {
+      this.linkCities(starSystem.cities);
+    }
+  }
+
+  /**
    * Register event listener
    */
   public addEventListener(listener: ConquestEventListener): void {

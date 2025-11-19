@@ -1525,9 +1525,10 @@ export class StarSystem {
     // PHASE 3B: INTEGRATION HELPERS
     // ========================================================================
     this.stationCreationIntegration = new StationCreationIntegration(this.stationGenerator);
-    this.productionEconomyBridge = new ProductionEconomyBridge();
-    this.cityPopulationSync = new CityPopulationSync();
     this.technologyEffectApplicator = new TechnologyEffectApplicator();
+
+    // Note: ProductionEconomyBridge and CityPopulationSync will be created later
+    // when we have the required dependencies (economy system, population system)
 
     // ========================================================================
     // CONSTRUCTION SYSTEM
@@ -1611,7 +1612,10 @@ export class StarSystem {
         }
       };
       this.manufacturingSystem.linkEconomySystem(economySystem as any);
-      this.productionEconomyBridge.linkEconomySystem(economySystem as any);
+
+      // Create ProductionEconomyBridge with both required dependencies
+      this.productionEconomyBridge = new ProductionEconomyBridge(economySystem as any, this.manufacturingSystem);
+
       console.log(`[MANUFACTURING] Linked to economy system with ${this.markets.size} markets`);
     }
 
@@ -1638,10 +1642,9 @@ export class StarSystem {
     // ========================================================================
     this.populationSystem = new PopulationSystem();
 
-    // CRITICAL FIX: Link city registry (if cities exist)
+    // CRITICAL FIX: Create CityPopulationSync with population system
     // Note: City system integration will be completed when city generation is enhanced
-    // For now, we set up the linkage so it's ready
-    this.cityPopulationSync.linkPopulationSystem(this.populationSystem);
+    this.cityPopulationSync = new CityPopulationSync(this.populationSystem);
     console.log(`[POPULATION] System initialized and ready for city linkage`);
 
     // ========================================================================
@@ -1695,9 +1698,7 @@ export class StarSystem {
     // ========================================================================
     // PHASE 3B: NPC TRADE INTEGRATION
     // ========================================================================
-    this.npcTradeIntegration = new NPCTradeIntegration();
-
-    // Link to markets
+    // Create NPC trade integration with economy system
     if (this.markets.size > 0) {
       const economySystem = {
         getMarketForStation: (stationId: string) => this.markets.get(stationId),
@@ -1713,20 +1714,22 @@ export class StarSystem {
           return null;
         }
       };
-      this.npcTradeIntegration.linkEconomySystem(economySystem as any);
+
+      // NPCTradeIntegration requires economy system in constructor
+      this.npcTradeIntegration = new NPCTradeIntegration(economySystem as any);
       console.log(`[NPC TRADE] Integrated with ${this.markets.size} markets`);
     }
 
     // ========================================================================
     // PHASE 3B: DIPLOMACY EVENT INTEGRATION
     // ========================================================================
+    // DiplomacyEventIntegration requires eventBus + diplomacyEngine in constructor
     this.diplomacyEventIntegration = new DiplomacyEventIntegration(
-      this.factionDiplomacy,
-      this.economicNeeds
+      this.eventSystem,
+      this.factionDiplomacy
     );
 
-    // Subscribe to all relevant events
-    this.diplomacyEventIntegration.subscribeToAllEvents();
+    // Event subscriptions are handled automatically in the constructor
     console.log(`[DIPLOMACY EVENTS] Integrated with event system`);
 
     // ========================================================================
@@ -1769,7 +1772,7 @@ export class StarSystem {
       );
 
       // Link expansion AI to economic needs for commodity checking
-      expansionAI.linkEconomicNeeds(this.economicNeeds);
+      expansionAI.linkFactionEconomicNeeds(this.economicNeeds);
 
       this.factionExpansionAIs.set(factionName, expansionAI);
 
