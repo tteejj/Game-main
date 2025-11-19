@@ -319,12 +319,16 @@ export class FactionEconomicNeeds {
   }
 
   /**
-   * Simulate supply chain disruption
+   * Simulate supply chain disruption by commodity
    */
-  public disruptSupplyChain(chainId: string, cause: string, duration: number, impact: number): void {
+  public disruptSupplyChain(commodity: string, cause: string, duration: number, impact: number): void {
+    let chainsDisrupted = 0;
+
     for (const economy of this.economies.values()) {
-      const chain = economy.supplyChains.find(c => c.id === chainId);
-      if (chain) {
+      // Find all supply chains for this commodity
+      const chains = economy.supplyChains.filter(c => c.commodity === commodity);
+
+      for (const chain of chains) {
         const disruption: Disruption = {
           timestamp: Date.now() / 1000,
           cause,
@@ -335,22 +339,30 @@ export class FactionEconomicNeeds {
 
         chain.disruptions.push(disruption);
         chain.actualFlow *= (1 - impact);
+        chainsDisrupted++;
 
         // Check if this creates resource crisis
         const need = economy.criticalResources.get(chain.commodity);
         if (need) {
-          need.imports *= (1 - impact);
+          // Reduce imports from this supply chain
+          const importReduction = chain.actualFlow * impact;
+          need.imports = Math.max(0, need.imports - importReduction);
           need.deficit = need.requiredPerDay - (need.domesticProduction + need.imports);
 
-          if (need.deficit > 0) {
+          if (need.deficit > 0 && need.currentStock > 0) {
             need.daysRemaining = need.currentStock / need.deficit;
             if (need.daysRemaining < this.CRISIS_DAYS_THRESHOLD) {
               need.inCrisis = true;
               economy.crisisLevel = Math.min(10, economy.crisisLevel + 2);
+              console.log(`🚨 ${economy.factionId} ${commodity} crisis! ${need.daysRemaining.toFixed(1)} days remaining`);
             }
           }
         }
       }
+    }
+
+    if (chainsDisrupted > 0) {
+      console.log(`⚠️  Disrupted ${chainsDisrupted} ${commodity} supply chains (${(impact * 100).toFixed(0)}% impact)`);
     }
   }
 
@@ -382,50 +394,132 @@ export class FactionEconomicNeeds {
       crisisLevel: 0
     };
 
+    // Vary population by faction
+    const populationMultipliers: Record<string, number> = {
+      'UNITED_EARTH': 5.0,      // 5 million - largest
+      'MARS_FEDERATION': 3.0,   // 3 million
+      'BELT_ALLIANCE': 1.5,     // 1.5 million
+      'OUTER_COLONIES': 0.8,    // 800k
+      'INDEPENDENT': 0.5        // 500k - smallest
+    };
+    const popMultiplier = populationMultipliers[factionId] || 1.0;
+    economy.population = 1000000 * popMultiplier;
+
+    // Set up production capacities (NOT perfectly matched to consumption)
+    // Some factions produce more of certain goods, others consume more
+    const productionProfiles: Record<string, Record<string, number>> = {
+      'UNITED_EARTH': { FOOD: 1.2, WATER: 1.1, FUEL: 0.7 },      // Agricultural powerhouse, fuel poor
+      'MARS_FEDERATION': { FOOD: 0.6, WATER: 0.9, FUEL: 1.3 },   // Fuel rich, food poor
+      'BELT_ALLIANCE': { FOOD: 0.3, WATER: 0.8, FUEL: 1.5 },     // Mining faction, food scarce
+      'OUTER_COLONIES': { FOOD: 0.9, WATER: 1.0, FUEL: 0.8 },    // Balanced but weak
+      'INDEPENDENT': { FOOD: 0.7, WATER: 0.9, FUEL: 0.9 }        // Varied
+    };
+    const profile = productionProfiles[factionId] || { FOOD: 1.0, WATER: 1.0, FUEL: 1.0 };
+
     // Initialize with basic critical resources
+    const foodRequired = economy.population * 0.5;  // 0.5 units per person per day
     economy.criticalResources.set('FOOD', {
       commodity: 'FOOD',
-      requiredPerDay: economy.population * 0.5,  // 0.5 units per person
-      currentStock: economy.population * 30,      // 30 days
-      daysRemaining: 30,
+      requiredPerDay: foodRequired,
+      currentStock: foodRequired * 15,  // Start with only 15 days (reduced from 30)
+      daysRemaining: 15,
       essential: true,
       substitutes: [],
-      domesticProduction: economy.population * 0.4,
-      imports: economy.population * 0.1,
-      deficit: 0,
+      domesticProduction: foodRequired * profile.FOOD,  // Varies by faction
+      imports: 0,  // Start with zero imports
+      deficit: foodRequired * (1 - profile.FOOD),  // Calculate actual deficit
       crisisThreshold: this.CRISIS_DAYS_THRESHOLD,
       inCrisis: false
     });
 
+    const waterRequired = economy.population * 1.0;
     economy.criticalResources.set('WATER', {
       commodity: 'WATER',
-      requiredPerDay: economy.population * 1.0,
-      currentStock: economy.population * 60,
-      daysRemaining: 60,
+      requiredPerDay: waterRequired,
+      currentStock: waterRequired * 20,  // Start with 20 days (reduced from 60)
+      daysRemaining: 20,
       essential: true,
       substitutes: [],
-      domesticProduction: economy.population * 0.8,
-      imports: economy.population * 0.2,
-      deficit: 0,
+      domesticProduction: waterRequired * profile.WATER,
+      imports: 0,
+      deficit: waterRequired * (1 - profile.WATER),
       crisisThreshold: this.CRISIS_DAYS_THRESHOLD,
       inCrisis: false
     });
 
+    const fuelRequired = 10000 * popMultiplier;
     economy.criticalResources.set('FUEL', {
       commodity: 'FUEL',
-      requiredPerDay: 10000,
-      currentStock: 500000,
-      daysRemaining: 50,
+      requiredPerDay: fuelRequired,
+      currentStock: fuelRequired * 10,  // Start with 10 days (reduced from 50)
+      daysRemaining: 10,
       essential: true,
       substitutes: ['ALTERNATIVE_FUEL'],
-      domesticProduction: 8000,
-      imports: 2000,
-      deficit: 0,
+      domesticProduction: fuelRequired * profile.FUEL,
+      imports: 0,
+      deficit: fuelRequired * (1 - profile.FUEL),
       crisisThreshold: this.CRISIS_DAYS_THRESHOLD,
       inCrisis: false
     });
 
+    // Set up production capacity map
+    economy.productionCapacity.set('FOOD', foodRequired * profile.FOOD);
+    economy.productionCapacity.set('WATER', waterRequired * profile.WATER);
+    economy.productionCapacity.set('FUEL', fuelRequired * profile.FUEL);
+
+    // Set up consumption rates
+    economy.consumptionRate.set('FOOD', foodRequired);
+    economy.consumptionRate.set('WATER', waterRequired);
+    economy.consumptionRate.set('FUEL', fuelRequired);
+
+    // Create supply chains between this faction and others
+    this.createSupplyChains(economy, factionId);
+
     this.economies.set(factionId, economy);
+  }
+
+  /**
+   * Create supply chains for faction
+   */
+  private createSupplyChains(economy: FactionEconomy, factionId: string): void {
+    // Create supply chains for deficit commodities
+    for (const [commodity, need] of economy.criticalResources) {
+      if (need.deficit > 0) {
+        // This faction needs this commodity - create supply chain
+        const chain: SupplyChain = {
+          id: `${factionId}_${commodity}_supply`,
+          commodity: commodity,
+          source: this.findSupplierFaction(commodity, factionId),
+          destination: factionId,
+          intermediaries: [],
+          capacity: need.deficit * 1.5,  // 150% of deficit
+          actualFlow: need.deficit,
+          utilization: 0.67,
+          uptime: 1.0,
+          disruptions: [],
+          criticalPoints: ['trade_route_1'],
+          vulnerability: 5
+        };
+
+        economy.supplyChains.push(chain);
+      }
+    }
+  }
+
+  /**
+   * Find faction that produces surplus of commodity
+   */
+  private findSupplierFaction(commodity: string, excludeFaction: string): string {
+    // Simple logic - return faction most likely to have surplus
+    const suppliers: Record<string, string[]> = {
+      'FOOD': ['UNITED_EARTH', 'OUTER_COLONIES'],
+      'WATER': ['UNITED_EARTH', 'MARS_FEDERATION'],
+      'FUEL': ['MARS_FEDERATION', 'BELT_ALLIANCE']
+    };
+
+    const options = suppliers[commodity] || ['INDEPENDENT'];
+    const filtered = options.filter(f => f !== excludeFaction);
+    return filtered[0] || 'INDEPENDENT';
   }
 
   private updateProduction(economy: FactionEconomy, deltaTime: number): void {
@@ -444,6 +538,21 @@ export class FactionEconomicNeeds {
       if (need) {
         need.domesticProduction = productionRate;
         need.currentStock += produced;
+
+        // Calculate imports from supply chains
+        const chains = economy.supplyChains.filter(c => c.commodity === commodity);
+        let totalImports = 0;
+        for (const chain of chains) {
+          totalImports += chain.actualFlow;
+        }
+
+        // Add imports to stock
+        const imported = totalImports * (deltaTime / 86400);
+        need.currentStock += imported;
+        need.imports = totalImports;
+
+        // Recalculate deficit
+        need.deficit = need.requiredPerDay - (need.domesticProduction + need.imports);
       }
     }
   }

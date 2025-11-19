@@ -1117,11 +1117,8 @@ export class StarSystem {
     duration: number,
     impactPercentage: number
   ): void {
-    // Find affected supply chains
-    const chainId = `${commodity}_supply`;
-    this.economicNeeds.disruptSupplyChain(chainId, cause, duration, impactPercentage);
-
-    console.log(`⚠️  Supply chain disrupted: ${commodity} (${(impactPercentage * 100).toFixed(0)}% impact for ${(duration / 3600).toFixed(1)}h)`);
+    // Disrupt all supply chains for this commodity
+    this.economicNeeds.disruptSupplyChain(commodity, cause, duration, impactPercentage);
   }
 
   /**

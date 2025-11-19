@@ -45,6 +45,11 @@ export class Game {
     // Background event tracking
     private lastBackgroundEventTime: number = 0;
 
+    // Player economy
+    public playerCredits: number = 100000; // Start with 100k credits
+    public playerCargo: Map<string, number> = new Map(); // commodity -> quantity
+    public readonly maxCargoCapacity: number = 1000; // Max 1000 units total
+
     // Performance tracking
     private frameCount: number = 0;
     private fps: number = 0;
@@ -226,6 +231,120 @@ export class Game {
 
             console.log(`💰 Trade completed with ${nearestStation.name} (${stationFaction}): ${value} credits`);
         }
+    }
+
+    /**
+     * Buy commodity from nearest station
+     */
+    public buyCommodity(commodity: string, quantity: number): boolean {
+        // Get market price
+        const marketPrice = this.starSystem.economicNeeds.calculateMarketPrice(
+            commodity,
+            'station_1',
+            this.getBasePriceFor(commodity)
+        );
+
+        const totalCost = marketPrice * quantity;
+
+        // Check if player has enough credits
+        if (this.playerCredits < totalCost) {
+            console.log(`❌ Not enough credits! Need ${totalCost.toFixed(0)}, have ${this.playerCredits.toFixed(0)}`);
+            return false;
+        }
+
+        // Check if player has cargo space
+        const currentCargo = Array.from(this.playerCargo.values()).reduce((sum, qty) => sum + qty, 0);
+        if (currentCargo + quantity > this.maxCargoCapacity) {
+            console.log(`❌ Not enough cargo space! Need ${quantity}, have ${this.maxCargoCapacity - currentCargo} free`);
+            return false;
+        }
+
+        // Execute purchase
+        this.playerCredits -= totalCost;
+        const current = this.playerCargo.get(commodity) || 0;
+        this.playerCargo.set(commodity, current + quantity);
+
+        // Fire trade event
+        this.processTradeTransaction(totalCost, commodity);
+
+        // Update economy
+        const stationFaction = this.getNearestStationFaction();
+        this.starSystem.processEconomicTrade('PLAYER', stationFaction, commodity, quantity, totalCost);
+
+        console.log(`✅ Bought ${quantity} ${commodity} for ${totalCost.toFixed(0)} credits (${this.playerCredits.toFixed(0)} remaining)`);
+        return true;
+    }
+
+    /**
+     * Sell commodity to nearest station
+     */
+    public sellCommodity(commodity: string, quantity: number): boolean {
+        // Check if player has commodity
+        const playerHas = this.playerCargo.get(commodity) || 0;
+        if (playerHas < quantity) {
+            console.log(`❌ Not enough ${commodity}! Have ${playerHas}, trying to sell ${quantity}`);
+            return false;
+        }
+
+        // Get market price (sell at 80% of buy price)
+        const marketPrice = this.starSystem.economicNeeds.calculateMarketPrice(
+            commodity,
+            'station_1',
+            this.getBasePriceFor(commodity)
+        );
+        const sellPrice = marketPrice * 0.8;
+        const totalValue = sellPrice * quantity;
+
+        // Execute sale
+        this.playerCredits += totalValue;
+        this.playerCargo.set(commodity, playerHas - quantity);
+
+        // Fire trade event
+        this.processTradeTransaction(totalValue, commodity);
+
+        // Update economy
+        const stationFaction = this.getNearestStationFaction();
+        this.starSystem.processEconomicTrade(stationFaction, 'PLAYER', commodity, quantity, totalValue);
+
+        console.log(`✅ Sold ${quantity} ${commodity} for ${totalValue.toFixed(0)} credits (${this.playerCredits.toFixed(0)} total)`);
+        return true;
+    }
+
+    /**
+     * Get base price for commodity
+     */
+    private getBasePriceFor(commodity: string): number {
+        const basePrices: Record<string, number> = {
+            'FOOD': 100,
+            'WATER': 50,
+            'FUEL': 200,
+            'ELECTRONICS': 500,
+            'WEAPONS': 1000,
+            'MEDICINE': 300
+        };
+        return basePrices[commodity] || 100;
+    }
+
+    /**
+     * Get nearest station faction
+     */
+    private getNearestStationFaction(): string {
+        const shipPos = this.spacecraft.getPosition();
+        let nearestStation = null;
+        let nearestDist = Infinity;
+
+        for (const station of this.starSystem.stations) {
+            const dx = station.position.x - shipPos.x;
+            const dy = station.position.y - shipPos.y;
+            const dz = station.position.z - shipPos.z;
+            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestStation = station;
+            }
+        }
+
+        return nearestStation?.faction || 'INDEPENDENT';
     }
 
     /**
