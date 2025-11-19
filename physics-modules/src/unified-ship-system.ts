@@ -1,13 +1,18 @@
 /**
  * Unified Ship System - Complete Integration Layer
  *
+ * @deprecated Use CompleteShip from complete-ship.ts instead
+ * This class is kept for backwards compatibility but will be removed in a future version.
+ * CompleteShip has ALL functionality including subsystems (power, thermal, life support, etc.)
+ * that this class is missing.
+ *
  * This module provides a single, cohesive interface that integrates:
  * - IntegratedShip (world physics integration)
  * - Spacecraft (full subsystems)
  * - WeaponSystem (combat)
  * - World (environment)
  *
- * Use this class instead of managing multiple ship classes separately.
+ * Use CompleteShip instead of managing multiple ship classes separately.
  */
 
 import { Vector3, VectorMath, Quaternion } from './math-utils';
@@ -25,10 +30,10 @@ export interface UnifiedShipConfig {
   orientation?: Quaternion;
   angularVelocity?: Vector3;
 
-  // Hull configuration
+  // Hull configuration (proper types from hull-damage.ts)
   hullConfig?: {
-    compartments: any[];
-    armorLayers: any[];
+    compartments: import('./hull-damage').Compartment[];
+    armorLayers: import('./hull-damage').ArmorLayer[];
   };
 
   // Weapon mounts
@@ -37,6 +42,8 @@ export interface UnifiedShipConfig {
 
 /**
  * Unified Ship - Complete integration of all ship systems
+ *
+ * @deprecated Use CompleteShip from complete-ship.ts instead
  */
 export class UnifiedShipSystem {
   private integratedShip: IntegratedShip;
@@ -263,6 +270,8 @@ export class CombatManager {
 
 /**
  * Complete Simulation System - integrates everything
+ *
+ * @deprecated Use CompleteSimulation from complete-ship.ts instead
  */
 export class CompleteSimulationSystem {
   private world: World;

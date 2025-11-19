@@ -171,12 +171,44 @@ export class WeaponsPanel {
                 const marker = isSelected ? '>' : ' ';
                 ctx.fillText(`${marker} ${weapon.type.toUpperCase()}: ${weapon.status}`, 60, y);
 
-                if (weapon.ammo !== undefined) {
+                // Enhanced ammo display with percentage
+                if (weapon.ammo !== undefined && weapon.maxAmmo !== undefined) {
+                    const ammoPercent = (weapon.ammo / weapon.maxAmmo) * 100;
+                    const ammoColor = ammoPercent > 50 ? this.palette.primary :
+                                     ammoPercent > 20 ? this.palette.warning :
+                                     this.palette.danger;
+                    ctx.fillStyle = ammoColor;
+                    ctx.fillText(`[${weapon.ammo}/${weapon.maxAmmo}]`, 260, y);
+                } else if (weapon.ammo !== undefined) {
                     ctx.fillStyle = this.palette.muted;
                     ctx.fillText(`[${weapon.ammo}]`, 260, y);
                 }
 
-                y += 20;
+                y += 18;
+
+                // Cooldown timer
+                if (weapon.cooldown !== undefined && weapon.cooldown > 0) {
+                    ctx.fillStyle = this.palette.warning;
+                    ctx.font = '12px "Courier New"';
+                    ctx.fillText(`  Cooldown: ${weapon.cooldown.toFixed(1)}s`, 70, y);
+                    ctx.font = '14px "Courier New"';
+                    y += 18;
+                }
+
+                // Hit probability (if selected and target is selected)
+                if (isSelected && targets.length > 0 && this.selectedTargetIndex < targets.length) {
+                    const hitProb = this.calculateHitProbability(weapon, targets[this.selectedTargetIndex]);
+                    const probColor = hitProb > 70 ? this.palette.primary :
+                                     hitProb > 40 ? this.palette.warning :
+                                     this.palette.danger;
+                    ctx.fillStyle = probColor;
+                    ctx.font = '12px "Courier New"';
+                    ctx.fillText(`  Hit Prob: ${hitProb.toFixed(0)}%`, 70, y);
+                    ctx.font = '14px "Courier New"';
+                    y += 18;
+                }
+
+                y += 4;
                 weaponIndex++;
             });
         }
@@ -185,13 +217,37 @@ export class WeaponsPanel {
         if (weaponsState.missileLaunchers) {
             weaponsState.missileLaunchers.forEach((launcher: any) => {
                 const isSelected = weaponIndex === this.selectedWeaponIndex;
-                const statusColor = launcher.loaded > 0 ? this.palette.primary : this.palette.muted;
+                const ammoPercent = (launcher.loaded / launcher.capacity) * 100;
+                const statusColor = ammoPercent > 50 ? this.palette.primary :
+                                   ammoPercent > 20 ? this.palette.warning :
+                                   this.palette.danger;
 
                 ctx.fillStyle = statusColor;
                 const marker = isSelected ? '>' : ' ';
                 ctx.fillText(`${marker} MISSILE: ${launcher.loaded}/${launcher.capacity}`, 60, y);
 
-                y += 20;
+                y += 18;
+
+                // Reload time (if reloading)
+                if (launcher.reloading && launcher.reloadTimeRemaining > 0) {
+                    ctx.fillStyle = this.palette.warning;
+                    ctx.font = '12px "Courier New"';
+                    ctx.fillText(`  Reloading: ${launcher.reloadTimeRemaining.toFixed(1)}s`, 70, y);
+                    ctx.font = '14px "Courier New"';
+                    y += 18;
+                }
+
+                // Hit probability for missiles (if selected)
+                if (isSelected && targets.length > 0 && this.selectedTargetIndex < targets.length) {
+                    const hitProb = 85; // Missiles have high hit probability due to guidance
+                    ctx.fillStyle = this.palette.primary;
+                    ctx.font = '12px "Courier New"';
+                    ctx.fillText(`  Hit Prob: ${hitProb}% (Guided)`, 70, y);
+                    ctx.font = '14px "Courier New"';
+                    y += 18;
+                }
+
+                y += 4;
                 weaponIndex++;
             });
         }
@@ -206,12 +262,38 @@ export class WeaponsPanel {
                 const marker = isSelected ? '>' : ' ';
                 ctx.fillText(`${marker} LASER: ${laser.status}`, 60, y);
 
+                // Enhanced capacitor charge display
                 if (laser.capacitorCharge !== undefined) {
-                    ctx.fillStyle = this.palette.muted;
-                    ctx.fillText(`[${(laser.capacitorCharge * 100).toFixed(0)}%]`, 260, y);
+                    const chargePercent = laser.capacitorCharge * 100;
+                    const chargeColor = chargePercent > 80 ? this.palette.primary :
+                                       chargePercent > 30 ? this.palette.warning :
+                                       this.palette.danger;
+                    ctx.fillStyle = chargeColor;
+                    ctx.fillText(`[${chargePercent.toFixed(0)}%]`, 260, y);
                 }
 
-                y += 20;
+                y += 18;
+
+                // Recharge rate
+                if (laser.capacitorCharge !== undefined && laser.capacitorCharge < 1.0) {
+                    ctx.fillStyle = this.palette.muted;
+                    ctx.font = '12px "Courier New"';
+                    ctx.fillText(`  Recharging...`, 70, y);
+                    ctx.font = '14px "Courier New"';
+                    y += 18;
+                }
+
+                // Hit probability for lasers (nearly 100% if charged)
+                if (isSelected && targets.length > 0 && this.selectedTargetIndex < targets.length && laser.ready) {
+                    const hitProb = 95; // Lasers are extremely accurate
+                    ctx.fillStyle = this.palette.primary;
+                    ctx.font = '12px "Courier New"';
+                    ctx.fillText(`  Hit Prob: ${hitProb}% (Instant)`, 70, y);
+                    ctx.font = '14px "Courier New"';
+                    y += 18;
+                }
+
+                y += 4;
                 weaponIndex++;
             });
         }
@@ -336,5 +418,61 @@ export class WeaponsPanel {
         ctx.fillStyle = this.palette.muted;
         ctx.font = '12px "Courier New"';
         ctx.fillText('S=Safety P=PointDef A=AutoEng W/X=Weapon T=Target F=Fire E=Engage J=EW C/D=CM', 40, hintsY);
+    }
+
+    /**
+     * Calculate hit probability for kinetic weapons based on distance, relative velocity, and weapon characteristics
+     */
+    private calculateHitProbability(weapon: any, target: any): number {
+        // Calculate distance to target
+        const dx = target.position.x;
+        const dy = target.position.y;
+        const dz = target.position.z;
+        const distance = Math.sqrt(dx*dx + dy*dy + dz*dz) * 1000; // Convert km to meters
+
+        // Base hit probability by weapon type
+        let baseProb = 50;
+        if (weapon.type === 'railgun') {
+            baseProb = 75; // Railguns are more accurate
+        } else if (weapon.type === 'autocannon') {
+            baseProb = 60; // Autocannons have decent accuracy
+        }
+
+        // Distance factor (probability decreases with distance)
+        const maxRange = weapon.maxRange || 1000000; // Default 1000km
+        const distanceFactor = 1 - (distance / maxRange);
+        const distanceModifier = Math.max(0, Math.min(1, distanceFactor));
+
+        // Relative velocity factor (harder to hit fast-moving targets)
+        let relativeVelocityModifier = 1.0;
+        if (target.velocity) {
+            const relVel = Math.sqrt(
+                target.velocity.x ** 2 +
+                target.velocity.y ** 2 +
+                target.velocity.z ** 2
+            );
+            // Reduce probability for targets moving > 100 m/s
+            if (relVel > 100) {
+                relativeVelocityModifier = Math.max(0.3, 1 - ((relVel - 100) / 1000));
+            }
+        }
+
+        // Target size factor (larger targets are easier to hit)
+        let sizeModifier = 1.0;
+        if (target.type === 'capital_ship') {
+            sizeModifier = 1.2;
+        } else if (target.type === 'fighter') {
+            sizeModifier = 0.7;
+        } else if (target.type === 'missile') {
+            sizeModifier = 0.5;
+        }
+
+        // Calculate final probability
+        let hitProb = baseProb * distanceModifier * relativeVelocityModifier * sizeModifier;
+
+        // Clamp to reasonable range
+        hitProb = Math.max(5, Math.min(95, hitProb));
+
+        return hitProb;
     }
 }

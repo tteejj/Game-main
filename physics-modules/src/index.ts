@@ -33,7 +33,7 @@ export type {
   SolarPanel,
   SatelliteBattery,
   PowerBus,
-  ThermalComponent,
+  ThermalComponent as SatelliteThermalComponent,
   Radiator,
   ReactionWheel,
   Magnetorquer,
@@ -123,3 +123,67 @@ export type {
   VehicleState,
   PhysicsForces
 } from './unified-physics-engine';
+
+// ========== PERFORMANCE OPTIMIZATIONS ⚡ ==========
+// Spatial partitioning, object pooling, LOD, and performance monitoring
+export {
+  SpatialHashGrid,
+  ObjectPool,
+  LODManager,
+  FrustumCuller,
+  PerformanceMonitor,
+  BatchRenderer
+} from './performance-optimizations';
+export type {
+  LODLevel,
+  PerformanceMetric,
+  BoundingBox
+} from './performance-optimizations';
+
+// ========== COMPLETE SHIP SYSTEM ⭐ ==========
+// The unified ship implementation with ALL features
+export {
+  CompleteShip,
+  CompleteSimulation
+} from './complete-ship';
+export type {
+  CompleteShipConfig
+} from './complete-ship';
+
+// Ship components (LOW-LEVEL - usually accessed via CompleteShip)
+export { IntegratedShip, SimulationController } from './integrated-ship';
+export type { ShipConfiguration } from './integrated-ship';
+
+export { WeaponSystem, Projectile, Missile, ProjectileManager, MissileManager, WeaponType } from './weapons';
+export type { Weapon, FiringResult } from './weapons';
+
+export { ShipCombatComputer } from './ship-combat';
+export type { FireSolution, TargetInfo } from './ship-combat';
+
+export { HullStructure, HullDamageSystem, PenetrationCalculator, MaterialType, DamageType } from './hull-damage';
+export type { Compartment, ArmorLayer, Breach, PenetrationResult, ImpactResult } from './hull-damage';
+
+export { PowerBudgetSystem, PowerSourceType, PowerPriority } from './power-budget';
+export type { PowerSource, PowerConsumer, BatteryBank } from './power-budget';
+
+export { ThermalBudgetSystem } from './thermal-budget';
+export type { ThermalComponent, ThermalCompartment, CoolingSystem } from './thermal-budget';
+
+export { LifeSupportSystem, CrewStatus } from './life-support';
+export type { CrewMember, LifeSupportConfig } from './life-support';
+
+export { SystemDamageManager, SystemType, SystemStatus } from './system-damage';
+export type { ShipSystem } from './system-damage';
+
+export { DamageControlSystem } from './damage-control';
+export type { RepairCrew } from './damage-control';
+
+// Ship templates and examples
+export { ShipTemplates } from './ship-configuration';
+export { createFrigate, runCombatExample } from './complete-ship-example';
+
+// DEPRECATED ship classes (use CompleteShip instead)
+/** @deprecated Use CompleteShip instead */
+export { UnifiedShip } from './unified-ship';
+/** @deprecated Use CompleteShip instead */
+export { UnifiedShipSystem, CompleteSimulationSystem } from './unified-ship-system';

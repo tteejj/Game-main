@@ -35,6 +35,10 @@ window.addEventListener('DOMContentLoaded', () => {
         input.onStationSwitch = (stationNum) => ui.setActiveStation(stationNum);
         input.onKeyPress = (key) => ui.handleInput(key);
 
+        // Pass game reference to UI for NPC updates
+        (window as any).game = game;
+        (window as any).ui = ui;
+
         // Hide loading screen
         setTimeout(() => {
             loadingEl.style.display = 'none';

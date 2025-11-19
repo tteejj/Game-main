@@ -119,16 +119,31 @@ export class NavigationPanel {
                 }
                 break;
 
-            // Autopilot controls
+            // Autopilot controls - cycle through modes
             case 'a':
-                const autopilotMode = this.spacecraft.getAutopilotMode();
-                if (autopilotMode === 'off') {
-                    this.spacecraft.setAutopilotMode('attitude_hold');
-                    console.log('Autopilot: ATTITUDE HOLD');
-                } else {
-                    this.spacecraft.setAutopilotMode('off');
-                    console.log('Autopilot: OFF');
+                const autopilotModes = ['off', 'altitude_hold', 'vertical_speed_hold',
+                                       'suicide_burn', 'hover', 'landing', 'docking', 'orbital_insertion'];
+                const currentMode = this.spacecraft.getAutopilotMode();
+                const currentIdx = autopilotModes.indexOf(currentMode);
+                const nextMode = autopilotModes[(currentIdx + 1) % autopilotModes.length];
+                this.spacecraft.setAutopilotMode(nextMode);
+                console.log(`Autopilot: ${nextMode.toUpperCase().replace(/_/g, ' ')}`);
+                break;
+            case 'd':
+                // Set docking target (use selected contact or nearby station)
+                const dockingContacts = this.spacecraft.getRadarContacts();
+                if (dockingContacts.length > this.selectedContactIndex) {
+                    const target = dockingContacts[this.selectedContactIndex];
+                    if (target.position) {
+                        this.spacecraft.setDockingTarget(target.position);
+                        console.log(`Docking target set: ${target.id || 'Contact'}`);
+                    }
                 }
+                break;
+            case 'i':
+                // Set orbital insertion altitude (100km default, can be customized)
+                this.spacecraft.setTargetOrbitAltitude(100000);
+                console.log('Orbital insertion target: 100km');
                 break;
             case 'p':
                 // Plot intercept
@@ -291,7 +306,33 @@ export class NavigationPanel {
         const autopilotMode = this.spacecraft.getAutopilotMode();
         const apColor = autopilotMode !== 'off' ? this.palette.warning : this.palette.muted;
         ctx.fillStyle = apColor;
-        ctx.fillText(`AUTOPILOT: ${autopilotMode.toUpperCase()}  (A)`, 470, y);
+        const modeText = autopilotMode.toUpperCase().replace(/_/g, ' ');
+        ctx.fillText(`AUTOPILOT: ${modeText}  (A)`, 470, y);
+
+        // Show autopilot phase details for advanced modes
+        if (['landing', 'docking', 'orbital_insertion'].includes(autopilotMode)) {
+            y += 18;
+            const phases = this.spacecraft.getAutopilotPhases();
+            ctx.fillStyle = this.palette.secondary;
+            ctx.font = '12px "Courier New"';
+
+            if (autopilotMode === 'landing') {
+                ctx.fillText(`  Phase: ${phases.landing.toUpperCase()}`, 470, y);
+            } else if (autopilotMode === 'docking') {
+                ctx.fillText(`  Phase: ${phases.docking.toUpperCase()}`, 470, y);
+            } else if (autopilotMode === 'orbital_insertion') {
+                ctx.fillText(`  Phase: ${phases.orbitalInsertion.toUpperCase().replace(/_/g, ' ')}`, 470, y);
+            }
+
+            ctx.font = '14px "Courier New"';
+        }
+
+        // Additional autopilot controls
+        y += 20;
+        ctx.fillStyle = this.palette.muted;
+        ctx.font = '11px "Courier New"';
+        ctx.fillText('D=DockTgt I=OrbAlt', 470, y);
+        ctx.font = '14px "Courier New"';
 
         // Contacts
         y += 50;
