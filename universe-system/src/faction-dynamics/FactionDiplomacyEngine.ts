@@ -18,11 +18,18 @@ export interface FactionRelationship {
   // Current diplomatic status
   status: DiplomaticStatus;
   relationshipValue: number;      // -100 to +100
+  opinion: number;                // -100 to +100 (how they view each other)
 
-  // Trends
+  // Trends and momentum
   recentInteractions: DiplomaticInteraction[];
   trend: RelationshipTrend;
   trendStrength: number;          // 0-1 (how fast changing)
+  momentum: number;               // Trend continuation tendency
+  inertia: number;                // Resistance to change (0-1)
+  history: RelationshipChange[];  // Track opinion changes
+
+  // Diplomatic capital
+  diplomaticCapital: number;      // Influence points (0-100)
 
   // Treaties and agreements
   treaties: Treaty[];
@@ -47,6 +54,12 @@ export interface FactionRelationship {
   militaryBalance: number;          // -1 to +1 (negative = A weaker)
   culturalCompatibility: number;    // 0-1
   territorialDisputes: number;      // 0-10 (number of disputed systems)
+}
+
+export interface RelationshipChange {
+  timestamp: number;
+  delta: number;                  // Change amount
+  reason: string;
 }
 
 export type DiplomaticStatus =
@@ -774,5 +787,176 @@ export class FactionDiplomacyEngine {
 
     this.activeWars.delete(war.id);
     this.completedWars.push(war);
+  }
+
+  // ====================================================================
+  // SOPHISTICATED DIPLOMACY ALGORITHMS
+  // ====================================================================
+
+  /**
+   * Update relationship momentum - relationships have inertia and trends continue
+   */
+  public updateRelationshipMomentum(relationship: FactionRelationship, deltaTime: number): void {
+    const daysDelta = deltaTime / 86400;
+
+    // Initialize history if needed
+    if (!relationship.history) {
+      relationship.history = [];
+    }
+
+    // Calculate trend (improving or deteriorating)
+    const recentChanges = relationship.history.slice(-10);
+    const trend = recentChanges.length > 0
+      ? recentChanges.reduce((sum, change) => sum + change.delta, 0) / recentChanges.length
+      : 0;
+
+    // Momentum continues trend (with decay)
+    const momentumEffect = trend * 0.1 * daysDelta;
+    const dampening = 0.9; // Momentum gradually decreases
+
+    relationship.opinion += momentumEffect * dampening;
+    relationship.momentum = trend;
+
+    // Strong relationships harder to change (inertia)
+    const extremity = Math.abs(relationship.opinion - 0);  // Opinion from neutral (0)
+    relationship.inertia = Math.min(0.5, extremity / 200); // 0 at neutral, 0.5 at extremes
+  }
+
+  /**
+   * Spend diplomatic capital to achieve goals
+   */
+  public spendDiplomaticCapital(
+    faction: string,
+    target: string,
+    goal: 'IMPROVE_RELATIONS' | 'REQUEST_FAVOR' | 'PRESSURE',
+    amount: number
+  ): boolean {
+    const relationship = this.getRelationship(faction, target);
+    const capital = relationship.diplomaticCapital || 0;
+
+    if (capital < amount) return false;
+
+    // Spend capital
+    relationship.diplomaticCapital -= amount;
+
+    // Apply effect based on goal
+    switch (goal) {
+      case 'IMPROVE_RELATIONS':
+        this.modifyRelationshipWithCapital(relationship, amount * 2, 'Diplomatic effort');
+        break;
+      case 'REQUEST_FAVOR':
+        // Process favor request (simplified)
+        break;
+      case 'PRESSURE':
+        // Apply political pressure (simplified)
+        break;
+    }
+
+    return true;
+  }
+
+  /**
+   * Modify relationship and track capital
+   */
+  private modifyRelationshipWithCapital(
+    relationship: FactionRelationship,
+    delta: number,
+    reason: string
+  ): void {
+    // Account for inertia
+    const actualDelta = delta * (1 - relationship.inertia);
+
+    relationship.opinion += actualDelta;
+    relationship.opinion = Math.max(-100, Math.min(100, relationship.opinion));
+
+    // Track change in history
+    if (!relationship.history) {
+      relationship.history = [];
+    }
+    relationship.history.push({
+      timestamp: Date.now() / 1000,
+      delta: actualDelta,
+      reason
+    });
+
+    // Keep last 20 changes
+    if (relationship.history.length > 20) {
+      relationship.history = relationship.history.slice(-20);
+    }
+  }
+
+  /**
+   * Earn diplomatic capital through positive interactions
+   */
+  public earnDiplomaticCapital(event: HistoricalEvent, factions: string[]): void {
+    if (event.category === 'DIPLOMATIC' || event.category === 'ECONOMIC') {
+      for (let i = 0; i < factions.length; i++) {
+        for (let j = i + 1; j < factions.length; j++) {
+          const relationship = this.getRelationship(factions[i], factions[j]);
+          const earnAmount = event.severity * 0.5;
+          relationship.diplomaticCapital = (relationship.diplomaticCapital || 0) + earnAmount;
+          relationship.diplomaticCapital = Math.min(100, relationship.diplomaticCapital);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get diplomatic capital between factions
+   */
+  private getDiplomaticCapital(faction: string, target: string): number {
+    const relationship = this.getRelationship(faction, target);
+    return relationship.diplomaticCapital || 0;
+  }
+
+  /**
+   * Modify diplomatic capital
+   */
+  private modifyDiplomaticCapital(faction: string, target: string, amount: number): void {
+    const relationship = this.getRelationship(faction, target);
+    relationship.diplomaticCapital = (relationship.diplomaticCapital || 0) + amount;
+    relationship.diplomaticCapital = Math.max(0, Math.min(100, relationship.diplomaticCapital));
+  }
+
+  /**
+   * Event-driven relationship changes with momentum
+   */
+  public processEventImpact(event: HistoricalEvent, affectedFactions: string[]): void {
+    for (let i = 0; i < affectedFactions.length; i++) {
+      for (let j = i + 1; j < affectedFactions.length; j++) {
+        const relationship = this.getRelationship(affectedFactions[i], affectedFactions[j]);
+
+        let impact = 0;
+        let reason = '';
+
+        // Calculate impact based on event type
+        switch (event.type) {
+          case 'TRADE_COMPLETED':
+            impact = event.severity * 0.5;
+            reason = 'Successful trade';
+            break;
+          case 'PIRATE_RAID':
+            impact = -event.severity * 0.3;
+            reason = 'Pirate incident';
+            break;
+          case 'ALLIANCE_FORMED':
+            impact = event.severity * 2;
+            reason = 'Alliance formation';
+            break;
+          case 'WAR_DECLARED':
+            impact = -event.severity * 3;
+            reason = 'War declaration';
+            break;
+          case 'RESCUE':
+            impact = event.severity;
+            reason = 'Rescue operation';
+            break;
+        }
+
+        if (impact !== 0) {
+          this.modifyRelationshipWithCapital(relationship, impact, reason);
+        }
+      }
+    }
   }
 }

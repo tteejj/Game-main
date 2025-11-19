@@ -11,8 +11,8 @@ export class SpacecraftAdapter {
     private updateCallbacks: Array<() => void> = [];
 
     // External sensor contacts (injected from game world)
-    private externalRadarContacts: any[] = [];
-    private externalOpticalContacts: any[] = [];
+    private externalRadarContacts: Record<string, unknown>[] = [];
+    private externalOpticalContacts: Record<string, unknown>[] = [];
 
     // Terrain data (injected from game world)
     private terrainAltitude: number = 0;
@@ -236,53 +236,53 @@ export class SpacecraftAdapter {
         this.spacecraft.weapons.engageTarget(target.id, weaponType, 'computer_assisted');
     }
 
-    getWeaponsState(): any {
+    getWeaponsState(): Record<string, unknown> {
         return this.spacecraft.weapons.getState();
     }
 
-    getWeaponsTargets(): any[] {
-        return this.spacecraft.weapons.getState().targets;
+    getWeaponsTargets(): unknown[] {
+        return this.spacecraft.weapons.getState().targets as unknown[];
     }
 
-    getEWState(): any {
+    getEWState(): Record<string, unknown> {
         return this.spacecraft.weapons.getEWState();
     }
 
-    getCountermeasuresState(): any {
+    getCountermeasuresState(): Record<string, unknown> {
         return this.spacecraft.weapons.getCountermeasuresState();
     }
 
     // ========== TELEMETRY GETTERS ==========
 
-    getState(): any {
-        return this.spacecraft.getState();
+    getState(): Record<string, unknown> {
+        return this.spacecraft.getState() as Record<string, unknown>;
     }
 
-    getNavigationTelemetry(): any {
+    getNavigationTelemetry(): Record<string, unknown> {
         return this.spacecraft.getNavigationTelemetry();
     }
 
-    getMainEngineState(): any {
+    getMainEngineState(): Record<string, unknown> {
         return this.spacecraft.mainEngine.getState();
     }
 
-    getElectricalState(): any {
-        return this.spacecraft.getState().electrical;
+    getElectricalState(): Record<string, unknown> {
+        return this.spacecraft.getState().electrical as Record<string, unknown>;
     }
 
-    getThermalState(): any {
-        return this.spacecraft.getState().thermal;
+    getThermalState(): Record<string, unknown> {
+        return this.spacecraft.getState().thermal as Record<string, unknown>;
     }
 
-    getFuelState(): any {
-        return this.spacecraft.getState().fuel;
+    getFuelState(): Record<string, unknown> {
+        return this.spacecraft.getState().fuel as Record<string, unknown>;
     }
 
-    getLifeSupportTelemetry(): any {
+    getLifeSupportTelemetry(): Record<string, unknown> {
         return this.spacecraft.getLifeSupportTelemetry();
     }
 
-    getSensorTelemetry(): any {
+    getSensorTelemetry(): Record<string, unknown> {
         return this.spacecraft.getSensorTelemetry();
     }
 
@@ -320,12 +320,12 @@ export class SpacecraftAdapter {
         return this.spacecraft.checkLandingSafety();
     }
 
-    getLandingGearTelemetry(): any {
+    getLandingGearTelemetry(): Record<string, unknown> {
         const telemetry = this.spacecraft.getLandingGearTelemetry();
 
         // Inject external terrain data
-        if (telemetry.terrainRadarActive) {
-            telemetry.terrainData = {
+        if ((telemetry as any).terrainRadarActive) {
+            (telemetry as any).terrainData = {
                 altitude: this.terrainAltitude,
                 slope: this.terrainSlope,
                 surfaceType: this.surfaceType
@@ -337,7 +337,7 @@ export class SpacecraftAdapter {
 
     // ========== DOCKING CONTROLS ==========
 
-    initiateDocking(portId: string, target: any): boolean {
+    initiateDocking(portId: string, target: Record<string, unknown>): boolean {
         return this.spacecraft.initiateDocking(portId, target);
     }
 
@@ -353,21 +353,21 @@ export class SpacecraftAdapter {
         return this.spacecraft.undock(portId);
     }
 
-    getDockingGuidance(): any {
+    getDockingGuidance(): Record<string, unknown> {
         return this.spacecraft.getDockingGuidance();
     }
 
-    getDockingTelemetry(): any {
+    getDockingTelemetry(): Record<string, unknown> {
         return this.spacecraft.getDockingTelemetry();
     }
 
     // ========== COOLANT/THERMAL CONTROLS ==========
 
-    getCoolantTelemetry(): any {
+    getCoolantTelemetry(): Record<string, unknown> {
         return this.spacecraft.getCoolantTelemetry();
     }
 
-    getThermalTelemetry(): any {
+    getThermalTelemetry(): Record<string, unknown> {
         return this.spacecraft.getThermalTelemetry();
     }
 
@@ -441,24 +441,24 @@ export class SpacecraftAdapter {
         this.spacecraft.dropRadarTrack(contactId);
     }
 
-    getRadarContacts(): any[] {
+    getRadarContacts(): Record<string, unknown>[] {
         // Combine internal sensor contacts with external game world contacts
         const internalContacts = this.spacecraft.getRadarContacts();
         return [...internalContacts, ...this.externalRadarContacts];
     }
 
-    getOpticalContacts(): any[] {
+    getOpticalContacts(): Record<string, unknown>[] {
         // Combine internal sensor contacts with external game world contacts
         const internalContacts = this.spacecraft.getOpticalContacts();
         return [...internalContacts, ...this.externalOpticalContacts];
     }
 
     // Inject external contacts from game world
-    injectRadarContacts(contacts: any[]): void {
+    injectRadarContacts(contacts: Record<string, unknown>[]): void {
         this.externalRadarContacts = contacts;
     }
 
-    injectOpticalContacts(contacts: any[]): void {
+    injectOpticalContacts(contacts: Record<string, unknown>[]): void {
         this.externalOpticalContacts = contacts;
     }
 
@@ -473,7 +473,7 @@ export class SpacecraftAdapter {
         return this.terrainAltitude;
     }
 
-    getESMContacts(): any[] {
+    getESMContacts(): Record<string, unknown>[] {
         return this.spacecraft.getESMContacts();
     }
 
@@ -483,11 +483,14 @@ export class SpacecraftAdapter {
 
     // ========== AUTOPILOT/NAV COMPUTER ==========
 
-    plotInterceptCourse(targetPosition: any, targetVelocity: any): any {
+    plotInterceptCourse(
+        targetPosition: Record<string, unknown>,
+        targetVelocity: Record<string, unknown>
+    ): Record<string, unknown> {
         return this.spacecraft.plotInterceptCourse(targetPosition, targetVelocity);
     }
 
-    getNavSolution(): any {
+    getNavSolution(): Record<string, unknown> {
         return this.spacecraft.getNavSolution();
     }
 

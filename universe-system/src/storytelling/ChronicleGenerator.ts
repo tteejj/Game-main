@@ -20,7 +20,44 @@ export interface Chronicle {
   themes: string[];                  // e.g. 'war', 'trade', 'discovery'
   namedEntities: Map<string, string>; // entity ID -> name/title in narrative
   createdAt: number;
+  causalChains?: CausalChain[];      // Identified cause-effect relationships
+  patterns?: HistoricalPattern[];    // Detected patterns in this chronicle
+  significance_breakdown?: {         // Detailed significance scoring
+    scope: number;
+    severity: number;
+    consequences: number;
+    uniqueness: number;
+    impact: number;
+  };
 }
+
+export interface CausalChain {
+  cause: string;                     // Event ID
+  effect: string;                    // Event ID
+  strength: number;                  // 0-1 (confidence in causality)
+  mechanism: string;                 // Description of how cause led to effect
+  timeDelay: number;                 // Seconds between events
+}
+
+export interface HistoricalPattern {
+  id: string;
+  type: PatternType;
+  description: string;
+  events: string[];                  // Event IDs in pattern
+  confidence: number;                // 0-1
+  significance: number;              // 0-10
+  previousOccurrences?: string[];   // IDs of similar patterns in history
+}
+
+export type PatternType =
+  | 'ESCALATION'                     // Conflict escalating
+  | 'CYCLE'                          // Repeating pattern
+  | 'DOMINO_EFFECT'                  // Chain reaction
+  | 'POWER_VACUUM'                   // Power shift creating instability
+  | 'BOOM_BUST'                      // Economic cycle
+  | 'REVENGE_SPIRAL'                 // Retaliatory actions
+  | 'ALLIANCE_CASCADE'               // Alliances forming in response
+  | 'HISTORICAL_PARALLEL';           // Similar to past events
 
 export type ChronicleType =
   | 'WAR_CHRONICLE'           // Story of a conflict
@@ -116,10 +153,17 @@ export class ChronicleGenerator {
   private legends: Map<string, Legend> = new Map();
   private prophecies: Map<string, Prophecy> = new Map();
   private factionHistories: Map<string, FactionHistory> = new Map();
+  private patterns: Map<string, HistoricalPattern> = new Map();
 
   private nextChronicleId = 1;
   private nextLegendId = 1;
   private nextProphecyId = 1;
+  private nextPatternId = 1;
+
+  // Configuration for pattern recognition
+  private readonly CAUSAL_TIME_WINDOW = 3600 * 24;  // 24 hours
+  private readonly MIN_CAUSAL_STRENGTH = 0.3;
+  private readonly PATTERN_CONFIDENCE_THRESHOLD = 0.6;
 
   constructor(history: HistoricalMemorySystem) {
     this.history = history;
@@ -175,7 +219,16 @@ export class ChronicleGenerator {
       end: Math.max(...events.map(e => e.timestamp))
     };
 
-    const significance = this.calculateChronicleSignificance(events);
+    // Enhanced significance calculation with breakdown
+    const significance_breakdown = this.calculateDetailedSignificance(events);
+    const significance = Object.values(significance_breakdown).reduce((sum, v) => sum + v, 0) / 5;
+
+    // Analyze causal relationships
+    const causalChains = this.analyzeCausalChains(events);
+
+    // Detect historical patterns
+    const patterns = this.detectPatterns(events, type);
+
     const themes = this.extractThemes(events);
     const namedEntities = this.buildNamedEntityMap(events);
 
@@ -194,7 +247,10 @@ export class ChronicleGenerator {
       sourceEvents: events.map(e => e.id),
       themes,
       namedEntities,
-      createdAt: Date.now() / 1000
+      createdAt: Date.now() / 1000,
+      causalChains,
+      patterns,
+      significance_breakdown
     };
   }
 
@@ -675,6 +731,441 @@ export class ChronicleGenerator {
     const uniqueParticipants = new Set(events.flatMap(e => e.participants)).size;
 
     return Math.min(10, avgSeverity + uniqueParticipants / 10);
+  }
+
+  // ====================================================================
+  // ADVANCED ANALYSIS - CAUSAL CHAINS
+  // ====================================================================
+
+  /**
+   * Analyze events to identify cause-and-effect relationships
+   * Uses temporal proximity, participant overlap, and logical connections
+   */
+  private analyzeCausalChains(events: HistoricalEvent[]): CausalChain[] {
+    const chains: CausalChain[] = [];
+    const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
+
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const cause = sorted[i];
+        const effect = sorted[j];
+
+        // Calculate causal strength
+        const strength = this.calculateCausalStrength(cause, effect);
+
+        if (strength >= this.MIN_CAUSAL_STRENGTH) {
+          chains.push({
+            cause: cause.id,
+            effect: effect.id,
+            strength,
+            mechanism: this.inferCausalMechanism(cause, effect),
+            timeDelay: effect.timestamp - cause.timestamp
+          });
+        }
+
+        // Stop looking if too much time has passed
+        if (effect.timestamp - cause.timestamp > this.CAUSAL_TIME_WINDOW) {
+          break;
+        }
+      }
+    }
+
+    return chains;
+  }
+
+  /**
+   * Calculate strength of causal relationship between two events
+   * Based on:
+   * - Temporal proximity (closer = stronger)
+   * - Participant overlap (same actors = stronger)
+   * - Category relationship (logical connection)
+   * - Severity ratio (cause should be significant enough)
+   */
+  private calculateCausalStrength(cause: HistoricalEvent, effect: HistoricalEvent): number {
+    let strength = 0;
+
+    // 1. Temporal proximity (40% weight)
+    const timeDiff = effect.timestamp - cause.timestamp;
+    if (timeDiff <= 0) return 0;  // Effect can't precede cause
+
+    const temporalScore = Math.exp(-timeDiff / (this.CAUSAL_TIME_WINDOW / 3));
+    strength += temporalScore * 0.4;
+
+    // 2. Participant overlap (30% weight)
+    const causeParticipants = new Set(cause.participants);
+    const effectParticipants = new Set(effect.participants);
+    const overlap = [...causeParticipants].filter(p => effectParticipants.has(p)).length;
+    const maxParticipants = Math.max(causeParticipants.size, effectParticipants.size);
+    const overlapRatio = maxParticipants > 0 ? overlap / maxParticipants : 0;
+    strength += overlapRatio * 0.3;
+
+    // 3. Category relationship (20% weight)
+    const categoryScore = this.calculateCategoryConnection(cause.category, effect.category);
+    strength += categoryScore * 0.2;
+
+    // 4. Severity relationship (10% weight)
+    // Cause should be significant enough to cause effect
+    const severityRatio = Math.min(1, cause.severity / Math.max(1, effect.severity));
+    strength += severityRatio * 0.1;
+
+    return Math.min(1, strength);
+  }
+
+  /**
+   * Determine how strongly two event categories are causally related
+   */
+  private calculateCategoryConnection(causeCategory: string, effectCategory: string): number {
+    // Same category = strong connection
+    if (causeCategory === effectCategory) return 1.0;
+
+    // Known causal relationships
+    const strongLinks: Record<string, string[]> = {
+      'MILITARY': ['MILITARY', 'POLITICAL', 'ECONOMIC', 'SOCIAL'],
+      'ECONOMIC': ['ECONOMIC', 'SOCIAL', 'POLITICAL'],
+      'POLITICAL': ['MILITARY', 'DIPLOMATIC', 'ECONOMIC'],
+      'SOCIAL': ['SOCIAL', 'POLITICAL'],
+      'DISCOVERY': ['ECONOMIC', 'SOCIAL', 'TECHNOLOGICAL']
+    };
+
+    if (strongLinks[causeCategory]?.includes(effectCategory)) {
+      return 0.7;
+    }
+
+    return 0.3;  // Weak connection
+  }
+
+  /**
+   * Infer the mechanism by which cause led to effect
+   */
+  private inferCausalMechanism(cause: HistoricalEvent, effect: HistoricalEvent): string {
+    const overlap = cause.participants.filter(p => effect.participants.includes(p));
+
+    if (cause.category === 'MILITARY' && effect.category === 'MILITARY') {
+      return overlap.length > 0 ? 'Retaliatory action' : 'Escalation';
+    }
+
+    if (cause.category === 'ECONOMIC' && effect.category === 'ECONOMIC') {
+      return 'Market reaction';
+    }
+
+    if (cause.category === 'MILITARY' && effect.category === 'ECONOMIC') {
+      return 'Economic disruption from conflict';
+    }
+
+    if (cause.category === 'POLITICAL' && effect.category === 'MILITARY') {
+      return 'Political decision leading to military action';
+    }
+
+    if (overlap.length > 0) {
+      return 'Direct consequence';
+    }
+
+    return 'Indirect influence';
+  }
+
+  // ====================================================================
+  // ADVANCED ANALYSIS - PATTERN RECOGNITION
+  // ====================================================================
+
+  /**
+   * Detect historical patterns in events
+   * Identifies cycles, escalations, domino effects, etc.
+   */
+  private detectPatterns(events: HistoricalEvent[], chronicleType: ChronicleType): HistoricalPattern[] {
+    const patterns: HistoricalPattern[] = [];
+
+    // 1. Detect escalation patterns
+    const escalation = this.detectEscalation(events);
+    if (escalation && escalation.confidence >= this.PATTERN_CONFIDENCE_THRESHOLD) {
+      patterns.push(escalation);
+    }
+
+    // 2. Detect revenge spirals
+    const revengeSpiral = this.detectRevengeSpiral(events);
+    if (revengeSpiral && revengeSpiral.confidence >= this.PATTERN_CONFIDENCE_THRESHOLD) {
+      patterns.push(revengeSpiral);
+    }
+
+    // 3. Detect domino effects
+    const dominoEffect = this.detectDominoEffect(events);
+    if (dominoEffect && dominoEffect.confidence >= this.PATTERN_CONFIDENCE_THRESHOLD) {
+      patterns.push(dominoEffect);
+    }
+
+    // 4. Detect power vacuums
+    const powerVacuum = this.detectPowerVacuum(events);
+    if (powerVacuum && powerVacuum.confidence >= this.PATTERN_CONFIDENCE_THRESHOLD) {
+      patterns.push(powerVacuum);
+    }
+
+    // 5. Detect boom-bust cycles
+    const boomBust = this.detectBoomBust(events);
+    if (boomBust && boomBust.confidence >= this.PATTERN_CONFIDENCE_THRESHOLD) {
+      patterns.push(boomBust);
+    }
+
+    // Store patterns for future reference
+    for (const pattern of patterns) {
+      this.patterns.set(pattern.id, pattern);
+    }
+
+    return patterns;
+  }
+
+  /**
+   * Detect escalation pattern - events growing in severity
+   */
+  private detectEscalation(events: HistoricalEvent[]): HistoricalPattern | null {
+    if (events.length < 3) return null;
+
+    const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Check if severity is generally increasing
+    let increases = 0;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].severity > sorted[i - 1].severity) {
+        increases++;
+      }
+    }
+
+    const escalationRatio = increases / (sorted.length - 1);
+
+    if (escalationRatio >= 0.6) {  // 60% of events escalate
+      const avgIncrease = sorted.reduce((sum, e, i) => {
+        if (i === 0) return 0;
+        return sum + (e.severity - sorted[i - 1].severity);
+      }, 0) / (sorted.length - 1);
+
+      return {
+        id: `pattern_${this.nextPatternId++}`,
+        type: 'ESCALATION',
+        description: `Events escalated from severity ${sorted[0].severity} to ${sorted[sorted.length - 1].severity}`,
+        events: sorted.map(e => e.id),
+        confidence: escalationRatio,
+        significance: Math.min(10, avgIncrease * 2),
+        previousOccurrences: this.findSimilarPatterns('ESCALATION')
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect revenge spiral - alternating attacks between same parties
+   */
+  private detectRevengeSpiral(events: HistoricalEvent[]): HistoricalPattern | null {
+    const militaryEvents = events.filter(e => e.category === 'MILITARY');
+    if (militaryEvents.length < 3) return null;
+
+    const sorted = [...militaryEvents].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Look for alternating participant patterns
+    let alternations = 0;
+    const participantSets: Set<string>[] = sorted.map(e => new Set(e.participants));
+
+    for (let i = 2; i < participantSets.length; i++) {
+      // Check if event i has similar participants to event i-2 (skipping i-1)
+      const similarity1 = this.setOverlap(participantSets[i], participantSets[i - 2]);
+      const similarity2 = this.setOverlap(participantSets[i - 1], participantSets[i]);
+
+      if (similarity1 > 0.5 && similarity2 > 0.5) {
+        alternations++;
+      }
+    }
+
+    const spiralRatio = alternations / Math.max(1, sorted.length - 2);
+
+    if (spiralRatio >= 0.5) {
+      return {
+        id: `pattern_${this.nextPatternId++}`,
+        type: 'REVENGE_SPIRAL',
+        description: 'Tit-for-tat retaliatory attacks between factions',
+        events: sorted.map(e => e.id),
+        confidence: spiralRatio,
+        significance: Math.min(10, sorted.length),
+        previousOccurrences: this.findSimilarPatterns('REVENGE_SPIRAL')
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect domino effect - one event triggering a cascade
+   */
+  private detectDominoEffect(events: HistoricalEvent[]): HistoricalPattern | null {
+    if (events.length < 4) return null;
+
+    const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Look for rapid succession of events with participant spillover
+    const chains = this.analyzeCausalChains(events);
+
+    // Find longest causal chain
+    const chainLengths = new Map<string, number>();
+    for (const chain of chains) {
+      chainLengths.set(chain.effect, (chainLengths.get(chain.effect) || 0) + 1);
+    }
+
+    const maxChainLength = Math.max(...Array.from(chainLengths.values()), 0);
+
+    if (maxChainLength >= 3 && chains.length >= events.length * 0.5) {
+      return {
+        id: `pattern_${this.nextPatternId++}`,
+        type: 'DOMINO_EFFECT',
+        description: `Chain reaction: initial event triggered ${maxChainLength} subsequent events`,
+        events: sorted.map(e => e.id),
+        confidence: Math.min(1, chains.length / events.length),
+        significance: Math.min(10, maxChainLength),
+        previousOccurrences: this.findSimilarPatterns('DOMINO_EFFECT')
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect power vacuum - major power decline followed by conflicts
+   */
+  private detectPowerVacuum(events: HistoricalEvent[]): HistoricalPattern | null {
+    if (events.length < 4) return null;
+
+    const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Look for pattern: high-severity event followed by increased conflicts
+    for (let i = 0; i < sorted.length - 3; i++) {
+      const trigger = sorted[i];
+
+      if (trigger.severity >= 7 && trigger.category === 'MILITARY') {
+        // Count military events in next window
+        const windowEnd = trigger.timestamp + 3600 * 24 * 3;  // 3 days
+        const subsequentConflicts = sorted.slice(i + 1).filter(e =>
+          e.category === 'MILITARY' &&
+          e.timestamp <= windowEnd &&
+          !e.participants.some(p => trigger.participants.includes(p))  // Different participants
+        );
+
+        if (subsequentConflicts.length >= 3) {
+          return {
+            id: `pattern_${this.nextPatternId++}`,
+            type: 'POWER_VACUUM',
+            description: 'Major power disruption led to widespread instability',
+            events: [trigger, ...subsequentConflicts].map(e => e.id),
+            confidence: 0.7,
+            significance: Math.min(10, trigger.severity + subsequentConflicts.length),
+            previousOccurrences: this.findSimilarPatterns('POWER_VACUUM')
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect boom-bust cycle - economic prosperity followed by crash
+   */
+  private detectBoomBust(events: HistoricalEvent[]): HistoricalPattern | null {
+    const economicEvents = events.filter(e => e.category === 'ECONOMIC');
+    if (economicEvents.length < 5) return null;
+
+    const sorted = [...economicEvents].sort((a, b) => a.timestamp - b.timestamp);
+
+    // Look for rising then falling severity
+    const midpoint = Math.floor(sorted.length / 2);
+    const firstHalf = sorted.slice(0, midpoint);
+    const secondHalf = sorted.slice(midpoint);
+
+    const avgFirstHalf = firstHalf.reduce((sum, e) => sum + e.severity, 0) / firstHalf.length;
+    const avgSecondHalf = secondHalf.reduce((sum, e) => sum + e.severity, 0) / secondHalf.length;
+
+    // Boom: first half high severity, bust: second half lower
+    if (avgFirstHalf >= 6 && avgSecondHalf < avgFirstHalf * 0.6) {
+      return {
+        id: `pattern_${this.nextPatternId++}`,
+        type: 'BOOM_BUST',
+        description: 'Economic boom followed by significant downturn',
+        events: sorted.map(e => e.id),
+        confidence: 0.65,
+        significance: Math.min(10, avgFirstHalf - avgSecondHalf + 3),
+        previousOccurrences: this.findSimilarPatterns('BOOM_BUST')
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Find similar patterns in historical data
+   */
+  private findSimilarPatterns(type: PatternType): string[] {
+    return Array.from(this.patterns.values())
+      .filter(p => p.type === type)
+      .map(p => p.id)
+      .slice(0, 3);  // Return up to 3 previous occurrences
+  }
+
+  /**
+   * Calculate overlap between two sets (Jaccard similarity)
+   */
+  private setOverlap(set1: Set<string>, set2: Set<string>): number {
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    return union.size > 0 ? intersection.size / union.size : 0;
+  }
+
+  // ====================================================================
+  // ADVANCED ANALYSIS - DETAILED SIGNIFICANCE
+  // ====================================================================
+
+  /**
+   * Calculate detailed significance breakdown
+   * More sophisticated than simple average
+   */
+  private calculateDetailedSignificance(events: HistoricalEvent[]): {
+    scope: number;
+    severity: number;
+    consequences: number;
+    uniqueness: number;
+    impact: number;
+  } {
+    // 1. Scope: number and diversity of participants
+    const uniqueParticipants = new Set(events.flatMap(e => e.participants));
+    const scopeScore = Math.min(10, uniqueParticipants.size * 0.5);
+
+    // 2. Severity: average event severity
+    const avgSeverity = events.reduce((sum, e) => sum + e.severity, 0) / events.length;
+    const severityScore = Math.min(10, avgSeverity);
+
+    // 3. Consequences: number of causal chains (cascading effects)
+    const chains = this.analyzeCausalChains(events);
+    const consequenceScore = Math.min(10, chains.length * 0.8);
+
+    // 4. Uniqueness: how rare are these event types?
+    const allHistoricalEvents = this.history.getAllEvents();
+    const eventTypes = new Set(events.map(e => e.type));
+    let raritySum = 0;
+    for (const type of eventTypes) {
+      const typeCount = allHistoricalEvents.filter(e => e.type === type).length;
+      const rarity = 1 / (1 + Math.log(typeCount + 1));  // Logarithmic rarity
+      raritySum += rarity;
+    }
+    const uniquenessScore = Math.min(10, (raritySum / eventTypes.size) * 10);
+
+    // 5. Impact: combination of duration and intensity
+    const duration = Math.max(...events.map(e => e.timestamp)) -
+                     Math.min(...events.map(e => e.timestamp));
+    const durationDays = duration / 86400;
+    const avgIntensity = avgSeverity / 10;
+    const impactScore = Math.min(10, (durationDays / 7) * avgIntensity * 5);
+
+    return {
+      scope: scopeScore,
+      severity: severityScore,
+      consequences: consequenceScore,
+      uniqueness: uniquenessScore,
+      impact: impactScore
+    };
   }
 
   private extractThemes(events: HistoricalEvent[]): string[] {

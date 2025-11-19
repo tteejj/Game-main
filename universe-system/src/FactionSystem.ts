@@ -5,6 +5,7 @@
 
 import { Vector3 } from './CelestialBody';
 import { SpaceStation } from './StationGenerator';
+import { FactionEconomicNeeds } from './faction-dynamics/FactionEconomicNeeds';
 
 export interface Faction {
   id: string;
@@ -150,6 +151,7 @@ export class FactionSystem {
   private relations: Map<string, DiplomaticRelation> = new Map();
   private reputations: Map<string, Reputation> = new Map();
   private conflicts: Map<string, Conflict> = new Map();
+  private economicNeeds: FactionEconomicNeeds = new FactionEconomicNeeds();
 
   constructor() {
     this.initializeDefaultFactions();
@@ -354,6 +356,11 @@ export class FactionSystem {
    * Update relations based on events
    */
   update(deltaTime: number): void {
+    // Update faction economies
+    for (const faction of this.factions.values()) {
+      this.economicNeeds.update(faction.id, deltaTime);
+    }
+
     // Natural drift toward neutral over time
     for (const relation of this.relations.values()) {
       if (relation.state !== 'WAR' && relation.state !== 'ALLIED') {
@@ -690,5 +697,189 @@ export class FactionSystem {
   willAttackPlayer(playerId: string, factionId: string): boolean {
     const rep = this.getReputation(playerId, factionId);
     return rep.standing < -60; // Hostile factions attack
+  }
+
+  // ====================================================================
+  // FACTION-TO-FACTION RELATIONSHIP API
+  // ====================================================================
+
+  /**
+   * Get relationship between two factions
+   */
+  getFactionRelationship(faction1: string, faction2: string): DiplomaticRelation | undefined {
+    const key = this.getRelationKey(faction1, faction2);
+    return this.relations.get(key);
+  }
+
+  /**
+   * Get standing value between two factions (-100 to 100)
+   */
+  getFactionStanding(faction1: string, faction2: string): number {
+    const relation = this.getFactionRelationship(faction1, faction2);
+    return relation?.standing || 0;
+  }
+
+  /**
+   * Get diplomatic state between two factions
+   */
+  getDiplomaticState(faction1: string, faction2: string): DiplomaticState {
+    const relation = this.getFactionRelationship(faction1, faction2);
+    return relation?.state || 'NEUTRAL';
+  }
+
+  /**
+   * Check if two factions are at war
+   */
+  areFactionsAtWar(faction1: string, faction2: string): boolean {
+    return this.getDiplomaticState(faction1, faction2) === 'WAR';
+  }
+
+  /**
+   * Check if two factions are allied
+   */
+  areFactionsAllied(faction1: string, faction2: string): boolean {
+    return this.getDiplomaticState(faction1, faction2) === 'ALLIED';
+  }
+
+  /**
+   * Modify faction standing based on an event
+   * Returns the new standing value
+   */
+  modifyFactionStanding(
+    faction1: string,
+    faction2: string,
+    change: number,
+    eventType: EventType,
+    description: string
+  ): number {
+    const key = this.getRelationKey(faction1, faction2);
+    let relation = this.relations.get(key);
+
+    // Create relation if it doesn't exist
+    if (!relation) {
+      const f1 = this.factions.get(faction1);
+      const f2 = this.factions.get(faction2);
+      if (!f1 || !f2) return 0;
+
+      const initialStanding = this.calculateInitialStanding(f1, f2);
+      relation = {
+        faction1,
+        faction2,
+        standing: initialStanding,
+        state: this.getStateFromStanding(initialStanding),
+        treaties: [],
+        history: [],
+        lastInteraction: Date.now() / 1000
+      };
+      this.relations.set(key, relation);
+    }
+
+    // Apply change
+    relation.standing = Math.max(-100, Math.min(100, relation.standing + change));
+    relation.state = this.getStateFromStanding(relation.standing);
+    relation.lastInteraction = Date.now() / 1000;
+
+    // Record event
+    this.addDiplomaticEvent(relation, eventType, change, description);
+
+    // Check for war/alliance transitions
+    if (relation.standing <= -80 && relation.state !== 'WAR') {
+      this.declareWar(faction1, faction2);
+    } else if (relation.standing >= 80 && relation.state !== 'ALLIED') {
+      this.formAlliance(faction1, faction2);
+    }
+
+    return relation.standing;
+  }
+
+  /**
+   * Report a trade between factions (improves relations)
+   */
+  reportTrade(faction1: string, faction2: string, tradeValue: number): void {
+    const change = Math.min(5, tradeValue / 10000); // Small positive change
+    this.modifyFactionStanding(
+      faction1,
+      faction2,
+      change,
+      'TRADE',
+      `Trade worth ${tradeValue.toFixed(0)} credits`
+    );
+  }
+
+  /**
+   * Report combat between factions (damages relations)
+   */
+  reportCombat(attacker: string, defender: string, severity: number): void {
+    const change = -Math.min(20, severity * 5); // Significant negative change
+    this.modifyFactionStanding(
+      attacker,
+      defender,
+      change,
+      'ATTACK',
+      `Combat engagement (severity: ${severity.toFixed(1)})`
+    );
+  }
+
+  /**
+   * Report aid given between factions (improves relations)
+   */
+  reportAid(donor: string, recipient: string, aidValue: number): void {
+    const change = Math.min(10, aidValue / 5000);
+    this.modifyFactionStanding(
+      donor,
+      recipient,
+      change,
+      'AID',
+      `Aid package worth ${aidValue.toFixed(0)} credits`
+    );
+  }
+
+  /**
+   * Get all relationships for a faction
+   */
+  getFactionRelationships(factionId: string): DiplomaticRelation[] {
+    const relationships: DiplomaticRelation[] = [];
+    for (const relation of this.relations.values()) {
+      if (relation.faction1 === factionId || relation.faction2 === factionId) {
+        relationships.push(relation);
+      }
+    }
+    return relationships;
+  }
+
+  // ====================================================================
+  // ECONOMIC NEEDS API
+  // ====================================================================
+
+  /**
+   * Get economic actions faction should take
+   */
+  getFactionEconomicActions(factionId: string) {
+    return this.economicNeeds.evaluateEconomicActions(factionId);
+  }
+
+  /**
+   * Get faction's economic state
+   */
+  getFactionEconomy(factionId: string) {
+    return this.economicNeeds.getFactionEconomy(factionId);
+  }
+
+  /**
+   * Check if faction would go to war for a resource
+   */
+  wouldFactionFightForResource(
+    factionId: string,
+    commodity: string,
+    targetFaction: string
+  ): boolean {
+    return this.economicNeeds.wouldGoToWarForResource(factionId, commodity, targetFaction);
+  }
+
+  /**
+   * Disrupt a supply chain (piracy, war, accidents)
+   */
+  disruptSupplyChain(chainId: string, cause: string, duration: number, impact: number): void {
+    this.economicNeeds.disruptSupplyChain(chainId, cause, duration, impact);
   }
 }

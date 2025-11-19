@@ -6,6 +6,24 @@
 import { Vector3, CelestialBody } from './CelestialBody';
 import { SpaceStation } from './StationGenerator';
 import { Commodity } from './EconomySystem';
+import { FactionSystem } from './FactionSystem';
+import {
+  ExtendedNPCMemory,
+  Experience,
+  ExperienceType,
+  TraumaMemory,
+  PersonalityTraits as ExtendedPersonality
+} from './entity-ai/ExtendedNPCMemory';
+import { HistoricalEvent } from './simulation/HistoricalMemorySystem';
+import {
+  NPCGoalSystem,
+  NPCGoal,
+  GoalType,
+  GoalEvaluationContext,
+  PlannedAction,
+  ActionPlan
+} from './entity-ai/NPCGoalSystem';
+import { AdaptiveAI, ExpertiseDomain } from './entity-ai/AdaptiveAI';
 
 export type ShipType = 'TRADER' | 'MINER' | 'PIRATE' | 'PATROL' | 'COURIER' | 'EXPLORER' | 'PASSENGER';
 export type ShipState = 'IDLE' | 'TRAVELING' | 'DOCKING' | 'DOCKED' | 'TRADING' | 'MINING' | 'ATTACKING' | 'FLEEING' | 'PATROLLING';
@@ -45,7 +63,16 @@ export interface NPCShip {
   threat?: string;            // ID of threatening ship
   personality: ShipPersonality;
   route?: TradeRoute;
-  memory: ShipMemory;
+  memory: ShipMemory;         // Legacy simple memory (for backward compatibility)
+  extendedMemory: ExtendedNPCMemory;  // New sophisticated memory system
+  goalSystem: NPCGoalSystem;  // Goal-based planning and decision making
+  adaptiveAI: AdaptiveAI;     // Learning system for skill progression and strategy evolution
+  emotionalState: {           // Current emotional state
+    stress: number;           // 0-10
+    satisfaction: number;     // -10 to +10
+    fear: number;             // 0-10
+  };
+  currentGoalAction?: PlannedAction;  // Action from goal system being executed
 }
 
 export interface ShipPersonality {
@@ -62,6 +89,7 @@ export interface ShipMemory {
   profitableRoutes: TradeRoute[];
   lastTradeTime: number;
   totalProfit: number;
+  lastCombatReport: number;          // Timestamp of last combat reported to factions
 }
 
 export interface TradeRoute {
@@ -100,8 +128,33 @@ export class NPCShipAI {
       Object.assign(stats, customStats);
     }
 
+    const shipId = `ship_${this.nextShipId++}`;
+    const personality = this.generatePersonality(type);
+
+    // Convert simple personality to extended personality traits
+    const extendedPersonality: Partial<ExtendedPersonality> = {
+      aggression: personality.aggression,
+      caution: personality.caution,
+      greed: personality.greed,
+      curiosity: personality.curiosity,
+      loyalty: personality.loyalty,
+      // Additional traits based on ship type
+      risktaking: type === 'PIRATE' ? 0.7 : type === 'TRADER' ? 0.3 : 0.5,
+      patience: type === 'TRADER' ? 0.7 : type === 'PIRATE' ? 0.2 : 0.5,
+      adaptability: type === 'EXPLORER' ? 0.8 : 0.5
+    };
+
+    // Create extended memory first (needed for goal system and adaptive AI)
+    const extendedMemory = new ExtendedNPCMemory(shipId, 'SHIP', extendedPersonality);
+
+    // Create goal system
+    const goalSystem = new NPCGoalSystem(extendedMemory);
+
+    // Create adaptive AI (learning and skill progression)
+    const adaptiveAI = new AdaptiveAI(extendedMemory, goalSystem);
+
     const ship: NPCShip = {
-      id: `ship_${this.nextShipId++}`,
+      id: shipId,
       name: this.generateShipName(type, faction),
       type,
       faction,
@@ -112,15 +165,27 @@ export class NPCShipAI {
       cargo: [],
       fuel: stats.fuelCapacity,
       credits: this.getStartingCredits(type),
-      personality: this.generatePersonality(type),
+      personality,
       memory: {
         visitedStations: new Set(),
         knownThreats: new Map(),
         profitableRoutes: [],
         lastTradeTime: 0,
-        totalProfit: 0
+        totalProfit: 0,
+        lastCombatReport: 0
+      },
+      extendedMemory,
+      goalSystem,
+      adaptiveAI,
+      emotionalState: {
+        stress: 0,
+        satisfaction: 0,
+        fear: 0
       }
     };
+
+    // Generate initial goals based on ship type
+    this.generateInitialGoals(ship);
 
     this.ships.set(ship.id, ship);
     return ship;
@@ -133,10 +198,11 @@ export class NPCShipAI {
     deltaTime: number,
     stations: Map<string, SpaceStation>,
     celestialBodies: CelestialBody[],
-    playerShip?: { position: Vector3; faction: string; id: string }
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
   ): void {
     for (const ship of this.ships.values()) {
-      this.updateShip(ship, deltaTime, stations, celestialBodies, playerShip);
+      this.updateShip(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
     }
   }
 
@@ -148,7 +214,8 @@ export class NPCShipAI {
     deltaTime: number,
     stations: Map<string, SpaceStation>,
     celestialBodies: CelestialBody[],
-    playerShip?: { position: Vector3; faction: string; id: string }
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
   ): void {
     // Fuel consumption
     const speed = this.magnitude(ship.velocity);
@@ -160,10 +227,45 @@ export class NPCShipAI {
       this.evaluateThreat(ship, playerShip);
     }
 
+    // Update goal system (goal-driven AI)
+    const context = this.buildGoalContext(ship, stations, celestialBodies, playerShip);
+    const goalAction = ship.goalSystem.update(deltaTime, context);
+
+    // If goal system has an action, execute it (goal-driven behavior)
+    // Otherwise fall back to state machine (legacy behavior)
+    if (goalAction && goalAction.status !== 'FAILED') {
+      ship.currentGoalAction = goalAction;
+      this.executeGoalAction(ship, goalAction, stations, celestialBodies);
+    } else {
+      // Fall back to state machine for behaviors not yet goal-driven
+      this.executeStateMachine(ship, deltaTime, stations, celestialBodies, playerShip, factionSystem);
+    }
+
+    // Skill decay: skills atrophy without practice (1% per day after 7 days)
+    ship.adaptiveAI.decaySkills(deltaTime);
+
+    // Update position
+    ship.position.x += ship.velocity.x * deltaTime;
+    ship.position.y += ship.velocity.y * deltaTime;
+    ship.position.z += ship.velocity.z * deltaTime;
+  }
+
+  /**
+   * Execute state machine (legacy behavior system)
+   */
+  private executeStateMachine(
+    ship: NPCShip,
+    deltaTime: number,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[],
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
+  ): void {
+
     // State machine
     switch (ship.state) {
       case 'IDLE':
-        this.handleIdleState(ship, stations);
+        this.handleIdleState(ship, stations, factionSystem);
         break;
 
       case 'TRAVELING':
@@ -179,11 +281,11 @@ export class NPCShipAI {
         break;
 
       case 'TRADING':
-        this.handleTradingState(ship, deltaTime);
+        this.handleTradingState(ship, deltaTime, stations, factionSystem);
         break;
 
       case 'ATTACKING':
-        this.handleAttackingState(ship, deltaTime, playerShip);
+        this.handleAttackingState(ship, deltaTime, playerShip, factionSystem);
         break;
 
       case 'FLEEING':
@@ -198,21 +300,165 @@ export class NPCShipAI {
         this.handleMiningState(ship, deltaTime, celestialBodies);
         break;
     }
+  }
 
-    // Update position
-    ship.position.x += ship.velocity.x * deltaTime;
-    ship.position.y += ship.velocity.y * deltaTime;
-    ship.position.z += ship.velocity.z * deltaTime;
+  /**
+   * Build context for goal evaluation
+   */
+  private buildGoalContext(
+    ship: NPCShip,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[],
+    playerShip?: { position: Vector3; faction: string; id: string }
+  ): GoalEvaluationContext {
+    const threats: string[] = [];
+    const opportunities: string[] = [];
+    const allies: string[] = [];
+    const enemies: string[] = [];
+
+    // Detect threats and opportunities
+    if (playerShip) {
+      const distance = this.distance(ship.position, playerShip.position);
+      if (distance < ship.stats.sensorRange) {
+        if (playerShip.faction === ship.faction) {
+          allies.push(playerShip.id);
+        } else {
+          // Check if at war or hostile
+          if (ship.type === 'PIRATE' || playerShip.faction !== ship.faction) {
+            threats.push(playerShip.id);
+            enemies.push(playerShip.id);
+          }
+        }
+      }
+    }
+
+    // Find nearby stations
+    for (const [stationId, station] of stations) {
+      const distance = this.distance(ship.position, station.position);
+      if (distance < ship.stats.sensorRange) {
+        opportunities.push(stationId);
+      }
+    }
+
+    return {
+      currentTime: Date.now() / 1000,
+      currentLocation: { ...ship.position },
+      currentState: {
+        location: { ...ship.position },
+        resources: {
+          credits: ship.credits,
+          fuel: ship.fuel,
+          cargoSpace: ship.stats.cargoCapacity - ship.cargo.reduce((sum, c) => sum + c.amount, 0)
+        },
+        satisfied: []
+      },
+      currentResources: {
+        credits: ship.credits,
+        fuel: ship.fuel,
+        cargoSpace: ship.stats.cargoCapacity - ship.cargo.reduce((sum, c) => sum + c.amount, 0),
+        health: ship.stats.hullStrength
+      },
+      threats,
+      opportunities,
+      allies,
+      enemies
+    };
+  }
+
+  /**
+   * Execute a goal-driven action
+   */
+  private executeGoalAction(
+    ship: NPCShip,
+    action: PlannedAction,
+    stations: Map<string, SpaceStation>,
+    celestialBodies: CelestialBody[]
+  ): void {
+    // Translate goal action type to ship behavior
+    switch (action.type) {
+      case 'TRAVEL_TO':
+        if (action.location) {
+          ship.state = 'TRAVELING';
+          ship.destination = { ...action.location };
+        } else if (action.target) {
+          // Target is a station ID
+          const station = stations.get(action.target);
+          if (station) {
+            ship.state = 'TRAVELING';
+            ship.destination = { ...station.position };
+            ship.currentTarget = action.target;
+          }
+        }
+        break;
+
+      case 'DOCK_AT':
+        if (action.target) {
+          ship.state = 'DOCKING';
+          ship.currentTarget = action.target;
+          const station = stations.get(action.target);
+          if (station) {
+            ship.destination = { ...station.position };
+          }
+        }
+        break;
+
+      case 'TRADE_WITH':
+        if (action.target) {
+          ship.state = 'TRADING';
+          ship.currentTarget = action.target;
+        }
+        break;
+
+      case 'COMBAT':
+        ship.state = 'ATTACKING';
+        if (action.target) {
+          ship.threat = action.target;
+        }
+        break;
+
+      case 'FLEE':
+        ship.state = 'FLEEING';
+        break;
+
+      case 'WAIT':
+        ship.state = 'IDLE';
+        break;
+
+      case 'MINE':
+        ship.state = 'MINING';
+        break;
+
+      case 'SCAN':
+      case 'INVESTIGATE':
+        ship.state = 'PATROLLING';
+        if (action.location) {
+          ship.destination = { ...action.location };
+        }
+        break;
+
+      default:
+        // Unknown action type, fall back to idle
+        ship.state = 'IDLE';
+    }
+
+    // Mark action as in progress
+    if (action.status === 'PENDING') {
+      action.status = 'IN_PROGRESS';
+    }
   }
 
   /**
    * Handle IDLE state - decide what to do
    */
-  private handleIdleState(ship: NPCShip, stations: Map<string, SpaceStation>): void {
+  private handleIdleState(
+    ship: NPCShip,
+    stations: Map<string, SpaceStation>,
+    factionSystem?: FactionSystem
+  ): void {
     switch (ship.type) {
       case 'TRADER':
-        // Find profitable trade route
-        const bestRoute = this.findBestTradeRoute(ship, stations);
+        // Find profitable trade route (considers faction economic needs)
+        const bestRoute = this.findBestTradeRoute(ship, stations, factionSystem);
         if (bestRoute) {
           ship.route = bestRoute;
           ship.currentTarget = bestRoute.fromStation;
@@ -230,7 +476,28 @@ export class NPCShipAI {
         break;
 
       case 'MINER':
-        // Find nearest asteroid field
+        // Mine resources faction needs (if faction system available)
+        if (factionSystem && ship.faction) {
+          try {
+            const economy = factionSystem.getFactionEconomy(ship.faction);
+            // Find most critical mineral need
+            let mostCritical = { commodity: 'iron', urgency: 0 };
+            for (const [commodity, need] of economy.criticalResources) {
+              if ((commodity === 'iron' || commodity === 'rare_earth' || commodity === 'uranium') &&
+                  (need.inCrisis || need.daysRemaining < 30)) {
+                const urgency = need.inCrisis ? 100 : (100 - need.daysRemaining);
+                if (urgency > mostCritical.urgency) {
+                  mostCritical = { commodity, urgency };
+                }
+              }
+            }
+            // Store target resource in ship memory for MINING state
+            (ship as any).targetResource = mostCritical.commodity;
+          } catch (e) {
+            // Faction economy not ready, mine default resource
+            (ship as any).targetResource = 'iron';
+          }
+        }
         ship.state = 'MINING';
         break;
 
@@ -265,6 +532,24 @@ export class NPCShipAI {
     if (!ship.destination) {
       ship.state = 'IDLE';
       return;
+    }
+
+    // Check for trauma triggers at current location
+    const traumatized = this.checkTraumaTriggers(ship, {
+      location: ship.position,
+      situationType: 'TRAVELING'
+    });
+
+    // If traumatized, abort current destination and flee
+    if (traumatized) {
+      ship.destination = this.generateRandomDestination(ship.position, 1e8);
+      ship.currentTarget = undefined;
+      ship.route = undefined;
+      // Traumatized ships return to idle after fleeing from trigger
+      if (Math.random() < 0.3) {
+        ship.state = 'IDLE';
+        return;
+      }
     }
 
     // Calculate direction to destination
@@ -335,6 +620,12 @@ export class NPCShipAI {
     if (this.magnitude(ship.velocity) < 1) {
       ship.state = 'DOCKED';
       ship.memory.visitedStations.add(ship.currentTarget!);
+
+      // Update goal progress: completed docking action
+      if (ship.currentGoalAction && ship.currentGoalAction.type === 'DOCK_AT') {
+        ship.currentGoalAction.status = 'COMPLETED';
+        this.updateGoalProgress(ship, 'docked_at_station');
+      }
     }
   }
 
@@ -363,6 +654,25 @@ export class NPCShipAI {
       ship.credits -= refuelAmount * 0.5; // Cost of fuel
     }
 
+    // Memory consolidation during rest (simulates "sleep"/downtime)
+    // Consolidate memories every ~5 seconds of docked time
+    if (Math.random() < deltaTime * 0.2) {
+      this.consolidateMemoriesWhileDocked(ship, deltaTime);
+
+      // Record docking experience if first time at this station
+      if (!ship.memory.visitedStations.has(ship.currentTarget)) {
+        ship.memory.visitedStations.add(ship.currentTarget);
+        this.recordExperience(
+          ship,
+          'FIRST_TIME',
+          `First visit to ${station.name}`,
+          2, // Slight positive emotional impact
+          5, // Moderate intensity
+          [station.id]
+        );
+      }
+    }
+
     // Trading behavior
     if (ship.type === 'TRADER' && ship.route) {
       ship.state = 'TRADING';
@@ -378,7 +688,12 @@ export class NPCShipAI {
   /**
    * Handle TRADING state
    */
-  private handleTradingState(ship: NPCShip, deltaTime: number): void {
+  private handleTradingState(
+    ship: NPCShip,
+    deltaTime: number,
+    stations: Map<string, SpaceStation>,
+    factionSystem?: FactionSystem
+  ): void {
     if (!ship.route) {
       ship.state = 'DOCKED';
       return;
@@ -409,11 +724,72 @@ export class NPCShipAI {
     else if (ship.currentTarget === ship.route.toStation && ship.cargo.length > 0) {
       const totalValue = ship.cargo.reduce((sum, c) => sum + c.value * 1.2, 0); // 20% profit
       ship.credits += totalValue;
-      ship.memory.totalProfit += totalValue - ship.cargo.reduce((sum, c) => sum + c.value, 0);
-      ship.cargo = [];
+      const profit = totalValue - ship.cargo.reduce((sum, c) => sum + c.value, 0);
+      ship.memory.totalProfit += profit;
+      ship.memory.lastTradeTime = Date.now() / 1000;
 
+      // Report trade to faction system to improve relations
+      if (factionSystem && ship.route) {
+        const fromStation = stations.get(ship.route.fromStation);
+        const toStation = stations.get(ship.route.toStation);
+
+        if (fromStation && toStation && fromStation.faction && toStation.faction) {
+          // Trade between different factions improves relations
+          if (fromStation.faction !== toStation.faction) {
+            factionSystem.reportTrade(fromStation.faction, toStation.faction, totalValue);
+          }
+        }
+      }
+
+      // Record successful trade experience
+      const emotionalImpact = Math.min(10, profit / 500); // Higher profit = better feeling
+      const intensity = profit > 1000 ? 7 : 5; // Very profitable trades are more memorable
+
+      this.recordExperience(
+        ship,
+        profit > 1000 ? 'PROFITABLE_DISCOVERY' : 'SUCCESSFUL_TRADE',
+        `Completed trade of ${ship.route.commodity}: ${profit.toFixed(0)} credits profit`,
+        emotionalImpact,
+        intensity,
+        ship.route ? [ship.route.fromStation, ship.route.toStation] : []
+      );
+
+      // Update profitable routes memory
+      if (profit > 0 && ship.route) {
+        const existingRoute = ship.memory.profitableRoutes.find(
+          r => r.fromStation === ship.route!.fromStation && r.toStation === ship.route!.toStation
+        );
+        if (existingRoute) {
+          existingRoute.profit = (existingRoute.profit + profit) / 2; // Moving average
+          existingRoute.lastCheck = Date.now() / 1000;
+        } else {
+          ship.memory.profitableRoutes.push({
+            ...ship.route,
+            profit,
+            lastCheck: Date.now() / 1000
+          });
+        }
+      }
+
+      ship.cargo = [];
       ship.state = 'DOCKED';
       ship.route = undefined;
+
+      // Update goal progress: completed a trade
+      if (ship.currentGoalAction && ship.currentGoalAction.type === 'TRADE_WITH') {
+        ship.currentGoalAction.status = 'COMPLETED';
+      }
+      this.updateGoalProgress(ship, 'completed_trade', { profit });
+
+      // Record learning outcome for adaptive AI
+      const normalizedReward = Math.max(-10, Math.min(10, profit / 1000)); // Normalize to -10 to +10
+      ship.adaptiveAI.recordOutcome(
+        `trading_${ship.route.commodity}`,
+        `route_${ship.route.fromStation}_to_${ship.route.toStation}`,
+        'SUCCESS',
+        normalizedReward,
+        { profit, commodity: ship.route.commodity }
+      );
     }
   }
 
@@ -423,7 +799,8 @@ export class NPCShipAI {
   private handleAttackingState(
     ship: NPCShip,
     deltaTime: number,
-    playerShip?: { position: Vector3; faction: string; id: string }
+    playerShip?: { position: Vector3; faction: string; id: string },
+    factionSystem?: FactionSystem
   ): void {
     if (!ship.threat || !playerShip || ship.threat !== playerShip.id) {
       ship.state = 'IDLE';
@@ -438,11 +815,63 @@ export class NPCShipAI {
     // In weapon range?
     if (distance < 5000) {
       // Attack! (this would trigger weapon systems in a full implementation)
-      // For now, just track it
+
+      // Report combat to faction system (max once per 10 seconds to avoid spam)
+      const now = Date.now() / 1000;
+      if (factionSystem && ship.faction && playerShip.faction && ship.faction !== playerShip.faction) {
+        if (now - ship.memory.lastCombatReport > 10) {
+          // Calculate combat severity based on damage potential
+          const severity = (ship.stats.weaponPower / 100) + (distance < 2000 ? 0.5 : 0);
+          factionSystem.reportCombat(ship.faction, playerShip.faction, severity);
+          ship.memory.lastCombatReport = now;
+
+          // Record combat experience
+          this.recordExperience(
+            ship,
+            'COMBAT_VICTORY',
+            `Engaged ${playerShip.faction} ship in combat`,
+            -3, // Combat is stressful even when winning
+            6,
+            [playerShip.id]
+          );
+
+          // Record learning outcome for adaptive AI (successful combat engagement)
+          const combatReward = severity * 3; // Higher severity = more impressive victory
+          ship.adaptiveAI.recordOutcome(
+            `combat_with_${playerShip.faction}`,
+            'engage_attack',
+            'SUCCESS',
+            combatReward,
+            { severity, distance, weaponPower: ship.stats.weaponPower }
+          );
+        }
+      }
     }
 
     // Lost target or too damaged?
     if (distance > ship.stats.sensorRange || ship.stats.hullStrength < 30) {
+      // Record combat defeat if hull is low
+      if (ship.stats.hullStrength < 30) {
+        this.recordExperience(
+          ship,
+          'COMBAT_DEFEAT',
+          `Severely damaged by ${playerShip.faction} ship - retreating`,
+          -8, // Very negative emotional impact
+          9,  // Highly memorable
+          [playerShip.id]
+        );
+
+        // Record learning outcome for adaptive AI (combat failure)
+        const defeatPenalty = -(100 - ship.stats.hullStrength) / 10; // More damage = worse failure
+        ship.adaptiveAI.recordOutcome(
+          `combat_with_${playerShip.faction}`,
+          'engage_attack',
+          'FAILURE',
+          defeatPenalty,
+          { hullStrength: ship.stats.hullStrength, distance }
+        );
+      }
+
       ship.state = 'FLEEING';
       ship.threat = undefined;
     }
@@ -461,6 +890,21 @@ export class NPCShipAI {
       return;
     }
 
+    // Record near-death experience if hull is critically low
+    // This will create trauma that affects future behavior
+    if (ship.stats.hullStrength < 20 && Math.random() < 0.1) {
+      this.recordExperience(
+        ship,
+        'NEAR_DEATH',
+        `Barely escaped death from ${playerShip.faction} ship at ${ship.position.x.toFixed(0)}, ${ship.position.y.toFixed(0)}, ${ship.position.z.toFixed(0)}`,
+        -10, // Maximum negative emotional impact
+        10,  // Maximum intensity - will never forget
+        [playerShip.id]
+      );
+      // Update threat memory
+      ship.memory.knownThreats.set(playerShip.id, Date.now() / 1000);
+    }
+
     // Flee in opposite direction
     const awayFromThreat = {
       x: ship.position.x - playerShip.position.x,
@@ -470,6 +914,28 @@ export class NPCShipAI {
 
     const distance = this.magnitude(awayFromThreat);
     if (distance > ship.stats.sensorRange * 2) {
+      // Successfully escaped
+      if (ship.stats.hullStrength < 50) {
+        // Record successful escape
+        this.recordExperience(
+          ship,
+          'FLEEING',
+          `Successfully escaped from ${playerShip.faction} threat`,
+          3, // Relief
+          7,
+          [playerShip.id]
+        );
+
+        // Record learning outcome for adaptive AI (successful escape)
+        const escapeReward = 5; // Successful survival is rewarding
+        ship.adaptiveAI.recordOutcome(
+          `threat_from_${playerShip.faction}`,
+          'flee_to_safety',
+          'SUCCESS',
+          escapeReward,
+          { hullStrength: ship.stats.hullStrength, distance }
+        );
+      }
       ship.state = 'IDLE';
       return;
     }
@@ -588,10 +1054,11 @@ export class NPCShipAI {
    */
   private findBestTradeRoute(
     ship: NPCShip,
-    stations: Map<string, SpaceStation>
+    stations: Map<string, SpaceStation>,
+    factionSystem?: FactionSystem
   ): TradeRoute | null {
-    // Check memory first
-    if (ship.memory.profitableRoutes.length > 0) {
+    // Check memory first (but deprioritize if faction needs exist)
+    if (ship.memory.profitableRoutes.length > 0 && !factionSystem) {
       const route = ship.memory.profitableRoutes[0];
       // Verify stations still exist
       if (stations.has(route.fromStation) && stations.has(route.toStation)) {
@@ -599,10 +1066,32 @@ export class NPCShipAI {
       }
     }
 
-    // Find new route
+    // Find new route considering faction economic needs
     const stationList = Array.from(stations.values());
     let bestRoute: TradeRoute | null = null;
-    let bestProfit = 0;
+    let bestScore = 0;
+
+    // If faction system available, get economic actions for ship's faction
+    let criticalCommodities: string[] = [];
+    let urgentDemand: Map<string, number> = new Map(); // commodity -> priority
+
+    if (factionSystem && ship.faction) {
+      try {
+        const economy = factionSystem.getFactionEconomy(ship.faction);
+        const actions = factionSystem.getFactionEconomicActions(ship.faction);
+
+        // Identify critical resources
+        for (const [commodity, need] of economy.criticalResources) {
+          if (need.inCrisis || need.daysRemaining < 30) {
+            criticalCommodities.push(commodity);
+            const priority = need.inCrisis ? 100 : (100 - need.daysRemaining);
+            urgentDemand.set(commodity.toLowerCase(), priority);
+          }
+        }
+      } catch (e) {
+        // Faction economy not initialized yet, continue with normal trade
+      }
+    }
 
     for (let i = 0; i < stationList.length; i++) {
       for (let j = 0; j < stationList.length; j++) {
@@ -611,26 +1100,50 @@ export class NPCShipAI {
         const from = stationList[i];
         const to = stationList[j];
 
-        // Simplified profit calculation
-        // In real implementation, would check actual market prices
-        const distance = this.distance(from.position, to.position);
-        const profit = 1000 - distance / 1e6; // Arbitrary profit model
+        // Consider multiple commodities
+        const commodities = ['fuel', 'food', 'water', 'iron', 'electronics', 'medicine'];
 
-        if (profit > bestProfit) {
-          bestProfit = profit;
-          bestRoute = {
-            fromStation: from.id,
-            toStation: to.id,
-            commodity: 'fuel', // Simplified
-            profit,
-            lastCheck: Date.now()
-          };
+        for (const commodity of commodities) {
+          const distance = this.distance(from.position, to.position);
+
+          // Base profit (distance-based)
+          let score = Math.max(0, 1000 - distance / 1e6);
+
+          // Massive bonus for critical faction needs
+          const urgency = urgentDemand.get(commodity) || 0;
+          if (urgency > 0) {
+            score += urgency * 50; // Up to 5000x multiplier for crisis goods
+          }
+
+          // Bonus for trading with friendly factions
+          if (factionSystem && from.faction && to.faction) {
+            const standing = factionSystem.getFactionStanding(from.faction, to.faction);
+            if (standing > 0) {
+              score += standing; // Up to +100 for allied factions
+            }
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestRoute = {
+              fromStation: from.id,
+              toStation: to.id,
+              commodity,
+              profit: score,
+              lastCheck: Date.now() / 1000
+            };
+          }
         }
       }
     }
 
-    if (bestRoute) {
+    if (bestRoute && bestScore > 0) {
       ship.memory.profitableRoutes.push(bestRoute);
+
+      // Limit memory to 5 routes
+      if (ship.memory.profitableRoutes.length > 5) {
+        ship.memory.profitableRoutes.shift();
+      }
     }
 
     return bestRoute;
@@ -849,5 +1362,457 @@ export class NPCShipAI {
    */
   removeShip(shipId: string): void {
     this.ships.delete(shipId);
+  }
+
+  /**
+   * Record an experience in the ship's extended memory
+   */
+  private recordExperience(
+    ship: NPCShip,
+    type: ExperienceType,
+    description: string,
+    emotionalImpact: number,
+    intensity: number,
+    participants: string[] = []
+  ): void {
+    const experience: Experience = {
+      id: `exp_${ship.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now() / 1000,
+      type,
+      event: {
+        id: `event_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: Date.now() / 1000,
+        type: this.mapExperienceTypeToEventType(type),
+        severity: Math.ceil(intensity / 2), // Convert 0-10 intensity to 1-5 severity
+        category: this.mapExperienceToCategory(type),
+        description,
+        participants,
+        initiator: ship.id,
+        victims: emotionalImpact < 0 ? [ship.id] : undefined,
+        location: { ...ship.position },
+        systemId: undefined,
+        stationId: undefined,
+        data: {
+          shipType: ship.type,
+          faction: ship.faction,
+          emotionalImpact,
+          intensity
+        },
+        detailedLog: undefined,
+        consequences: [],
+        witnessed: false,
+        priority: Math.ceil(intensity),
+        tags: [ship.type, ship.faction, type]
+      },
+      emotionalImpact,
+      intensity,
+      location: { ...ship.position },
+      witnesses: participants,
+      memoryStrength: 1.0,
+      recallCount: 0,
+      consolidated: false
+    };
+
+    ship.extendedMemory.recordExperience(experience);
+
+    // Update emotional state based on experience
+    if (emotionalImpact < -5) {
+      ship.emotionalState.stress += Math.abs(emotionalImpact) / 2;
+      ship.emotionalState.satisfaction += emotionalImpact / 2;
+    } else if (emotionalImpact > 5) {
+      ship.emotionalState.satisfaction += emotionalImpact / 2;
+      ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - 1);
+    }
+
+    // Cap emotional states
+    ship.emotionalState.stress = Math.max(0, Math.min(10, ship.emotionalState.stress));
+    ship.emotionalState.satisfaction = Math.max(-10, Math.min(10, ship.emotionalState.satisfaction));
+    ship.emotionalState.fear = Math.max(0, Math.min(10, ship.emotionalState.fear));
+  }
+
+  /**
+   * Map ExperienceType to HistoricalEvent EventType
+   */
+  private mapExperienceTypeToEventType(type: ExperienceType): HistoricalEvent['type'] {
+    const mapping: Record<ExperienceType, HistoricalEvent['type']> = {
+      'NEAR_DEATH': 'COMBAT_ENDED',
+      'SUCCESSFUL_TRADE': 'TRADE_COMPLETED',
+      'PROFITABLE_DISCOVERY': 'POI_DISCOVERED',
+      'BETRAYAL': 'REPUTATION_CHANGE',
+      'RESCUE': 'RESCUE',
+      'BEING_RESCUED': 'RESCUE',
+      'COMBAT_VICTORY': 'COMBAT_ENDED',
+      'COMBAT_DEFEAT': 'COMBAT_ENDED',
+      'FLEEING': 'COMBAT_ENDED',
+      'FIRST_TIME': 'ENCOUNTER',
+      'MILESTONE': 'GOAL_ACHIEVED',
+      'FAILURE': 'GOAL_FAILED',
+      'FRIENDSHIP_FORMED': 'REPUTATION_CHANGE',
+      'FRIENDSHIP_BROKEN': 'REPUTATION_CHANGE',
+      'REPUTATION_GAINED': 'REPUTATION_EARNED',
+      'REPUTATION_LOST': 'REPUTATION_CHANGE',
+      'GOAL_ACHIEVED': 'GOAL_ACHIEVED',
+      'GOAL_FAILED': 'GOAL_FAILED',
+      'DISCOVERY': 'POI_DISCOVERED',
+      'EXPLORATION': 'SYSTEM_MAPPED',
+      'LEARNING': 'GOAL_ACHIEVED'
+    };
+    return mapping[type] || 'ENCOUNTER';
+  }
+
+  /**
+   * Map ExperienceType to HistoricalEvent EventCategory
+   */
+  private mapExperienceToCategory(type: ExperienceType): HistoricalEvent['category'] {
+    const mapping: Record<ExperienceType, HistoricalEvent['category']> = {
+      'NEAR_DEATH': 'MILITARY',
+      'SUCCESSFUL_TRADE': 'ECONOMIC',
+      'PROFITABLE_DISCOVERY': 'DISCOVERY',
+      'BETRAYAL': 'SOCIAL',
+      'RESCUE': 'PERSONAL',
+      'BEING_RESCUED': 'PERSONAL',
+      'COMBAT_VICTORY': 'MILITARY',
+      'COMBAT_DEFEAT': 'MILITARY',
+      'FLEEING': 'MILITARY',
+      'FIRST_TIME': 'PERSONAL',
+      'MILESTONE': 'PERSONAL',
+      'FAILURE': 'PERSONAL',
+      'FRIENDSHIP_FORMED': 'SOCIAL',
+      'FRIENDSHIP_BROKEN': 'SOCIAL',
+      'REPUTATION_GAINED': 'SOCIAL',
+      'REPUTATION_LOST': 'SOCIAL',
+      'GOAL_ACHIEVED': 'PERSONAL',
+      'GOAL_FAILED': 'PERSONAL',
+      'DISCOVERY': 'DISCOVERY',
+      'EXPLORATION': 'DISCOVERY',
+      'LEARNING': 'PERSONAL'
+    };
+    return mapping[type] || 'PERSONAL';
+  }
+
+  /**
+   * Check for trauma triggers before making decisions
+   * Returns true if ship is too traumatized to proceed
+   */
+  private checkTraumaTriggers(
+    ship: NPCShip,
+    situation: {
+      location?: Vector3;
+      entityTypes?: string[];
+      situationType?: string;
+    }
+  ): boolean {
+    const triggeredTraumas = ship.extendedMemory.checkTraumaTriggers(situation);
+
+    if (triggeredTraumas.length > 0) {
+      // Trauma triggered! Update emotional state
+      ship.emotionalState.fear += triggeredTraumas.length * 2;
+      ship.emotionalState.stress += triggeredTraumas.length;
+      ship.emotionalState.fear = Math.min(10, ship.emotionalState.fear);
+      ship.emotionalState.stress = Math.min(10, ship.emotionalState.stress);
+
+      // If fear is too high, ship should avoid this situation
+      return ship.emotionalState.fear > 7;
+    }
+
+    return false;
+  }
+
+  /**
+   * Consolidate memories during rest period (docking)
+   */
+  private consolidateMemoriesWhileDocked(ship: NPCShip, dockingDuration: number): void {
+    const consolidated = ship.extendedMemory.consolidateMemories(dockingDuration);
+
+    if (consolidated > 0) {
+      // Consolidation reduces stress
+      ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - consolidated * 0.5);
+    }
+  }
+
+  /**
+   * Update goal progress based on completed actions
+   */
+  private updateGoalProgress(ship: NPCShip, event: string, data?: Record<string, unknown>): void {
+    const currentGoal = ship.goalSystem.getCurrentGoal();
+    if (!currentGoal) return;
+
+    // Track progress based on event type
+    let progressMade = false;
+
+    switch (event) {
+      case 'docked_at_station':
+        // For trading goals, docking is a step toward trading
+        if (currentGoal.type === 'ACCUMULATE_WEALTH' || currentGoal.type === 'BUILD_TRADE_EMPIRE') {
+          const subgoal = currentGoal.subgoals[currentGoal.currentSubgoal];
+          if (subgoal && subgoal.description.includes('trade route')) {
+            subgoal.progress = Math.min(1, subgoal.progress + 0.2);
+            progressMade = true;
+          }
+        }
+        break;
+
+      case 'completed_trade':
+        // Trading goals - count trades
+        if (currentGoal.type === 'ACCUMULATE_WEALTH' || currentGoal.type === 'BUILD_TRADE_EMPIRE') {
+          const tradeCount = ship.memory.profitableRoutes.length;
+          const targetTrades = 10; // From "Complete 10 profitable trades" subgoal
+
+          // Update subgoal progress
+          const subgoal = currentGoal.subgoals.find(sg => sg.description.includes('profitable trades'));
+          if (subgoal) {
+            subgoal.progress = Math.min(1, tradeCount / targetTrades);
+            if (subgoal.progress >= 1) {
+              subgoal.completed = true;
+            }
+            progressMade = true;
+          }
+
+          // Update overall goal progress
+          currentGoal.progress = currentGoal.subgoals
+            .filter(sg => !sg.optional)
+            .reduce((sum, sg) => sum + sg.progress, 0) /
+            currentGoal.subgoals.filter(sg => !sg.optional).length;
+
+          // Check if goal is complete
+          if (currentGoal.progress >= 1) {
+            ship.goalSystem.completeGoal(currentGoal.id);
+
+            // Update satisfaction based on achievement
+            ship.emotionalState.satisfaction += currentGoal.expectedReward.satisfaction || 0;
+            ship.emotionalState.satisfaction = Math.min(10, ship.emotionalState.satisfaction);
+          }
+        }
+        break;
+
+      case 'region_explored':
+        // Exploration goals
+        if (currentGoal.type === 'EXPLORE_UNKNOWN') {
+          const subgoal = currentGoal.subgoals[currentGoal.currentSubgoal];
+          if (subgoal) {
+            subgoal.progress = Math.min(1, subgoal.progress + 0.2); // Each region = 20% of 5 regions
+            if (subgoal.progress >= 1) {
+              subgoal.completed = true;
+              currentGoal.currentSubgoal++;
+            }
+            progressMade = true;
+          }
+
+          currentGoal.progress = currentGoal.subgoals
+            .filter(sg => !sg.optional)
+            .reduce((sum, sg) => sum + (sg.completed ? 1 : sg.progress), 0) /
+            currentGoal.subgoals.filter(sg => !sg.optional).length;
+        }
+        break;
+
+      case 'combat_won':
+        // Pirate goals - raid count
+        if (currentGoal.type === 'ACCUMULATE_WEALTH' && currentGoal.category === 'ECONOMIC') {
+          const subgoal = currentGoal.subgoals.find(sg => sg.description.includes('raid'));
+          if (subgoal) {
+            subgoal.progress = Math.min(1, subgoal.progress + 0.2); // Each raid = 20% of 5 raids
+            if (subgoal.progress >= 1) {
+              subgoal.completed = true;
+            }
+            progressMade = true;
+          }
+        }
+        break;
+    }
+
+    // Reduce stress slightly when making progress toward goals
+    if (progressMade && currentGoal.motivation.emotionalDrive > 5) {
+      ship.emotionalState.stress = Math.max(0, ship.emotionalState.stress - 0.5);
+    }
+  }
+
+  /**
+   * Generate initial goals based on ship type
+   */
+  private generateInitialGoals(ship: NPCShip): void {
+    const now = Date.now() / 1000;
+    let primaryGoal: NPCGoal | null = null;
+
+    switch (ship.type) {
+      case 'TRADER':
+        primaryGoal = {
+          id: `goal_${ship.id}_wealth`,
+          type: 'ACCUMULATE_WEALTH',
+          category: 'ECONOMIC',
+          name: 'Build Trading Fortune',
+          description: 'Accumulate wealth through profitable trade routes',
+          priority: 80,
+          urgency: 40,
+          progress: 0,
+          subgoals: [
+            { description: 'Find profitable trade route', completed: false, optional: false, progress: 0 },
+            { description: 'Complete 10 profitable trades', completed: false, optional: false, progress: 0 },
+            { description: 'Build reputation with traders', completed: false, optional: true, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'INTRINSIC',
+            reason: 'Desire for financial success',
+            emotionalDrive: ship.personality.greed * 10
+          },
+          expectedReward: {
+            credits: 100000,
+            satisfaction: 8
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['trading', 'wealth', 'career']
+        };
+        break;
+
+      case 'EXPLORER':
+        primaryGoal = {
+          id: `goal_${ship.id}_explore`,
+          type: 'EXPLORE_UNKNOWN',
+          category: 'EXPLORATION',
+          name: 'Map the Unknown',
+          description: 'Discover and map unexplored regions of space',
+          priority: 85,
+          urgency: 30,
+          progress: 0,
+          subgoals: [
+            { description: 'Visit 5 unexplored regions', completed: false, optional: false, progress: 0 },
+            { description: 'Discover points of interest', completed: false, optional: true, progress: 0 },
+            { description: 'Return safely with data', completed: false, optional: false, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'INTRINSIC',
+            reason: 'Curiosity and love of discovery',
+            emotionalDrive: ship.personality.curiosity * 10
+          },
+          expectedReward: {
+            credits: 50000,
+            satisfaction: 9,
+            reputation: new Map([['explorers_guild', 20]])
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['exploration', 'discovery', 'career']
+        };
+        break;
+
+      case 'PIRATE':
+        primaryGoal = {
+          id: `goal_${ship.id}_plunder`,
+          type: 'ACCUMULATE_WEALTH',
+          category: 'ECONOMIC',
+          name: 'Plunder and Profit',
+          description: 'Acquire wealth through raiding and piracy',
+          priority: 90,
+          urgency: 60,
+          progress: 0,
+          subgoals: [
+            { description: 'Find vulnerable targets', completed: false, optional: false, progress: 0 },
+            { description: 'Successfully raid 5 ships', completed: false, optional: false, progress: 0 },
+            { description: 'Avoid capture', completed: false, optional: false, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Need for resources and thrills',
+            emotionalDrive: (ship.personality.aggression + ship.personality.greed) * 5
+          },
+          expectedReward: {
+            credits: 75000,
+            satisfaction: 7
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['piracy', 'wealth', 'combat']
+        };
+        break;
+
+      case 'PATROL':
+        primaryGoal = {
+          id: `goal_${ship.id}_protect`,
+          type: 'RISE_IN_FACTION',
+          category: 'CAREER',
+          name: 'Protect Territory',
+          description: 'Maintain security in assigned patrol zone',
+          priority: 75,
+          urgency: 50,
+          progress: 0,
+          subgoals: [
+            { description: 'Patrol assigned routes', completed: false, optional: false, progress: 0 },
+            { description: 'Respond to threats', completed: false, optional: false, progress: 0 },
+            { description: 'Earn commendations', completed: false, optional: true, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Duty and loyalty to faction',
+            emotionalDrive: ship.personality.loyalty * 10
+          },
+          expectedReward: {
+            credits: 30000,
+            satisfaction: 6,
+            reputation: new Map([[ship.faction, 15]])
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'FACTION',
+          tags: ['patrol', 'duty', 'security']
+        };
+        break;
+
+      default:
+        // Generic survival goal for other types
+        primaryGoal = {
+          id: `goal_${ship.id}_survive`,
+          type: 'ACHIEVE_FINANCIAL_SECURITY',
+          category: 'SURVIVAL',
+          name: 'Survive and Thrive',
+          description: 'Maintain ship operations and build financial security',
+          priority: 70,
+          urgency: 50,
+          progress: 0,
+          subgoals: [
+            { description: 'Maintain fuel and supplies', completed: false, optional: false, progress: 0 },
+            { description: 'Build emergency fund', completed: false, optional: false, progress: 0 }
+          ],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'COMPULSION',
+            reason: 'Need for security and stability',
+            emotionalDrive: ship.personality.caution * 10
+          },
+          expectedReward: {
+            credits: 50000,
+            satisfaction: 5
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['survival', 'financial']
+        };
+    }
+
+    if (primaryGoal) {
+      ship.goalSystem.addGoal(primaryGoal);
+    }
   }
 }
