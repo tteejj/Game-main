@@ -20,6 +20,9 @@ import { EconomicModel } from '../../universe-system/src/economy/economic-model'
 import { CommunicationsManager } from '../../universe-system/src/communications/communications-manager';
 import { RelayNetwork, NetworkNode } from '../../universe-system/src/communications/relay-network';
 import { GameWorld } from '../../physics-modules/src/game-world';
+import { SpaceRenderer, ColorPalette } from './rendering/renderer';
+import { VisualEffects } from './rendering/effects';
+import { PerformanceMonitor } from './utils/performance-monitor';
 
 export class Game {
     private ctx: CanvasRenderingContext2D;
@@ -54,6 +57,24 @@ export class Game {
     private frameCount: number = 0;
     private fps: number = 0;
     private lastFpsUpdate: number = 0;
+
+    // Rendering systems (Phase 4)
+    private spaceRenderer: SpaceRenderer;
+    private visualEffects: VisualEffects;
+    private perfMonitor: PerformanceMonitor;
+    private showTrajectory: boolean = false;
+    private showPerfStats: boolean = false;
+
+    // Color palette for rendering
+    private palette: ColorPalette = {
+        background: '#000000',
+        primary: '#00ff00',
+        secondary: '#00aa00',
+        accent: '#00ffff',
+        good: '#00ff00',
+        warning: '#ffff00',
+        critical: '#ff0000'
+    };
 
     constructor(canvas: HTMLCanvasElement) {
         const ctx = canvas.getContext('2d');
@@ -114,6 +135,12 @@ export class Game {
         // Initialize faction diplomacy with starting relationships
         this.initializeDiplomacy();
         console.log('✅ Faction diplomacy initialized');
+
+        // Initialize rendering systems (Phase 4)
+        this.spaceRenderer = new SpaceRenderer(this.ctx, this.palette);
+        this.visualEffects = new VisualEffects(this.ctx);
+        this.perfMonitor = new PerformanceMonitor();
+        console.log('✅ Rendering systems initialized');
 
         console.log('🚀 All systems ready!');
     }
@@ -757,6 +784,40 @@ export class Game {
     }
 
     /**
+     * Toggle trajectory display
+     */
+    toggleTrajectory(): void {
+        this.showTrajectory = !this.showTrajectory;
+        console.log(`Trajectory display: ${this.showTrajectory ? 'ON' : 'OFF'}`);
+    }
+
+    /**
+     * Toggle performance stats display
+     */
+    togglePerfStats(): void {
+        this.showPerfStats = !this.showPerfStats;
+        console.log(`Performance stats: ${this.showPerfStats ? 'ON' : 'OFF'}`);
+    }
+
+    /**
+     * Zoom camera in
+     */
+    zoomIn(): void {
+        const currentZoom = this.spaceRenderer.camera.zoom;
+        this.spaceRenderer.camera.setZoom(currentZoom * 1.25);
+        console.log(`Zoom: ${this.spaceRenderer.camera.zoom.toFixed(2)}x`);
+    }
+
+    /**
+     * Zoom camera out
+     */
+    zoomOut(): void {
+        const currentZoom = this.spaceRenderer.camera.zoom;
+        this.spaceRenderer.camera.setZoom(currentZoom * 0.8);
+        console.log(`Zoom: ${this.spaceRenderer.camera.zoom.toFixed(2)}x`);
+    }
+
+    /**
      * Main game loop
      */
     private gameLoop = (): void => {
@@ -792,33 +853,53 @@ export class Game {
      * Update all game systems
      */
     private update(deltaTime: number): void {
+        const frameStart = this.perfMonitor.startFrame();
+
         this.gameTime += deltaTime;
 
         // Update game world (terrain, environment, satellites, orbital mechanics)
+        let start = this.perfMonitor.startUpdate('gameWorld');
         this.gameWorld.update(deltaTime);
+        this.perfMonitor.endUpdate('gameWorld', start);
 
         // Update star system (planetary orbits, hazards)
+        start = this.perfMonitor.startUpdate('starSystem');
         this.starSystem.update(deltaTime);
+        this.perfMonitor.endUpdate('starSystem', start);
 
         // Apply multi-body gravity to spacecraft
+        start = this.perfMonitor.startUpdate('gravity');
         this.applyGravity(deltaTime);
+        this.perfMonitor.endUpdate('gravity', start);
 
         // Update spacecraft physics and all subsystems
+        start = this.perfMonitor.startUpdate('spacecraft');
         this.spacecraft.update(deltaTime);
+        this.perfMonitor.endUpdate('spacecraft', start);
 
         // Update NPC traffic (navigation, collision avoidance)
+        start = this.perfMonitor.startUpdate('traffic');
         this.updateTraffic(deltaTime);
+        this.perfMonitor.endUpdate('traffic', start);
 
         // Simulate background diplomatic events (pirate raids, NPC combat, trade)
+        start = this.perfMonitor.startUpdate('backgroundEvents');
         this.simulateBackgroundEvents(deltaTime);
+        this.perfMonitor.endUpdate('backgroundEvents', start);
 
         // Economy is passive (pricing calculator), no update needed
 
         // Update communications network
+        start = this.perfMonitor.startUpdate('communications');
         this.updateCommunications(deltaTime);
+        this.perfMonitor.endUpdate('communications', start);
 
         // Check for collisions
+        start = this.perfMonitor.startUpdate('collisions');
         this.checkCollisions();
+        this.perfMonitor.endUpdate('collisions', start);
+
+        this.perfMonitor.endFrame(frameStart);
 
         // Update sensors and contacts
         this.updateSensors();
@@ -1138,12 +1219,48 @@ export class Game {
      * Render the current frame
      */
     private render(): void {
-        // Clear canvas
-        this.ctx.fillStyle = '#000000';
-        this.ctx.fillRect(0, 0, 1280, 720);
+        // Render space scene using Phase 4 SpaceRenderer
+        const shipPos = this.spacecraft.getPosition();
+        const shipVel = this.spacecraft.getVelocity();
+        const mainEngineState = this.spacecraft.getMainEngineState();
 
-        // Simple stats overlay (bottom-left corner)
+        this.spaceRenderer.render({
+            spacecraft: {
+                position: shipPos,
+                rotation: Math.atan2(shipVel.y, shipVel.x), // Point towards velocity
+                engineFiring: mainEngineState.isOn,
+                trajectory: [] // TODO: Add trajectory calculation
+            },
+            starSystem: {
+                bodies: this.starSystem.planets.map(p => ({
+                    position: p.position,
+                    radius: p.radius,
+                    name: p.name,
+                    type: p.type || 'planet',
+                    atmosphere: p.atmosphere
+                })),
+                stations: this.starSystem.stations,
+                hazards: [] // TODO: Add hazards
+            },
+            npcShips: this.trafficManager.getAllVessels().map(v => ({
+                position: v.position,
+                heading: 0, // TODO: Get heading from NPC
+                hostile: false // TODO: Get hostile status
+            })),
+            targetedContact: null, // TODO: Add targeting system
+            showTrajectory: this.showTrajectory
+        });
+
+        // Update visual effects
+        this.visualEffects.update(Date.now());
+
+        // Render stats overlay (bottom-left corner)
         this.renderStats();
+
+        // Render performance stats if enabled
+        if (this.showPerfStats) {
+            this.perfMonitor.renderStats(this.ctx, 10, 100);
+        }
 
         // UI panels will be rendered on top by UIManager
     }
