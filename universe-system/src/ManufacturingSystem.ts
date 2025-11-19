@@ -931,4 +931,113 @@ export class ManufacturingSystem {
       default: return 1500;
     }
   }
+
+  // ====================================================================
+  // SAVE/LOAD SUPPORT
+  // ====================================================================
+
+  /**
+   * Serialize system state for saving
+   */
+  serialize(): import('./SaveFileFormat').ManufacturingSystemState {
+    const facilities = Array.from(this.facilities.values()).map(facility => {
+      // Serialize active jobs
+      const activeJobs = facility.activeJobs.map(job => ({
+        id: job.id,
+        recipeId: job.recipe.id,
+        facilityId: job.facilityId,
+        startTime: job.startTime,
+        estimatedCompletion: job.estimatedCompletion,
+        progress: job.progress,
+        inputsConsumed: Array.from(job.inputsConsumed.entries()).map(([commodity, quantity]) => ({ commodity, quantity })),
+        outputsProduced: Array.from(job.outputsProduced.entries()).map(([commodity, quantity]) => ({ commodity, quantity })),
+        status: job.status,
+        failureReason: job.failureReason
+      }));
+
+      // Serialize inventory
+      const inventory = Array.from(facility.inventory.entries()).map(([commodity, quantity]) => ({ commodity, quantity }));
+
+      return {
+        id: facility.id,
+        stationId: facility.stationId,
+        facilityType: facility.facilityType,
+        techLevel: facility.techLevel,
+        maxConcurrentJobs: facility.maxConcurrentJobs,
+        productionRateMultiplier: facility.productionRateMultiplier,
+        activeJobs,
+        inventory,
+        efficiency: facility.efficiency,
+        condition: facility.condition,
+        powerAvailable: facility.powerAvailable
+      };
+    });
+
+    return {
+      facilities,
+      jobIdCounter: this.jobIdCounter
+    };
+  }
+
+  /**
+   * Deserialize and restore system state
+   */
+  deserialize(state: import('./SaveFileFormat').ManufacturingSystemState): void {
+    console.log('[ManufacturingSystem] Deserializing state...');
+
+    // Clear existing state
+    this.facilities.clear();
+
+    // Restore facilities
+    for (const serializedFacility of state.facilities) {
+      // Restore active jobs
+      const activeJobs: ProductionJob[] = [];
+      for (const serializedJob of serializedFacility.activeJobs) {
+        const recipe = RecipeDatabase.getRecipe(serializedJob.recipeId);
+        if (!recipe) {
+          console.warn(`[ManufacturingSystem] Recipe ${serializedJob.recipeId} not found, skipping job ${serializedJob.id}`);
+          continue;
+        }
+
+        const job: ProductionJob = {
+          id: serializedJob.id,
+          recipe,
+          facilityId: serializedJob.facilityId,
+          startTime: serializedJob.startTime,
+          estimatedCompletion: serializedJob.estimatedCompletion,
+          progress: serializedJob.progress,
+          inputsConsumed: new Map(serializedJob.inputsConsumed.map(({ commodity, quantity }) => [commodity, quantity])),
+          outputsProduced: new Map(serializedJob.outputsProduced.map(({ commodity, quantity }) => [commodity, quantity])),
+          status: serializedJob.status,
+          failureReason: serializedJob.failureReason
+        };
+
+        activeJobs.push(job);
+      }
+
+      // Restore inventory
+      const inventory = new Map(serializedFacility.inventory.map(({ commodity, quantity }) => [commodity, quantity]));
+
+      const facility: ManufacturingFacility = {
+        id: serializedFacility.id,
+        stationId: serializedFacility.stationId,
+        facilityType: serializedFacility.facilityType,
+        techLevel: serializedFacility.techLevel,
+        maxConcurrentJobs: serializedFacility.maxConcurrentJobs,
+        productionRateMultiplier: serializedFacility.productionRateMultiplier,
+        activeJobs,
+        inventory,
+        efficiency: serializedFacility.efficiency,
+        condition: serializedFacility.condition,
+        powerAvailable: serializedFacility.powerAvailable
+      };
+
+      this.facilities.set(facility.id, facility);
+    }
+
+    // Restore counter
+    this.jobIdCounter = state.jobIdCounter;
+
+    console.log(`[ManufacturingSystem] Restored ${this.facilities.size} facilities`);
+  }
 }

@@ -16,6 +16,7 @@ import { StarSystem } from '../StarSystem';
 import { ConstructionSystem, ConstructionProject, ConstructionProjectType } from '../ConstructionSystem';
 import { CommodityType } from '../economy/commodity';
 import { Faction, Ideology } from '../FactionSystem';
+import { FactionEconomicNeeds } from './FactionEconomicNeeds';
 
 /**
  * Extended faction interface for expansion AI
@@ -51,6 +52,7 @@ export class FactionExpansionAI {
   private faction: ExpandableFaction;
   private starSystem: StarSystem;
   private constructionSystem: ConstructionSystem;
+  private economicNeeds: FactionEconomicNeeds | null = null;
 
   // Expansion parameters
   private minStationDistance = 50000; // km - minimum distance between stations
@@ -65,6 +67,16 @@ export class FactionExpansionAI {
     this.faction = faction;
     this.starSystem = starSystem;
     this.constructionSystem = constructionSystem;
+  }
+
+  /**
+   * Link FactionEconomicNeeds system for real commodity tracking
+   *
+   * @param economicNeeds - FactionEconomicNeeds instance
+   */
+  linkFactionEconomicNeeds(economicNeeds: FactionEconomicNeeds): void {
+    this.economicNeeds = economicNeeds;
+    console.log(`[FactionExpansionAI] ${this.faction.name} linked to economic needs system`);
   }
 
   /**
@@ -280,7 +292,8 @@ export class FactionExpansionAI {
     const canAfford = this.factionHasResources(costs);
 
     if (!canAfford) {
-      console.log(`[FactionExpansionAI] ${this.faction.name} can't afford ${type} (needs ${this.calculateCost(costs)} credits, has ${this.faction.credits})`);
+      console.log(`[FactionExpansionAI] ${this.faction.name} can't afford ${type}`);
+      this.emitResourceShortage(type, costs);
       return;
     }
 
@@ -380,21 +393,67 @@ export class FactionExpansionAI {
   /**
    * Check if faction has resources to build
    *
-   * Simplified check based on credits.
-   * Full implementation would check commodity stockpiles.
+   * Checks actual commodity stockpiles in faction's strategic reserves.
+   * If economic needs system is not linked, falls back to credit-only check.
    *
    * @param costs - Array of commodity costs
-   * @returns True if faction can afford
+   * @returns True if faction has all required commodities
    */
   private factionHasResources(costs: Array<{ commodity: CommodityType; quantity: number }>): boolean {
-    const totalCost = this.calculateCost(costs);
-    return this.faction.credits >= totalCost && this.faction.credits >= this.MIN_CREDITS;
+    // Fallback: If economic needs not linked, use credit-only check
+    if (!this.economicNeeds) {
+      const totalCost = this.calculateCost(costs);
+      return this.faction.credits >= totalCost && this.faction.credits >= this.MIN_CREDITS;
+    }
+
+    // Get faction economy
+    const economy = this.economicNeeds.getFactionEconomy(this.faction.id);
+
+    if (!economy) {
+      console.warn(`[FactionExpansionAI] ${this.faction.name} not found in economic system`);
+      return false;
+    }
+
+    // Check each required commodity
+    const missing: Array<{ commodity: string; needed: number; available: number }> = [];
+
+    for (const cost of costs) {
+      const commodityName = this.mapCommodityTypeToEconomyName(cost.commodity);
+      const available = economy.strategicReserves.get(commodityName) || 0;
+      const needed = cost.quantity;
+
+      if (available < needed) {
+        missing.push({
+          commodity: commodityName,
+          needed,
+          available
+        });
+      }
+    }
+
+    // Log shortages
+    if (missing.length > 0) {
+      console.log(`[FactionExpansionAI] ${this.faction.name} resource shortage:`);
+      for (const shortage of missing) {
+        console.log(`  ${shortage.commodity}: need ${shortage.needed}, have ${shortage.available} (short ${shortage.needed - shortage.available})`);
+      }
+      return false;
+    }
+
+    // Also check minimum credits
+    if (this.faction.credits < this.MIN_CREDITS) {
+      console.log(`[FactionExpansionAI] ${this.faction.name} insufficient credits: ${this.faction.credits} < ${this.MIN_CREDITS}`);
+      return false;
+    }
+
+    return true;
   }
 
   /**
    * Calculate total credit cost from commodity costs
    *
    * Estimates cost by multiplying quantity by average commodity value.
+   * Used as fallback when economic system not linked.
    *
    * @param costs - Array of commodity costs
    * @returns Total cost in credits
@@ -405,17 +464,156 @@ export class FactionExpansionAI {
   }
 
   /**
-   * Consume resources from faction treasury
+   * Consume resources from faction stockpile
    *
-   * Deducts credits from faction when starting construction.
+   * Actually deducts commodities from faction's strategic reserves.
+   * If economic needs system not linked, falls back to credit deduction.
    *
    * @param costs - Array of commodity costs
    */
   private consumeFactionResources(costs: Array<{ commodity: CommodityType; quantity: number }>): void {
-    const totalCost = this.calculateCost(costs);
-    this.faction.credits -= totalCost;
+    // Fallback: If economic needs not linked, use credit-only deduction
+    if (!this.economicNeeds) {
+      const totalCost = this.calculateCost(costs);
+      this.faction.credits -= totalCost;
+      console.log(`[FactionExpansionAI] ${this.faction.name} spent ${totalCost} credits (${this.faction.credits} remaining)`);
+      return;
+    }
 
-    console.log(`[FactionExpansionAI] ${this.faction.name} spent ${totalCost} credits (${this.faction.credits} remaining)`);
+    // Get faction economy
+    const economy = this.economicNeeds.getFactionEconomy(this.faction.id);
+
+    if (!economy) {
+      console.error(`[FactionExpansionAI] ${this.faction.name} not found in economic system - cannot consume resources`);
+      return;
+    }
+
+    // Consume each commodity from strategic reserves
+    console.log(`[FactionExpansionAI] ${this.faction.name} consuming construction materials:`);
+
+    for (const cost of costs) {
+      const commodityName = this.mapCommodityTypeToEconomyName(cost.commodity);
+      const current = economy.strategicReserves.get(commodityName) || 0;
+      const newAmount = Math.max(0, current - cost.quantity);
+
+      economy.strategicReserves.set(commodityName, newAmount);
+
+      console.log(`  ${commodityName}: ${cost.quantity} consumed (${current} -> ${newAmount})`);
+    }
+
+    // Also deduct minimum credits for labor/energy costs
+    const laborCost = this.MIN_CREDITS;
+    this.faction.credits -= laborCost;
+
+    console.log(`[FactionExpansionAI] ${this.faction.name} spent ${laborCost} credits for labor/energy (${this.faction.credits} remaining)`);
+  }
+
+  /**
+   * Map CommodityType enum to FactionEconomicNeeds commodity names
+   *
+   * Translates between the CommodityType enum used in construction
+   * and the string-based commodity names used in FactionEconomicNeeds.
+   *
+   * @param commodityType - CommodityType enum value
+   * @returns String name used in economy system
+   */
+  private mapCommodityTypeToEconomyName(commodityType: CommodityType): string {
+    // Map CommodityType enum to economy system names
+    // Economy system uses simple uppercase strings
+    const mapping: Record<string, string> = {
+      // Refined materials (used in construction)
+      'STEEL': 'STEEL',
+      'TITANIUM': 'TITANIUM',
+      'ALUMINUM': 'ALUMINUM',
+      'SILICON': 'SILICON',
+      'COPPER': 'COPPER',
+      'CARBON_FIBER': 'CARBON_FIBER',
+
+      // Manufactured goods
+      'ELECTRONICS': 'ELECTRONICS',
+      'MACHINERY': 'MACHINERY',
+      'TOOLS': 'TOOLS',
+      'CONSTRUCTION_MATERIALS': 'CONSTRUCTION_MATERIALS',
+      'WEAPONS': 'WEAPONS',
+      'SHIELD_GENERATORS': 'SHIELD_GENERATORS',
+      'SHIP_COMPONENTS': 'SHIP_COMPONENTS',
+      'COMPUTER_SYSTEMS': 'COMPUTER_SYSTEMS',
+      'SENSORS': 'SENSORS',
+
+      // Fuels
+      'HYDROGEN_FUEL': 'FUEL',
+      'FUSION_PELLETS': 'FUSION_PELLETS',
+      'OXYGEN': 'OXYGEN',
+
+      // Raw materials
+      'METALLIC_ORE': 'METALLIC_ORE',
+      'ROCKY_ORE': 'ROCKY_ORE',
+      'ICE': 'ICE',
+      'RARE_EARTH': 'RARE_EARTH',
+      'PLATINUM': 'PLATINUM',
+      'URANIUM': 'URANIUM',
+
+      // Consumables
+      'FOOD': 'FOOD',
+      'WATER': 'WATER',
+      'MEDICAL_SUPPLIES': 'MEDICINE',
+
+      // Luxury
+      'JEWELRY': 'JEWELRY',
+      'ART': 'ART',
+      'ENTERTAINMENT': 'ENTERTAINMENT'
+    };
+
+    return mapping[commodityType] || commodityType;
+  }
+
+  /**
+   * Emit RESOURCE_SHORTAGE event when faction can't build
+   *
+   * Logs detailed information about what resources are missing
+   * and what the faction was trying to build.
+   *
+   * @param projectType - Type of construction that was blocked
+   * @param costs - Required costs that couldn't be met
+   */
+  private emitResourceShortage(
+    projectType: ConstructionProjectType,
+    costs: Array<{ commodity: CommodityType; quantity: number }>
+  ): void {
+    console.log(`[FactionExpansionAI] 🚨 RESOURCE_SHORTAGE: ${this.faction.name} blocked from building ${projectType}`);
+
+    // If economic needs linked, show detailed shortage info
+    if (this.economicNeeds) {
+      const economy = this.economicNeeds.getFactionEconomy(this.faction.id);
+
+      if (economy) {
+        console.log(`[FactionExpansionAI] Required resources for ${projectType}:`);
+
+        for (const cost of costs) {
+          const commodityName = this.mapCommodityTypeToEconomyName(cost.commodity);
+          const available = economy.strategicReserves.get(commodityName) || 0;
+          const needed = cost.quantity;
+          const shortage = Math.max(0, needed - available);
+
+          if (shortage > 0) {
+            console.log(`  ❌ ${commodityName}: need ${needed}, have ${available} (SHORT ${shortage})`);
+          } else {
+            console.log(`  ✓ ${commodityName}: need ${needed}, have ${available}`);
+          }
+        }
+
+        // Also check credits
+        if (this.faction.credits < this.MIN_CREDITS) {
+          console.log(`  ❌ CREDITS: need ${this.MIN_CREDITS}, have ${this.faction.credits} (SHORT ${this.MIN_CREDITS - this.faction.credits})`);
+        } else {
+          console.log(`  ✓ CREDITS: need ${this.MIN_CREDITS}, have ${this.faction.credits}`);
+        }
+      }
+    } else {
+      // Economic needs not linked - show credit-only info
+      const totalCost = this.calculateCost(costs);
+      console.log(`[FactionExpansionAI] Required credits: ${totalCost} (have ${this.faction.credits})`);
+    }
   }
 
   /**

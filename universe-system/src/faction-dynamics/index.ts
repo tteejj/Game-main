@@ -25,6 +25,11 @@ export {
 } from './FactionDiplomacyEngine';
 
 export {
+  DiplomacyEventIntegration,
+  DiplomacyEventIntegrationConfig
+} from './DiplomacyEventIntegration';
+
+export {
   FactionEconomicNeeds,
   FactionEconomy,
   ResourceNeed,

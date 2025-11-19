@@ -1535,10 +1535,9 @@ export class StarSystem {
 
       militaryAI.initializeFaction(factionName as any, doctrine);
 
-      // Register faction's territories
-      factionStations.forEach(station => {
-        militaryAI.registerStation(station as any);
-      });
+      // CRITICAL: Link to StarSystem and sync territories
+      // This populates the military AI's station/city registries from actual game state
+      militaryAI.linkStarSystem(this);
 
       this.factionMilitaryAIs.set(factionName, militaryAI);
 

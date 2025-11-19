@@ -17,6 +17,7 @@ import { PlanetaryCity } from '../PlanetaryCities';
 import { ConquestSystem, SiegeOperation, OccupationState } from '../ConquestSystem';
 import { FactionDiplomacyEngine, DiplomaticStatus } from './FactionDiplomacyEngine';
 import { FactionEconomicNeeds } from './FactionEconomicNeeds';
+import { getGlobalEventBus, UniverseEventType, EventPriority } from '../UniverseEventSystem';
 
 export interface MilitaryTarget {
   id: string;
@@ -158,18 +159,24 @@ export class FactionMilitaryAI {
   // All operations
   private operations: Map<string, MilitaryOperation> = new Map();
 
-  // Available stations and cities (would be populated by integration)
+  // Available stations and cities - NOW POPULATED VIA STARSYSTEM INTEGRATION
   private stations: Map<string, SpaceStation> = new Map();
   private cities: Map<string, PlanetaryCity> = new Map();
+
+  // StarSystem integration
+  private starSystem: any = null;  // Will be set via linkStarSystem()
+  private eventSubscriptions: string[] = [];
 
   // Configuration
   private readonly UPDATE_INTERVAL = 3600;  // Update every hour (game time)
   private readonly TARGET_SCAN_INTERVAL = 86400;  // Scan for targets daily
+  private readonly SYNC_INTERVAL = 7200;  // Sync territories every 2 hours
   private readonly FORCE_RATIO_FOR_ATTACK = 1.5;  // Need 1.5x defender strength
   private readonly MAX_OPERATIONS_PER_FACTION = 3;
 
   private lastUpdate = 0;
   private lastTargetScan = 0;
+  private lastSync = 0;
 
   constructor(
     conquestSystem: ConquestSystem,
@@ -180,7 +187,206 @@ export class FactionMilitaryAI {
     this.diplomacyEngine = diplomacyEngine;
     this.economicNeeds = economicNeeds;
 
+    // Subscribe to universe events for automatic registry updates
+    this.subscribeToEvents();
+
     console.log('[FactionMilitaryAI] Initialized - Factions can now wage war');
+  }
+
+  /**
+   * Link to StarSystem for accessing stations and cities
+   */
+  public linkStarSystem(starSystem: any): void {
+    this.starSystem = starSystem;
+    console.log('[FactionMilitaryAI] Linked to StarSystem - gaining access to territories');
+
+    // Perform initial sync
+    this.syncTerritories();
+  }
+
+  /**
+   * Synchronize registries with StarSystem's actual stations and cities
+   * This ensures military AI always has up-to-date territory information
+   */
+  public syncTerritories(): void {
+    if (!this.starSystem) {
+      console.warn('[FactionMilitaryAI] Cannot sync - no StarSystem linked');
+      return;
+    }
+
+    const beforeStations = this.stations.size;
+    const beforeCities = this.cities.size;
+
+    // Clear old registries
+    this.stations.clear();
+    this.cities.clear();
+
+    // Sync stations from StarSystem
+    if (this.starSystem.stations && Array.isArray(this.starSystem.stations)) {
+      for (const station of this.starSystem.stations) {
+        this.stations.set(station.id, station);
+
+        // Update faction's controlled territories
+        const state = this.getFactionState(station.faction);
+        if (state && !state.controlledTerritories.includes(station.id)) {
+          state.controlledTerritories.push(station.id);
+        }
+      }
+    }
+
+    // Sync cities from StarSystem (if available)
+    if (this.starSystem.cities && Array.isArray(this.starSystem.cities)) {
+      for (const city of this.starSystem.cities) {
+        this.cities.set(city.id, city);
+
+        // Update faction's controlled territories
+        const state = this.getFactionState(city.faction);
+        if (state && !state.controlledTerritories.includes(city.id)) {
+          state.controlledTerritories.push(city.id);
+        }
+      }
+    }
+
+    const afterStations = this.stations.size;
+    const afterCities = this.cities.size;
+
+    console.log(`[FactionMilitaryAI] Territory sync complete:`);
+    console.log(`  Stations: ${beforeStations} -> ${afterStations}`);
+    console.log(`  Cities: ${beforeCities} -> ${afterCities}`);
+
+    // Force a target scan after sync to populate with real targets
+    this.scanForTargets();
+  }
+
+  /**
+   * Subscribe to universe events for automatic updates
+   */
+  private subscribeToEvents(): void {
+    const eventBus = getGlobalEventBus();
+
+    // Subscribe to STATION_CREATED
+    const stationCreatedSub = eventBus.subscribe(
+      UniverseEventType.STATION_CREATED,
+      (event) => this.onStationCreated(event),
+      EventPriority.HIGH
+    );
+    this.eventSubscriptions.push(stationCreatedSub);
+
+    // Subscribe to TERRITORY_CAPTURED
+    const territoryCapturedSub = eventBus.subscribe(
+      UniverseEventType.TERRITORY_CAPTURED,
+      (event) => this.onTerritoryCaptured(event),
+      EventPriority.URGENT
+    );
+    this.eventSubscriptions.push(territoryCapturedSub);
+
+    // Subscribe to STATION_DESTROYED
+    const stationDestroyedSub = eventBus.subscribe(
+      UniverseEventType.STATION_DESTROYED,
+      (event) => this.onStationDestroyed(event),
+      EventPriority.HIGH
+    );
+    this.eventSubscriptions.push(stationDestroyedSub);
+
+    console.log('[FactionMilitaryAI] Subscribed to universe events');
+  }
+
+  /**
+   * Handle STATION_CREATED event
+   */
+  private onStationCreated(event: any): void {
+    const station = event.data?.station;
+    if (!station) return;
+
+    console.log(`[FactionMilitaryAI] Station created: ${station.name} (${station.faction})`);
+
+    // Register the new station
+    this.registerStation(station);
+
+    // Trigger immediate target scan for factions
+    this.scanForTargets();
+  }
+
+  /**
+   * Handle TERRITORY_CAPTURED event
+   */
+  private onTerritoryCaptured(event: any): void {
+    const { territoryId, oldOwner, newOwner } = event.data || {};
+    if (!territoryId) return;
+
+    console.log(`[FactionMilitaryAI] Territory captured: ${territoryId} (${oldOwner} -> ${newOwner})`);
+
+    // Update station/city ownership
+    const station = this.stations.get(territoryId);
+    if (station) {
+      station.faction = newOwner;
+    }
+
+    const city = this.cities.get(territoryId);
+    if (city) {
+      city.faction = newOwner;
+    }
+
+    // Update faction territories
+    const oldOwnerState = this.getFactionState(oldOwner);
+    if (oldOwnerState) {
+      oldOwnerState.controlledTerritories = oldOwnerState.controlledTerritories.filter(
+        id => id !== territoryId
+      );
+    }
+
+    const newOwnerState = this.getFactionState(newOwner);
+    if (newOwnerState && !newOwnerState.controlledTerritories.includes(territoryId)) {
+      newOwnerState.controlledTerritories.push(territoryId);
+    }
+
+    // Rescan targets - borders have shifted
+    this.scanForTargets();
+  }
+
+  /**
+   * Handle STATION_DESTROYED event
+   */
+  private onStationDestroyed(event: any): void {
+    const stationId = event.data?.stationId || event.target;
+    if (!stationId) return;
+
+    console.log(`[FactionMilitaryAI] Station destroyed: ${stationId}`);
+
+    // Remove from registries
+    const station = this.stations.get(stationId);
+    if (station) {
+      // Remove from faction's territories
+      const state = this.getFactionState(station.faction);
+      if (state) {
+        state.controlledTerritories = state.controlledTerritories.filter(
+          id => id !== stationId
+        );
+      }
+
+      this.stations.delete(stationId);
+    }
+
+    // Also check cities
+    const city = this.cities.get(stationId);
+    if (city) {
+      const state = this.getFactionState(city.faction);
+      if (state) {
+        state.controlledTerritories = state.controlledTerritories.filter(
+          id => id !== stationId
+        );
+      }
+
+      this.cities.delete(stationId);
+    }
+
+    // Cancel any operations targeting this station
+    for (const operation of this.operations.values()) {
+      if (operation.targetId === stationId && operation.status === 'EXECUTING') {
+        operation.status = 'CANCELLED';
+        console.log(`[FactionMilitaryAI] Operation ${operation.id} cancelled - target destroyed`);
+      }
+    }
   }
 
   /**
@@ -291,6 +497,12 @@ export class FactionMilitaryAI {
       return;
     }
     this.lastUpdate = currentTime;
+
+    // Periodic territory sync to ensure registries stay current
+    if (currentTime - this.lastSync > this.SYNC_INTERVAL) {
+      this.syncTerritories();
+      this.lastSync = currentTime;
+    }
 
     // Scan for targets periodically
     if (currentTime - this.lastTargetScan > this.TARGET_SCAN_INTERVAL) {
@@ -1092,5 +1304,20 @@ export class FactionMilitaryAI {
       .slice(0, count)
       .map(id => state.knownTargets.get(id))
       .filter(t => t !== undefined) as MilitaryTarget[];
+  }
+
+  /**
+   * Cleanup subscriptions on destroy
+   */
+  public destroy(): void {
+    const eventBus = getGlobalEventBus();
+
+    // Unsubscribe from all events
+    for (const subId of this.eventSubscriptions) {
+      eventBus.unsubscribe(subId);
+    }
+
+    this.eventSubscriptions = [];
+    console.log('[FactionMilitaryAI] Destroyed - cleaned up event subscriptions');
   }
 }
