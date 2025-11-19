@@ -20,6 +20,8 @@ import { EconomicModel } from '../../universe-system/src/economy/economic-model'
 import { CommunicationsManager } from '../../universe-system/src/communications/communications-manager';
 import { RelayNetwork, NetworkNode } from '../../universe-system/src/communications/relay-network';
 import { GameWorld } from '../../physics-modules/src/game-world';
+import { PlayerShipIntegration } from '../../universe-system/src/PlayerShipIntegration';
+import { UniverseOrchestrator } from '../../universe-system/src/UniverseOrchestrator';
 
 export class Game {
     private ctx: CanvasRenderingContext2D;
@@ -41,6 +43,10 @@ export class Game {
     public communications: CommunicationsManager;
     private commNetwork: RelayNetwork;
     private markets: Map<string, any> = new Map();
+
+    // Player integration systems
+    public playerIntegration: PlayerShipIntegration;
+    private universeOrchestrator: UniverseOrchestrator;
 
     // Background event tracking
     private lastBackgroundEventTime: number = 0;
@@ -115,6 +121,21 @@ export class Game {
         this.initializeDiplomacy();
         console.log('✅ Faction diplomacy initialized');
 
+        // Initialize universe orchestrator for player systems
+        this.universeOrchestrator = new UniverseOrchestrator();
+
+        // Initialize player integration with real spacecraft
+        this.playerIntegration = new PlayerShipIntegration(
+            this.spacecraft.spacecraft,  // The actual physics Spacecraft
+            this.universeOrchestrator,
+            this.starSystem
+        );
+
+        // Sync initial state
+        this.syncPlayerState();
+
+        console.log('✅ Player integration systems initialized');
+
         console.log('🚀 All systems ready!');
     }
 
@@ -150,6 +171,40 @@ export class Game {
 
         console.log('  └─ Created 2 treaties');
         console.log('  └─ Set initial faction standings');
+    }
+
+    /**
+     * Sync player state between Game and PlayerShipIntegration
+     */
+    private syncPlayerState(): void {
+        // Sync credits
+        const state = this.playerIntegration.getState();
+        state.credits = this.playerCredits;
+
+        // Sync cargo
+        this.playerCargo.forEach((qty, commodity) => {
+            state.cargo.set(commodity, qty);
+        });
+        state.cargoUsed = Array.from(this.playerCargo.values()).reduce((sum, qty) => sum + qty, 0);
+    }
+
+    /**
+     * Get nearby ships for player combat system
+     */
+    private getNearbyShipsForCombat(): any[] {
+        const playerPos = this.spacecraft.getPosition();
+        const nearbyNPCs = this.trafficManager.getVesselsNear(
+            playerPos,
+            50000 // 50km range
+        );
+
+        return nearbyNPCs.map(npc => ({
+            id: npc.id,
+            name: npc.name,
+            position: npc.position,
+            faction: npc.faction,
+            hostile: npc.hostile || false
+        }));
     }
 
     /**
@@ -805,6 +860,12 @@ export class Game {
 
         // Update spacecraft physics and all subsystems
         this.spacecraft.update(deltaTime);
+
+        // Update player integration systems (missions, combat, crew, research)
+        this.playerIntegration.update(deltaTime, this.getNearbyShipsForCombat());
+
+        // Sync state back from player integration
+        this.playerCredits = this.playerIntegration.getState().credits;
 
         // Update NPC traffic (navigation, collision avoidance)
         this.updateTraffic(deltaTime);

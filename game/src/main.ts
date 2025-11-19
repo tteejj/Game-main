@@ -38,6 +38,9 @@ window.addEventListener('DOMContentLoaded', () => {
         input.onStationSwitch = (stationNum) => ui.setActiveStation(stationNum);
         input.onKeyPress = (key) => ui.handleInput(key);
 
+        // Connect player integration to UI (Station 6: Operations)
+        ui.setPlayerIntegration(game.playerIntegration);
+
         // Pass game reference to UI for NPC updates
         (window as any).game = game;
         (window as any).ui = ui;

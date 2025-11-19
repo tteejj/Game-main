@@ -9,18 +9,24 @@
  */
 
 import { SpacecraftAdapter } from '../spacecraft-adapter';
+import { PlayerShipIntegration } from '../../../universe-system/src/PlayerShipIntegration';
 
 export class HUD {
     private ctx: CanvasRenderingContext2D;
     private palette: any;
     private spacecraft: SpacecraftAdapter;
     private canvas: HTMLCanvasElement;
+    private playerIntegration: PlayerShipIntegration | null = null;
 
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter, canvas: HTMLCanvasElement) {
         this.ctx = ctx;
         this.palette = palette;
         this.spacecraft = spacecraft;
         this.canvas = canvas;
+    }
+
+    setPlayerIntegration(integration: PlayerShipIntegration): void {
+        this.playerIntegration = integration;
     }
 
     render(): void {
@@ -30,6 +36,13 @@ export class HUD {
         this.renderFlightData();
         this.renderAttitudeReadout();
         this.renderShipOrientation();
+
+        // Render player status (if integration available)
+        if (this.playerIntegration) {
+            this.renderPlayerStatus();
+            this.renderMissionStatus();
+            this.renderReputationStatus();
+        }
     }
 
     /**
@@ -404,5 +417,143 @@ export class HUD {
         const yaw = Math.atan2(siny_cosp, cosy_cosp) * 180 / Math.PI;
 
         return { pitch, roll, yaw };
+    }
+
+    /**
+     * Render player status (credits, cargo, docking)
+     */
+    private renderPlayerStatus(): void {
+        if (!this.playerIntegration) return;
+
+        const ctx = this.ctx;
+        const state = this.playerIntegration.getState();
+
+        // Position in top-right corner
+        const x = this.canvas.width - 250;
+        let y = 40;
+
+        ctx.font = 'bold 14px "Courier New"';
+        ctx.fillStyle = this.palette.info;
+        ctx.fillText('PLAYER STATUS', x, y);
+        y += 25;
+
+        ctx.font = '12px "Courier New"';
+        ctx.fillStyle = this.palette.primary;
+
+        // Credits
+        ctx.fillText(`Credits: ${state.credits.toFixed(0)} CR`, x, y);
+        y += 18;
+
+        // Cargo
+        const cargoColor = state.cargoUsed > state.cargoCapacity * 0.9 ? this.palette.danger : this.palette.primary;
+        ctx.fillStyle = cargoColor;
+        ctx.fillText(`Cargo: ${state.cargoUsed}/${state.cargoCapacity}`, x, y);
+        y += 18;
+
+        // Docking status
+        if (state.isDocked && state.dockedAt) {
+            ctx.fillStyle = this.palette.info;
+            ctx.fillText(`Docked: ${state.dockedAt.name}`, x, y);
+            y += 18;
+        } else if (state.nearestStation) {
+            const distKm = (state.distanceToStation / 1000).toFixed(1);
+            ctx.fillStyle = this.palette.secondary;
+            ctx.fillText(`Station: ${distKm} km`, x, y);
+            y += 18;
+        }
+
+        // Criminal status
+        if (state.criminalStatus) {
+            ctx.fillStyle = this.palette.danger;
+            ctx.fillText(`⚠ WANTED: ${state.bounty} CR`, x, y);
+            y += 18;
+        }
+
+        // Combat status
+        if (state.isInCombat) {
+            ctx.fillStyle = this.palette.danger;
+            ctx.fillText('⚠ IN COMBAT', x, y);
+            y += 18;
+        }
+    }
+
+    /**
+     * Render active mission status
+     */
+    private renderMissionStatus(): void {
+        if (!this.playerIntegration) return;
+
+        const ctx = this.ctx;
+        const activeMissions = this.playerIntegration.getActiveMissions();
+
+        if (activeMissions.length === 0) return;
+
+        // Position below player status
+        const x = this.canvas.width - 250;
+        let y = 180;
+
+        ctx.font = 'bold 12px "Courier New"';
+        ctx.fillStyle = this.palette.warning;
+        ctx.fillText(`ACTIVE MISSIONS (${activeMissions.length})`, x, y);
+        y += 20;
+
+        ctx.font = '11px "Courier New"';
+        ctx.fillStyle = this.palette.secondary;
+
+        // Show first 3 missions
+        activeMissions.slice(0, 3).forEach(mission => {
+            const progress = Math.floor((mission.currentObjective / mission.objectives.length) * 100);
+            ctx.fillText(`• ${mission.title}`, x, y);
+            y += 15;
+            ctx.fillStyle = this.palette.muted;
+            ctx.fillText(`  ${progress}% | ${mission.creditReward} CR`, x, y);
+            y += 18;
+            ctx.fillStyle = this.palette.secondary;
+        });
+
+        if (activeMissions.length > 3) {
+            ctx.fillStyle = this.palette.muted;
+            ctx.fillText(`  +${activeMissions.length - 3} more...`, x, y);
+        }
+    }
+
+    /**
+     * Render reputation status
+     */
+    private renderReputationStatus(): void {
+        if (!this.playerIntegration) return;
+
+        const ctx = this.ctx;
+        const reputations = this.playerIntegration.getAllReputations();
+
+        if (reputations.size === 0) return;
+
+        // Position in bottom-right corner
+        const x = this.canvas.width - 250;
+        let y = this.canvas.height - 150;
+
+        ctx.font = 'bold 12px "Courier New"';
+        ctx.fillStyle = this.palette.info;
+        ctx.fillText('FACTION STANDINGS', x, y);
+        y += 20;
+
+        ctx.font = '11px "Courier New"';
+
+        // Sort by reputation and show top 5
+        const sorted = Array.from(reputations.entries())
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+            .slice(0, 5);
+
+        sorted.forEach(([faction, rep]) => {
+            const standing = this.playerIntegration!.getReputationStanding(faction);
+            let color = this.palette.primary;
+            if (rep >= 50) color = this.palette.info;
+            else if (rep <= -50) color = this.palette.danger;
+            else if (rep <= -20) color = this.palette.warning;
+
+            ctx.fillStyle = color;
+            ctx.fillText(`${faction}: ${standing} (${rep.toFixed(0)})`, x, y);
+            y += 16;
+        });
     }
 }
