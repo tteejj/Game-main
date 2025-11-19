@@ -161,6 +161,209 @@ export class NPCShip implements ITrackableVessel {
     // Set behavior parameters from personality
     this.aggressiveness = initialPersonality.aggression || 0.3;
     this.caution = initialPersonality.caution || 0.5;
+
+    // Create initial goals based on ship type
+    this.createInitialGoals(type);
+  }
+
+  /**
+   * Create initial goals for NPC based on ship type
+   */
+  private createInitialGoals(type: ShipType): void {
+    const now = Date.now() / 1000;
+    const personality = this.extendedMemory.getCurrentPersonality();
+
+    switch (type) {
+      case ShipType.PIRATE:
+        // Pirates pursue wealth through predation
+        this.goalSystem.addGoal({
+          id: `${this.id}_accumulate_wealth`,
+          type: 'ACCUMULATE_WEALTH',
+          category: 'ECONOMIC',
+          name: 'Accumulate Wealth',
+          description: 'Get rich through piracy',
+          priority: 80 + personality.greed * 20,
+          urgency: 60,
+          progress: 0,
+          subgoals: [],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'INTRINSIC',
+            reason: 'Greed and survival',
+            emotionalDrive: personality.greed * 10
+          },
+          expectedReward: {
+            credits: 50000,
+            satisfaction: 8
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['economic', 'piracy']
+        });
+        break;
+
+      case ShipType.CARGO_FREIGHTER:
+      case ShipType.CARGO_SHUTTLE:
+        // Traders establish profitable routes
+        this.goalSystem.addGoal({
+          id: `${this.id}_establish_trade`,
+          type: 'ESTABLISH_TRADE_ROUTE',
+          category: 'ECONOMIC',
+          name: 'Establish Trade Route',
+          description: 'Set up profitable trading route',
+          priority: 70 + personality.greed * 15,
+          urgency: 50,
+          progress: 0,
+          subgoals: [],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Make profit through trade',
+            emotionalDrive: personality.greed * 8
+          },
+          expectedReward: {
+            credits: 20000,
+            satisfaction: 7
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['economic', 'trade']
+        });
+        break;
+
+      case ShipType.PATROL_SHIP:
+        // Patrol ships maintain security
+        this.goalSystem.addGoal({
+          id: `${this.id}_maintain_security`,
+          type: 'HUNT_PIRATE',
+          category: 'MISSION',
+          name: 'Maintain Security',
+          description: 'Patrol and protect trade routes',
+          priority: 75 + personality.loyalty * 20,
+          urgency: 70,
+          progress: 0,
+          subgoals: [],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Duty and honor',
+            emotionalDrive: personality.loyalty * 10
+          },
+          expectedReward: {
+            satisfaction: 8,
+            reputation: new Map([[this.faction, 10]])
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['security', 'patrol']
+        });
+        break;
+
+      case ShipType.RESEARCH:
+        // Research ships explore unknown
+        this.goalSystem.addGoal({
+          id: `${this.id}_explore_unknown`,
+          type: 'EXPLORE_UNKNOWN',
+          category: 'EXPLORATION',
+          name: 'Explore Unknown Space',
+          description: 'Discover new regions and phenomena',
+          priority: 70 + personality.curiosity * 25,
+          urgency: 40,
+          progress: 0,
+          subgoals: [],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'INTRINSIC',
+            reason: 'Scientific curiosity',
+            emotionalDrive: personality.curiosity * 10
+          },
+          expectedReward: {
+            satisfaction: 9,
+            unlocks: ['new_discoveries']
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['exploration', 'science']
+        });
+        break;
+
+      case ShipType.MINING_VESSEL:
+        // Miners accumulate wealth slowly
+        this.goalSystem.addGoal({
+          id: `${this.id}_mining_wealth`,
+          type: 'ACCUMULATE_WEALTH',
+          category: 'ECONOMIC',
+          name: 'Mine Valuable Ores',
+          description: 'Extract and sell valuable minerals',
+          priority: 65 + personality.patience * 10,
+          urgency: 30,
+          progress: 0,
+          subgoals: [],
+          currentSubgoal: 0,
+          prerequisites: [],
+          motivation: {
+            type: 'EXTRINSIC',
+            reason: 'Steady income',
+            emotionalDrive: personality.greed * 7
+          },
+          expectedReward: {
+            credits: 15000,
+            satisfaction: 6
+          },
+          status: 'ACTIVE',
+          attempts: 0,
+          failures: 0,
+          createdAt: now,
+          createdBy: 'SELF',
+          tags: ['economic', 'mining']
+        });
+        break;
+    }
+
+    // All ships have survival as background goal (lower priority unless threatened)
+    this.goalSystem.addGoal({
+      id: `${this.id}_survive`,
+      type: 'ACHIEVE_FINANCIAL_SECURITY',
+      category: 'SURVIVAL',
+      name: 'Survive',
+      description: 'Maintain ship and stay alive',
+      priority: 40,  // Low priority until threatened
+      urgency: 30,
+      progress: 0,
+      subgoals: [],
+      currentSubgoal: 0,
+      prerequisites: [],
+      motivation: {
+        type: 'COMPULSION',
+        reason: 'Survival instinct',
+        emotionalDrive: 10
+      },
+      expectedReward: {
+        satisfaction: 10
+      },
+      status: 'ACTIVE',
+      attempts: 0,
+      failures: 0,
+      createdAt: now,
+      createdBy: 'SELF',
+      tags: ['survival']
+    });
   }
 
   /**
@@ -284,6 +487,29 @@ export class NPCShip implements ITrackableVessel {
     // Decay skills over time
     this.adaptiveAI.decaySkills(dt);
 
+    // Check trauma triggers (affects behavior)
+    const nearbyEntityTypes = [...new Set(nearbyShips.map(s => s.type))];
+    const triggeredTraumas = this.extendedMemory.checkTraumaTriggers({
+      location: this.position,
+      entityTypes: nearbyEntityTypes,
+      situationType: this.status
+    });
+
+    // If trauma triggered, modify behavior (increase caution, reduce aggression)
+    if (triggeredTraumas.length > 0) {
+      const personality = this.extendedMemory.getCurrentPersonality();
+      this.caution = Math.min(1.0, personality.caution + 0.3);  // More cautious
+      this.aggressiveness = Math.max(0.0, personality.aggression - 0.3);  // Less aggressive
+
+      // Log trauma trigger
+      console.log(`⚠️ ${this.name} trauma triggered! Becoming more cautious`);
+    } else {
+      // Reset to personality-based values
+      const personality = this.extendedMemory.getCurrentPersonality();
+      this.caution = personality.caution;
+      this.aggressiveness = personality.aggression;
+    }
+
     // Build context for goal system
     const context: GoalEvaluationContext = {
       currentTime,
@@ -321,9 +547,91 @@ export class NPCShip implements ITrackableVessel {
     // Update goal system - returns next action to take
     const plannedAction = this.goalSystem.update(dt, context);
 
-    // If goal system suggests an action, we could influence ship behavior
-    // For now, just let the goal system run in the background
-    // (Future: integrate planned actions into ship behavior)
+    // Apply planned action to influence behavior
+    if (plannedAction && plannedAction.status === 'IN_PROGRESS') {
+      this.applyPlannedAction(plannedAction, nearbyShips);
+    }
+  }
+
+  /**
+   * Apply planned action from goal system to ship behavior
+   */
+  private applyPlannedAction(action: PlannedAction, nearbyShips: NPCShip[]): void {
+    // Only apply if not already executing specific behavior
+    if (this.status === ShipStatus.DOCKED || this.status === ShipStatus.DISABLED) {
+      return;
+    }
+
+    switch (action.type) {
+      case 'FLEE':
+        // Already handled by emergency conditions, but we can reinforce
+        if (this.status !== ShipStatus.FLEEING && action.target) {
+          this.status = ShipStatus.FLEEING;
+        }
+        break;
+
+      case 'TRAVEL_TO':
+        // Set destination if we have target location
+        if (action.location && this.status === ShipStatus.IDLE) {
+          this.setDestination(action.location, action.description);
+        }
+        break;
+
+      case 'TRADE_WITH':
+        // Seek out trade opportunities
+        if (this.status === ShipStatus.IDLE) {
+          const tradeTargets = nearbyShips.filter(s =>
+            s.type === ShipType.CARGO_FREIGHTER || s.type === ShipType.CARGO_SHUTTLE
+          );
+          if (tradeTargets.length > 0) {
+            const target = tradeTargets[0];
+            this.setDestination(target.position, `Trade with ${target.name}`);
+          }
+        }
+        break;
+
+      case 'COMBAT':
+        // Engage if we're aggressive enough and have target
+        const personality = this.extendedMemory.getCurrentPersonality();
+        if (personality.aggression > 0.6 && this.type === ShipType.PIRATE) {
+          const targets = nearbyShips.filter(s => s.type === ShipType.CARGO_FREIGHTER);
+
+          // Use relationships to filter targets - avoid those we fear, prefer those we dislike
+          const targetScores = targets.map(target => {
+            const relationship = this.extendedMemory.getRelationship(target.id);
+            let score = 1.0;
+
+            if (relationship) {
+              if (relationship.type === 'FEARED_ENTITY') {
+                score = 0; // Never attack feared entities
+              } else if (relationship.type === 'ALLY') {
+                score = 0; // Never attack allies
+              } else if (relationship.type === 'ENEMY') {
+                score = 2.0; // Prefer attacking known enemies
+              }
+
+              // Fear level reduces willingness to attack
+              score *= (1 - relationship.fearLevel);
+            }
+
+            return { ship: target, score };
+          }).sort((a, b) => b.score - a.score);
+
+          if (targetScores.length > 0 && targetScores[0].score > 0 && this.status !== ShipStatus.ATTACKING) {
+            this.status = ShipStatus.ATTACKING;
+            this.setDestination(targetScores[0].ship.position, `Attack ${targetScores[0].ship.name}`);
+          }
+        }
+        break;
+
+      case 'SCAN':
+      case 'INVESTIGATE':
+        // Research ships investigate opportunities
+        if (this.type === ShipType.RESEARCH && this.status === ShipStatus.IDLE) {
+          // Would set destination to interesting location
+        }
+        break;
+    }
   }
 
   /**
@@ -517,11 +825,16 @@ export class NPCShip implements ITrackableVessel {
    */
   private checkEmergencyConditions(): void {
     const health = this.subsystems.health;
+    const personality = this.extendedMemory.getCurrentPersonality();
+
+    // Personality-based flee threshold (cautious flee earlier, brave flee later)
+    const fleeThreshold = 0.2 + (personality.caution * 0.3) - (personality.aggression * 0.1);
 
     // Critical hull damage - flee or disable
-    if (health.hull < 0.2) {
+    if (health.hull < fleeThreshold) {
       if (this.status !== ShipStatus.DISABLED && this.status !== ShipStatus.FLEEING) {
         this.status = ShipStatus.FLEEING;
+        console.log(`🏃 ${this.name} fleeing at ${(health.hull * 100).toFixed(0)}% health (threshold: ${(fleeThreshold * 100).toFixed(0)}%)`);
       }
     }
 
@@ -565,10 +878,35 @@ export class NPCShip implements ITrackableVessel {
    */
   private updateFleeing(dt: number, nearbyShips: NPCShip[], obstacles: NavigationObstacle[]): void {
     // Flee away from threats at maximum speed
-    // For now, just move away from nearest ship
+    // Prioritize fleeing from feared entities and enemies
     if (nearbyShips.length > 0) {
-      const nearest = nearbyShips[0];
-      const awayVector = this.position.subtract(nearest.position).normalize();
+      // Score threats based on relationships
+      const threats = nearbyShips.map(ship => {
+        const relationship = this.extendedMemory.getRelationship(ship.id);
+        let threatScore = 1.0;
+
+        if (relationship) {
+          if (relationship.type === 'FEARED_ENTITY') {
+            threatScore = 10.0; // Flee from feared entities first
+          } else if (relationship.type === 'ENEMY') {
+            threatScore = 5.0; // Then enemies
+          } else if (relationship.type === 'ALLY') {
+            threatScore = 0.1; // Don't really flee from allies
+          }
+
+          // Fear level increases threat
+          threatScore *= (1 + relationship.fearLevel);
+        }
+
+        // Distance matters - closer is more threatening
+        const distance = this.position.subtract(ship.position).length();
+        threatScore *= (10000 / Math.max(distance, 1));
+
+        return { ship, threatScore };
+      }).sort((a, b) => b.threatScore - a.threatScore);
+
+      const biggestThreat = threats[0].ship;
+      const awayVector = this.position.subtract(biggestThreat.position).normalize();
       const fleeAcceleration = awayVector.scale(this.physics.maxAcceleration);
 
       this.physics.applyAcceleration(fleeAcceleration);
@@ -583,6 +921,12 @@ export class NPCShip implements ITrackableVessel {
    * Refuel and recharge while docked
    */
   private refuelWhileDocked(dt: number): void {
+    // Consolidate memories while docked (every 10 seconds)
+    if (Math.random() < dt / 10) {
+      this.extendedMemory.consolidateMemories();
+      console.log(`💭 ${this.name} consolidating memories while docked`);
+    }
+
     // Refuel at 10% per second
     const refuelRate = 0.1 * dt;
     this.subsystems.fuel.mainFuel.current += refuelRate * this.subsystems.fuel.mainFuel.capacity;

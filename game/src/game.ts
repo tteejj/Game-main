@@ -472,6 +472,12 @@ export class Game {
             const commodity = commodities[Math.floor(Math.random() * commodities.length)];
             this.starSystem.disruptSupplyChain(commodity, 'PIRATE_RAID', 3600, 0.15); // 1hr, 15% impact
 
+            // NPCs record combat experience
+            const damage = Math.random() * 0.3; // 0-30% damage
+            pirate.recordCombatExperience(victim.id, 'VICTORY', damage * 0.5, damage);
+            victim.recordCombatExperience(pirate.id, 'DEFEAT', damage, damage * 0.5);
+            victim.takeDamage(damage, undefined, pirate.id); // Actually damage victim
+
             console.log(`☠️  Background event: ${pirate.faction} pirate raid on ${victim.faction}`);
 
         } else if (roll < 0.15) { // 5% chance - NPC trade
@@ -509,6 +515,12 @@ export class Game {
                 tradeValue
             );
 
+            // NPCs record trade experience
+            const profit1 = Math.floor(tradeValue * 0.1 * (Math.random() * 0.4 + 0.8)); // 8-12% profit
+            const profit2 = Math.floor(tradeValue * 0.1 * (Math.random() * 0.4 + 0.8));
+            trader1.recordTradeExperience(trader2.id, tradeCommodity, profit1, tradeVolume);
+            trader2.recordTradeExperience(trader1.id, tradeCommodity, profit2, tradeVolume);
+
             console.log(`📦 Background event: ${trader1.faction} traded with ${trader2.faction} (${tradeValue} credits)`);
 
         } else if (roll < 0.17) { // 2% chance - NPC combat
@@ -537,7 +549,20 @@ export class Game {
             const combatCommodity = combatCommodities[Math.floor(Math.random() * combatCommodities.length)];
             this.starSystem.disruptSupplyChain(combatCommodity, 'MILITARY_COMBAT', 7200, 0.25); // 2hr, 25% impact
 
-            console.log(`⚔️  Background event: ${combatant1.faction} combat with ${combatant2.faction}`);
+            // NPCs record combat experience - determine winner
+            const damage1 = Math.random() * 0.4; // 0-40% damage to combatant1
+            const damage2 = Math.random() * 0.4; // 0-40% damage to combatant2
+            const winner = damage1 < damage2 ? combatant1 : combatant2;
+            const loser = winner === combatant1 ? combatant2 : combatant1;
+            const winnerDamage = winner === combatant1 ? damage1 : damage2;
+            const loserDamage = winner === combatant1 ? damage2 : damage1;
+
+            winner.recordCombatExperience(loser.id, 'VICTORY', winnerDamage, loserDamage);
+            loser.recordCombatExperience(winner.id, 'DEFEAT', loserDamage, winnerDamage);
+            winner.takeDamage(winnerDamage, undefined, loser.id);
+            loser.takeDamage(loserDamage, undefined, winner.id);
+
+            console.log(`⚔️  Background event: ${combatant1.faction} combat with ${combatant2.faction} (${winner.name} wins)`);
         }
 
         // Check if economic crises might trigger wars
