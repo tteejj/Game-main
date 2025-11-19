@@ -42,7 +42,7 @@ export interface ConsumptionRates {
   waterPerCrew: number; // liters per crew per day
 
   powerIdle: number; // kW
-  powerLife Support: number; // kW
+  powerLifeSupport: number; // kW
   powerSensors: number; // kW
   powerWeapons: number; // kW
   powerShields: number; // kW
