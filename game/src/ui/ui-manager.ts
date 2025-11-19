@@ -10,6 +10,7 @@ import { NavigationPanel } from './panels/navigation-panel';
 import { LifeSupportPanel } from './panels/lifesupport-panel';
 import { WeaponsPanel } from './panels/weapons-panel';
 import { OperationsPanel } from './panels/operations-panel';
+import { StationServicesPanel } from './panels/station-services-panel';
 import { FactionPanel } from './panels/faction-panel';
 import { TradingPanel } from './panels/trading-panel';
 import { HUD } from './hud';
@@ -18,7 +19,7 @@ import { NPCShipMonitor, NPCShipContact } from './npc-ship-monitor';
 import { NPCShip } from '../../../universe-system/src/npc-traffic/npc-ship';
 import { PlayerShipIntegration } from '../../../universe-system/src/PlayerShipIntegration';
 
-export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel | OperationsPanel;
+export type StationPanel = HelmPanel | EngineeringPanel | NavigationPanel | LifeSupportPanel | WeaponsPanel | OperationsPanel | StationServicesPanel;
 
 export class UIManager {
     private canvas: HTMLCanvasElement;
@@ -89,7 +90,7 @@ export class UIManager {
     }
 
     /**
-     * Set player integration and initialize Operations panel (Station 6)
+     * Set player integration and initialize Operations panel (Station 6) and Station Services (Station 7)
      */
     setPlayerIntegration(integration: PlayerShipIntegration): void {
         this.playerIntegration = integration;
@@ -103,13 +104,31 @@ export class UIManager {
         );
         this.stations.push(operationsPanel);
 
+        // Add Station Services panel as Station 7
+        const stationServicesPanel = new StationServicesPanel(
+            this.ctx,
+            this.palette,
+            this.spacecraft,
+            integration
+        );
+        this.stations.push(stationServicesPanel);
+
         // Connect weapons panel to player integration for combat
         const weaponsPanel = this.stations[4] as WeaponsPanel;
         if (weaponsPanel && typeof (weaponsPanel as any).setPlayerIntegration === 'function') {
             (weaponsPanel as any).setPlayerIntegration(integration);
         }
 
-        console.log('✅ Operations panel (Station 6) initialized');
+        // Connect HUD to player integration for status displays
+        this.hud.setPlayerIntegration(integration);
+
+        // Connect Navigation panel to player integration for NPC contacts and discoveries
+        const navPanel = this.stations[2] as any;
+        if (navPanel && typeof navPanel.setPlayerIntegration === 'function') {
+            navPanel.setPlayerIntegration(integration);
+        }
+
+        console.log('✅ Operations panel (Station 6), Station Services (Station 7), HUD status displays, and Navigation contacts initialized');
     }
 
     /**

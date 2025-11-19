@@ -94,12 +94,12 @@ export class WeaponsPanel {
                 }
                 break;
             case 'f':
-                // Fire selected weapon (only if safety off)
+                // Fire primary weapon (only if safety off)
                 if (!this.weaponsSafetyOn) {
                     if (this.playerIntegration) {
                         // Use player integration combat system
                         const result = this.playerIntegration.firePrimaryWeapon();
-                        console.log(`Weapon fired: ${result.hit ? 'HIT' : 'MISS'}`);
+                        console.log(`Primary weapon fired: ${result.hit ? 'HIT' : 'MISS'}`);
                         if (result.hit && result.damage) {
                             const damageVal = typeof result.damage === 'number' ? result.damage : (result.damage as any).totalDamage || result.damage;
                             console.log(`  Damage: ${damageVal} HP`);
@@ -107,8 +107,35 @@ export class WeaponsPanel {
                     } else {
                         // Fallback to spacecraft weapons
                         this.spacecraft.fireWeapon(this.selectedWeaponIndex, this.selectedTargetIndex);
-                        console.log('Weapon fired');
+                        console.log('Primary weapon fired');
                     }
+                }
+                break;
+            case 'g':
+                // Fire secondary weapon (only if safety off)
+                if (!this.weaponsSafetyOn) {
+                    if (this.playerIntegration) {
+                        const result = this.playerIntegration.fireSecondaryWeapon();
+                        console.log(`Secondary weapon fired: ${result.hit ? 'HIT' : 'MISS'}`);
+                        if (result.hit && result.damage) {
+                            const damageVal = typeof result.damage === 'number' ? result.damage : (result.damage as any).totalDamage || result.damage;
+                            console.log(`  Damage: ${damageVal} HP`);
+                        }
+                    }
+                }
+                break;
+            case 'h':
+                // Toggle shields
+                if (this.playerIntegration) {
+                    const result = this.playerIntegration.toggleShields();
+                    console.log(`🛡️ ${result.message}`);
+                }
+                break;
+            case 'v':
+                // Toggle evasion mode
+                if (this.playerIntegration) {
+                    const result = this.playerIntegration.toggleEvasion();
+                    console.log(`🎯 ${result.message}`);
                 }
                 break;
             case 'e':
@@ -196,7 +223,22 @@ export class WeaponsPanel {
         // Auto-engage
         ctx.fillStyle = this.autoEngageHostiles ? this.palette.primary : this.palette.muted;
         ctx.fillText(`Auto-Engage: ${this.autoEngageHostiles ? 'ON' : 'OFF'}  (A)`, 60, y);
-        y += 30;
+        y += 20;
+
+        // Shields (if player integration available)
+        if (this.playerIntegration) {
+            const combatState = this.playerIntegration.getCombatState();
+            ctx.fillStyle = combatState.shieldsUp ? this.palette.info : this.palette.muted;
+            ctx.fillText(`Shields: ${combatState.shieldsUp ? 'UP' : 'DOWN'}  (H)`, 60, y);
+            y += 20;
+
+            // Evasion mode
+            ctx.fillStyle = combatState.evasionMode ? this.palette.info : this.palette.muted;
+            ctx.fillText(`Evasion: ${combatState.evasionMode ? 'ACTIVE' : 'OFF'}  (V)`, 60, y);
+            y += 10;
+        }
+
+        y += 10;
 
         // Weapons List (left side)
         ctx.fillStyle = this.palette.primary;

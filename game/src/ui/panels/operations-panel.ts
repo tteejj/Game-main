@@ -17,6 +17,10 @@ export class OperationsPanel {
     private currentTab: 'missions' | 'crew' | 'research' | 'intel' | 'cargo' = 'missions';
     private selectedIndex: number = 0;
     private scrollOffset: number = 0;
+    private crewSubMode: 'roster' | 'hire' = 'roster';
+    private intelSubMode: 'database' | 'market' = 'database';
+    private cargoSubMode: 'manifest' | 'smuggling' = 'manifest';
+    private missionSubMode: 'available' | 'active' = 'available';
 
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter, playerIntegration: PlayerShipIntegration) {
         this.ctx = ctx;
@@ -56,6 +60,11 @@ export class OperationsPanel {
                 console.log('Operations: CARGO');
                 break;
 
+            // Submode switching
+            case 'q':
+                this.toggleSubMode();
+                break;
+
             // Navigation
             case 'w':
             case 'arrowup':
@@ -71,18 +80,66 @@ export class OperationsPanel {
             case 'e':
                 this.executeAction();
                 break;
+            case 'x':
+            case 'delete':
+                this.executeDeleteAction();
+                break;
+            case 'p':
+                this.executeSecondaryAction();
+                break;
+        }
+    }
+
+    private toggleSubMode(): void {
+        switch (this.currentTab) {
+            case 'missions':
+                this.missionSubMode = this.missionSubMode === 'available' ? 'active' : 'available';
+                this.selectedIndex = 0;
+                break;
+            case 'crew':
+                this.crewSubMode = this.crewSubMode === 'roster' ? 'hire' : 'roster';
+                this.selectedIndex = 0;
+                break;
+            case 'intel':
+                this.intelSubMode = this.intelSubMode === 'database' ? 'market' : 'database';
+                this.selectedIndex = 0;
+                break;
+            case 'cargo':
+                this.cargoSubMode = this.cargoSubMode === 'manifest' ? 'smuggling' : 'manifest';
+                this.selectedIndex = 0;
+                break;
         }
     }
 
     private executeAction(): void {
         switch (this.currentTab) {
             case 'missions':
-                const missions = this.playerIntegration.getAvailableMissions();
-                if (this.selectedIndex < missions.length) {
-                    const mission = missions[this.selectedIndex];
-                    this.playerIntegration.acceptMission(mission.id);
-                    console.log(`✅ Mission accepted: ${mission.title}`);
+                if (this.missionSubMode === 'available') {
+                    const missions = this.playerIntegration.getAvailableMissions();
+                    if (this.selectedIndex < missions.length) {
+                        const mission = missions[this.selectedIndex];
+                        const result = this.playerIntegration.acceptMission(mission.id);
+                        console.log(`✅ ${result.message}`);
+                    }
+                } else {
+                    const active = this.playerIntegration.getActiveMissions();
+                    if (this.selectedIndex < active.length) {
+                        const mission = active[this.selectedIndex];
+                        const result = this.playerIntegration.completeMission(mission.id);
+                        console.log(`✅ ${result.message}`);
+                    }
                 }
+                break;
+            case 'crew':
+                if (this.crewSubMode === 'hire') {
+                    const available = this.playerIntegration.getAvailableCrewForHire(10);
+                    if (this.selectedIndex < available.length) {
+                        const crew = available[this.selectedIndex];
+                        const result = this.playerIntegration.hireCrew(crew);
+                        console.log(`✅ ${result.message}`);
+                    }
+                }
+                // Roster mode has no primary action (use X to fire)
                 break;
             case 'research':
                 try {
@@ -90,13 +147,80 @@ export class OperationsPanel {
                     const active = this.playerIntegration.getActiveResearch();
                     if (!active && this.selectedIndex < projects.length) {
                         const project = projects[this.selectedIndex];
-                        const state = this.playerIntegration.getState();
                         const projectId = (project as any).techId || (project as any).id || 'unknown';
-                        this.playerIntegration.startResearch(projectId, state.credits);
-                        console.log(`🔬 Research started: ${projectId}`);
+                        const result = this.playerIntegration.startResearch(projectId);
+                        console.log(`🔬 ${result.message}`);
                     }
                 } catch (e) {
                     console.error('Research action failed:', e);
+                }
+                break;
+            case 'intel':
+                if (this.intelSubMode === 'market') {
+                    const intel = this.playerIntegration.getAllIntel();
+                    if (this.selectedIndex < intel.length) {
+                        const data = intel[this.selectedIndex];
+                        const result = this.playerIntegration.sellIntel(data.id);
+                        console.log(`💰 ${result.message}`);
+                    }
+                }
+                break;
+            case 'cargo':
+                if (this.cargoSubMode === 'smuggling') {
+                    const contraband = this.playerIntegration.getContraband();
+                    if (this.selectedIndex < contraband.length) {
+                        const item = contraband[this.selectedIndex];
+                        const result = this.playerIntegration.sellContrabandOnBlackMarket(item.commodity);
+                        console.log(`🏴‍☠️ ${result.message}`);
+                    }
+                }
+                break;
+        }
+    }
+
+    private executeDeleteAction(): void {
+        switch (this.currentTab) {
+            case 'missions':
+                if (this.missionSubMode === 'active') {
+                    const active = this.playerIntegration.getActiveMissions();
+                    if (this.selectedIndex < active.length) {
+                        const mission = active[this.selectedIndex];
+                        const result = this.playerIntegration.abandonMission(mission.id);
+                        console.log(`❌ ${result.message}`);
+                    }
+                }
+                break;
+            case 'crew':
+                if (this.crewSubMode === 'roster') {
+                    const crew = this.playerIntegration.getCrew();
+                    if (this.selectedIndex < crew.length) {
+                        const member = crew[this.selectedIndex];
+                        const result = this.playerIntegration.fireCrew(member.id);
+                        console.log(`❌ ${result.message}`);
+                    }
+                }
+                break;
+        }
+    }
+
+    private executeSecondaryAction(): void {
+        switch (this.currentTab) {
+            case 'crew':
+                if (this.crewSubMode === 'roster') {
+                    const result = this.playerIntegration.payCrewSalaries();
+                    console.log(`💰 ${result.message}`);
+                }
+                break;
+            case 'cargo':
+                if (this.cargoSubMode === 'smuggling') {
+                    const result = this.playerIntegration.bribeOfficial();
+                    console.log(`💸 ${result.message}`);
+                }
+                break;
+            case 'intel':
+                if (this.intelSubMode === 'database') {
+                    const result = this.playerIntegration.gatherIntelFromNews();
+                    console.log(`📡 ${result.message}`);
                 }
                 break;
         }
@@ -135,7 +259,17 @@ export class OperationsPanel {
         // Controls hint
         ctx.font = '12px "Courier New"';
         ctx.fillStyle = this.palette.muted;
-        ctx.fillText('[1-5] Tabs | [W/S] Navigate | [ENTER] Accept/Start', 40, 700);
+        let controlsText = '[1-5] Tabs | [Q] Submode | [W/S] Navigate | [ENTER] Accept/Start';
+        if (this.currentTab === 'crew' && this.crewSubMode === 'roster') {
+            controlsText = '[1-5] Tabs | [Q] Hire Mode | [W/S] Navigate | [X] Fire | [P] Pay Salaries';
+        } else if (this.currentTab === 'missions' && this.missionSubMode === 'active') {
+            controlsText = '[1-5] Tabs | [Q] Available | [W/S] Navigate | [ENTER] Complete | [X] Abandon';
+        } else if (this.currentTab === 'cargo' && this.cargoSubMode === 'smuggling') {
+            controlsText = '[1-5] Tabs | [Q] Manifest | [W/S] Navigate | [ENTER] Sell | [P] Bribe';
+        } else if (this.currentTab === 'intel') {
+            controlsText = '[1-5] Tabs | [Q] Toggle | [W/S] Navigate | [ENTER] Sell | [P] Gather';
+        }
+        ctx.fillText(controlsText, 40, 700);
     }
 
     private renderTabBar(): void {
@@ -156,82 +290,151 @@ export class OperationsPanel {
 
     private renderMissions(): void {
         const ctx = this.ctx;
-        const missions = this.playerIntegration.getAvailableMissions();
+        const availableMissions = this.playerIntegration.getAvailableMissions();
         const activeMissions = this.playerIntegration.getActiveMissions();
 
-        // Available missions (left)
-        this.drawBox(40, 100, 580, 560, 'AVAILABLE MISSIONS');
+        // Show submode indicator
+        ctx.font = 'bold 14px "Courier New"';
+        ctx.fillStyle = this.palette.info;
+        const modeText = this.missionSubMode === 'available' ? '[AVAILABLE]' : '[ACTIVE]';
+        ctx.fillText(modeText, 600, 95);
 
-        let y = 130;
-        ctx.font = '13px "Courier New"';
+        if (this.missionSubMode === 'available') {
+            // Available missions (full width)
+            this.drawBox(40, 100, 1180, 560, 'AVAILABLE MISSIONS - [ENTER] Accept');
 
-        missions.slice(0, 10).forEach((mission, i) => {
-            const isSelected = i === this.selectedIndex;
-            ctx.fillStyle = isSelected ? this.palette.info : this.palette.primary;
-
-            if (isSelected) ctx.fillText('>', 50, y);
-            ctx.fillText(mission.title, 70, y);
-
-            ctx.font = '11px "Courier New"';
-            ctx.fillStyle = this.palette.secondary;
-            ctx.fillText(mission.description.substring(0, 55), 70, y + 15);
-            ctx.fillStyle = this.palette.warning;
-            ctx.fillText(`${mission.creditReward} CR | ${mission.type}`, 70, y + 30);
-
+            let y = 140;
             ctx.font = '13px "Courier New"';
-            y += 52;
-        });
 
-        // Active missions (right)
-        this.drawBox(640, 100, 580, 560, 'ACTIVE MISSIONS');
+            availableMissions.slice(0, 10).forEach((mission, i) => {
+                const isSelected = i === this.selectedIndex;
+                ctx.fillStyle = isSelected ? this.palette.info : this.palette.primary;
 
-        y = 130;
-        activeMissions.forEach(mission => {
-            ctx.fillStyle = this.palette.primary;
-            ctx.fillText(`• ${mission.title}`, 660, y);
+                if (isSelected) ctx.fillText('>', 50, y);
+                ctx.fillText(mission.title, 70, y);
 
-            ctx.font = '11px "Courier New"';
-            ctx.fillStyle = this.palette.secondary;
-            const progressPct = Math.floor((mission.currentObjective / mission.objectives.length) * 100);
-            ctx.fillText(`Progress: ${progressPct}%`, 670, y + 15);
+                ctx.font = '11px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                ctx.fillText(mission.description.substring(0, 100), 70, y + 15);
+                ctx.fillStyle = this.palette.warning;
+                ctx.fillText(`Reward: ${mission.creditReward} CR | Type: ${mission.type}`, 70, y + 30);
 
+                ctx.font = '13px "Courier New"';
+                y += 52;
+            });
+        } else {
+            // Active missions (full width with details)
+            this.drawBox(40, 100, 1180, 560, 'ACTIVE MISSIONS - [ENTER] Complete | [X] Abandon');
+
+            let y = 140;
             ctx.font = '13px "Courier New"';
-            y += 45;
-        });
+
+            activeMissions.forEach((mission, i) => {
+                const isSelected = i === this.selectedIndex;
+                ctx.fillStyle = isSelected ? this.palette.info : this.palette.primary;
+
+                if (isSelected) ctx.fillText('>', 50, y);
+                ctx.fillText(mission.title, 70, y);
+
+                ctx.font = '11px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                const progressPct = Math.floor((mission.currentObjective / mission.objectives.length) * 100);
+                ctx.fillText(`Progress: ${progressPct}% | Reward: ${mission.creditReward} CR`, 70, y + 15);
+
+                // Show current objective
+                if (mission.objectives[mission.currentObjective]) {
+                    const obj = mission.objectives[mission.currentObjective];
+                    ctx.fillText(`Objective: ${obj.description}`, 70, y + 30);
+                }
+
+                ctx.font = '13px "Courier New"';
+                y += 60;
+            });
+        }
     }
 
     private renderCrew(): void {
         const ctx = this.ctx;
         const crew = this.playerIntegration.getCrew();
+        const available = this.playerIntegration.getAvailableCrewForHire(10);
 
-        this.drawBox(40, 100, 1180, 560, 'CREW ROSTER');
+        // Show submode indicator
+        ctx.font = 'bold 14px "Courier New"';
+        ctx.fillStyle = this.palette.info;
+        const modeText = this.crewSubMode === 'roster' ? '[ROSTER]' : '[HIRE]';
+        ctx.fillText(modeText, 600, 95);
 
-        let y = 140;
-        ctx.font = '14px "Courier New"';
+        if (this.crewSubMode === 'roster') {
+            // Current crew roster
+            this.drawBox(40, 100, 1180, 560, 'CREW ROSTER - [X] Fire | [P] Pay Salaries');
 
-        crew.forEach(member => {
-            ctx.fillStyle = this.palette.primary;
-            ctx.fillText(`${member.name} - ${member.role}`, 60, y);
-
+            // Show crew status
+            const status = this.playerIntegration.getCrewStatus();
             ctx.font = '12px "Courier New"';
-            ctx.fillStyle = this.palette.secondary;
-            const level = (member as any).skillLevel || (member as any).level || 1;
-            const exp = member.experience || 0;
-            const expNext = (member as any).experienceForNextLevel || (member as any).nextLevelExp || 100;
-            ctx.fillText(`Level ${level} | XP: ${exp}/${expNext}`, 80, y + 18);
-            ctx.fillText(`Salary: ${member.salary} CR/day | Morale: ${Math.floor(member.morale * 100)}%`, 80, y + 33);
+            ctx.fillStyle = this.palette.warning;
+            ctx.fillText(`Crew: ${status.count}/${status.capacity} | Salaries: ${status.totalSalaries} CR/day | Morale: ${Math.floor(status.averageMorale * 100)}%`, 60, 125);
 
-            // Skills
-            const skills = Object.entries(member.skills);
-            let skillX = 500;
-            skills.forEach(([skill, value]) => {
-                ctx.fillText(`${skill}: ${Math.floor((value as number) * 100)}%`, skillX, y + 18);
-                skillX += 150;
-            });
-
+            let y = 160;
             ctx.font = '14px "Courier New"';
-            y += 65;
-        });
+
+            crew.forEach((member, i) => {
+                const isSelected = i === this.selectedIndex;
+                ctx.fillStyle = isSelected ? this.palette.info : this.palette.primary;
+
+                if (isSelected) ctx.fillText('>', 50, y);
+                ctx.fillText(`${member.name} - ${member.role}`, 70, y);
+
+                ctx.font = '12px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                const level = (member as any).skillLevel || (member as any).level || 1;
+                const exp = member.experience || 0;
+                const expNext = (member as any).experienceForNextLevel || (member as any).nextLevelExp || 100;
+                ctx.fillText(`Level ${level} | XP: ${exp}/${expNext}`, 90, y + 18);
+                ctx.fillText(`Salary: ${member.salary} CR/day | Morale: ${Math.floor(member.morale * 100)}%`, 90, y + 33);
+
+                // Skills
+                const skills = Object.entries(member.skills);
+                let skillX = 520;
+                skills.forEach(([skill, value]) => {
+                    ctx.fillText(`${skill}: ${Math.floor((value as number) * 100)}%`, skillX, y + 18);
+                    skillX += 170;
+                });
+
+                ctx.font = '14px "Courier New"';
+                y += 70;
+            });
+        } else {
+            // Available crew for hire
+            this.drawBox(40, 100, 1180, 560, 'HIRE CREW - [ENTER] Hire');
+
+            let y = 140;
+            ctx.font = '14px "Courier New"';
+
+            available.forEach((member, i) => {
+                const isSelected = i === this.selectedIndex;
+                ctx.fillStyle = isSelected ? this.palette.info : this.palette.primary;
+
+                if (isSelected) ctx.fillText('>', 50, y);
+                ctx.fillText(`${member.name} - ${member.role}`, 70, y);
+
+                ctx.font = '12px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                ctx.fillText(`Salary: ${member.salary} CR/day | Hiring bonus: ${Math.floor(member.salary * 10)} CR`, 90, y + 18);
+
+                // Skills
+                const skills = Object.entries(member.skills);
+                let skillX = 90;
+                ctx.fillText('Skills: ', skillX, y + 33);
+                skillX += 55;
+                skills.forEach(([skill, value]) => {
+                    ctx.fillText(`${skill}: ${Math.floor((value as number) * 100)}%`, skillX, y + 33);
+                    skillX += 170;
+                });
+
+                ctx.font = '14px "Courier New"';
+                y += 60;
+            });
+        }
     }
 
     private renderResearch(): void {
@@ -304,23 +507,64 @@ export class OperationsPanel {
         const ctx = this.ctx;
         const intel = this.playerIntegration.getAllIntel();
 
-        this.drawBox(40, 100, 1180, 560, 'INTELLIGENCE DATABASE');
+        // Show submode indicator
+        ctx.font = 'bold 14px "Courier New"';
+        ctx.fillStyle = this.palette.info;
+        const modeText = this.intelSubMode === 'database' ? '[DATABASE]' : '[MARKET]';
+        ctx.fillText(modeText, 600, 95);
 
-        let y = 140;
-        ctx.font = '13px "Courier New"';
+        if (this.intelSubMode === 'database') {
+            this.drawBox(40, 100, 1180, 560, 'INTELLIGENCE DATABASE - [P] Gather from News');
 
-        intel.slice(0, 12).forEach(data => {
-            ctx.fillStyle = this.palette.warning;
-            ctx.fillText(`[${data.type}] ${data.location}`, 60, y);
-
-            ctx.font = '11px "Courier New"';
-            ctx.fillStyle = this.palette.secondary;
-            ctx.fillText(data.content.substring(0, 90), 80, y + 15);
-            ctx.fillText(`Value: ${data.value} CR | Reliability: ${Math.floor(data.reliability * 100)}%`, 80, y + 30);
-
+            let y = 140;
             ctx.font = '13px "Courier New"';
-            y += 50;
-        });
+
+            intel.slice(0, 12).forEach(data => {
+                ctx.fillStyle = this.palette.warning;
+                ctx.fillText(`[${data.type}] ${data.location}`, 60, y);
+
+                ctx.font = '11px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                ctx.fillText(data.content.substring(0, 90), 80, y + 15);
+                ctx.fillText(`Value: ${data.value} CR | Reliability: ${Math.floor(data.reliability * 100)}%`, 80, y + 30);
+
+                ctx.font = '13px "Courier New"';
+                y += 50;
+            });
+
+            if (intel.length === 0) {
+                ctx.fillStyle = this.palette.muted;
+                ctx.fillText('No intelligence data. Press [P] to gather from news.', 60, 200);
+            }
+        } else {
+            // Intel market - sell intel
+            this.drawBox(40, 100, 1180, 560, 'INTEL MARKET - [ENTER] Sell Selected');
+
+            let y = 140;
+            ctx.font = '13px "Courier New"';
+
+            intel.slice(0, 12).forEach((data, i) => {
+                const isSelected = i === this.selectedIndex;
+                ctx.fillStyle = isSelected ? this.palette.info : this.palette.warning;
+
+                if (isSelected) ctx.fillText('>', 50, y);
+                ctx.fillText(`[${data.type}] ${data.location}`, 70, y);
+
+                ctx.font = '11px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                ctx.fillText(data.content.substring(0, 85), 90, y + 15);
+                ctx.fillStyle = this.palette.warning;
+                ctx.fillText(`Sell for: ${data.value} CR | Reliability: ${Math.floor(data.reliability * 100)}%`, 90, y + 30);
+
+                ctx.font = '13px "Courier New"';
+                y += 52;
+            });
+
+            if (intel.length === 0) {
+                ctx.fillStyle = this.palette.muted;
+                ctx.fillText('No intelligence to sell.', 60, 200);
+            }
+        }
     }
 
     private renderCargo(): void {
@@ -328,39 +572,93 @@ export class OperationsPanel {
         const contraband = this.playerIntegration.getContraband();
         const state = this.playerIntegration.getState();
 
-        this.drawBox(40, 100, 1180, 560, 'CARGO MANIFEST');
+        // Show submode indicator
+        ctx.font = 'bold 14px "Courier New"';
+        ctx.fillStyle = this.palette.info;
+        const modeText = this.cargoSubMode === 'manifest' ? '[MANIFEST]' : '[SMUGGLING]';
+        ctx.fillText(modeText, 600, 95);
 
-        // Cargo capacity
-        ctx.font = '14px "Courier New"';
-        ctx.fillStyle = this.palette.primary;
-        ctx.fillText(`Capacity: ${state.cargoUsed} / ${state.cargoCapacity} units`, 60, 130);
+        if (this.cargoSubMode === 'manifest') {
+            this.drawBox(40, 100, 1180, 560, 'CARGO MANIFEST');
 
-        let y = 170;
-        ctx.font = '13px "Courier New"';
-
-        // Regular cargo
-        state.cargo.forEach((qty, commodity) => {
+            // Cargo capacity
+            ctx.font = '14px "Courier New"';
             ctx.fillStyle = this.palette.primary;
-            ctx.fillText(`${commodity}: ${qty} units`, 60, y);
-            y += 25;
-        });
+            ctx.fillText(`Capacity: ${state.cargoUsed} / ${state.cargoCapacity} units`, 60, 130);
 
-        // Contraband
-        if (contraband.length > 0) {
-            y += 20;
-            ctx.fillStyle = this.palette.danger;
-            ctx.fillText('⚠ CONTRABAND:', 60, y);
-            y += 30;
+            let y = 170;
+            ctx.font = '13px "Courier New"';
 
-            contraband.forEach(item => {
+            // Regular cargo
+            if (state.cargo.size > 0) {
+                ctx.fillStyle = this.palette.info;
+                ctx.fillText('LEGITIMATE CARGO:', 60, y);
+                y += 30;
+
+                state.cargo.forEach((qty, commodity) => {
+                    ctx.fillStyle = this.palette.primary;
+                    ctx.fillText(`${commodity}: ${qty} units`, 80, y);
+                    y += 25;
+                });
+            } else {
+                ctx.fillStyle = this.palette.muted;
+                ctx.fillText('No cargo loaded', 60, y);
+                y += 30;
+            }
+
+            // Contraband warning
+            if (contraband.length > 0) {
+                y += 20;
                 ctx.fillStyle = this.palette.danger;
-                ctx.fillText(`${item.commodity}: ${item.quantity} units`, 80, y);
-                ctx.font = '11px "Courier New"';
-                ctx.fillStyle = this.palette.secondary;
-                ctx.fillText(`Illegal in: ${item.illegalIn.join(', ')}`, 100, y + 15);
-                ctx.font = '13px "Courier New"';
-                y += 40;
-            });
+                ctx.fillText('⚠ CONTRABAND DETECTED:', 60, y);
+                y += 30;
+
+                contraband.forEach(item => {
+                    ctx.fillStyle = this.palette.danger;
+                    ctx.fillText(`${item.commodity}: ${item.quantity} units`, 80, y);
+                    ctx.font = '11px "Courier New"';
+                    ctx.fillStyle = this.palette.secondary;
+                    ctx.fillText(`Illegal in: ${item.illegalIn.join(', ')}`, 100, y + 15);
+                    ctx.font = '13px "Courier New"';
+                    y += 40;
+                });
+            }
+        } else {
+            // Smuggling operations
+            this.drawBox(40, 100, 1180, 560, 'SMUGGLING OPERATIONS - [ENTER] Sell | [P] Bribe Official');
+
+            let y = 140;
+            ctx.font = '13px "Courier New"';
+
+            if (contraband.length > 0) {
+                contraband.forEach((item, i) => {
+                    const isSelected = i === this.selectedIndex;
+                    ctx.fillStyle = isSelected ? this.palette.info : this.palette.danger;
+
+                    if (isSelected) ctx.fillText('>', 50, y);
+                    ctx.fillText(`${item.commodity}: ${item.quantity} units`, 70, y);
+
+                    ctx.font = '11px "Courier New"';
+                    ctx.fillStyle = this.palette.secondary;
+                    ctx.fillText(`Illegal in: ${item.illegalIn.join(', ')}`, 90, y + 15);
+                    ctx.fillStyle = this.palette.warning;
+                    const blackMarketPrice = Math.floor(item.quantity * 500 * (1 + Math.random()));
+                    ctx.fillText(`Black market value: ~${blackMarketPrice} CR`, 90, y + 30);
+
+                    ctx.font = '13px "Courier New"';
+                    y += 52;
+                });
+
+                // Bribe info
+                y += 30;
+                ctx.fillStyle = this.palette.muted;
+                ctx.font = '12px "Courier New"';
+                ctx.fillText('⚠ Warning: Contraband detected during station scans will result in fines and reputation loss', 60, y);
+                ctx.fillText('Press [P] to attempt to bribe inspection official (costs 1000 CR, 60% success rate)', 60, y + 20);
+            } else {
+                ctx.fillStyle = this.palette.muted;
+                ctx.fillText('No contraband in cargo hold', 60, 200);
+            }
         }
     }
 

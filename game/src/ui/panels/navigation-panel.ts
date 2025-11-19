@@ -5,13 +5,15 @@
  */
 
 import { SpacecraftAdapter } from '../../spacecraft-adapter';
+import { PlayerShipIntegration } from '../../../../universe-system/src/PlayerShipIntegration';
 
-type NavMode = 'sensors' | 'landing' | 'docking';
+type NavMode = 'sensors' | 'landing' | 'docking' | 'contacts';
 
 export class NavigationPanel {
     private ctx: CanvasRenderingContext2D;
     private palette: any;
     private spacecraft: SpacecraftAdapter;
+    private playerIntegration: PlayerShipIntegration | null = null;
 
     // State
     private radarRange: number = 10; // km
@@ -25,6 +27,10 @@ export class NavigationPanel {
         this.ctx = ctx;
         this.palette = palette;
         this.spacecraft = spacecraft;
+    }
+
+    setPlayerIntegration(integration: PlayerShipIntegration): void {
+        this.playerIntegration = integration;
     }
 
     handleInput(key: string): void {
@@ -47,14 +53,46 @@ export class NavigationPanel {
             case 'docking':
                 this.handleDockingInput(keyLower);
                 break;
+            case 'contacts':
+                this.handleContactsInput(keyLower);
+                break;
         }
     }
 
     private cycleMode(): void {
-        const modes: NavMode[] = ['sensors', 'landing', 'docking'];
+        const modes: NavMode[] = ['sensors', 'landing', 'docking', 'contacts'];
         const currentIndex = modes.indexOf(this.currentMode);
         this.currentMode = modes[(currentIndex + 1) % modes.length];
         console.log(`Nav mode: ${this.currentMode.toUpperCase()}`);
+    }
+
+    private handleContactsInput(key: string): void {
+        if (!this.playerIntegration) return;
+
+        switch (key) {
+            case 'w':
+            case 'arrowup':
+                this.selectedContactIndex = Math.max(0, this.selectedContactIndex - 1);
+                break;
+            case 's':
+            case 'arrowdown':
+                this.selectedContactIndex++;
+                break;
+            case 'h':
+            case 'enter':
+                // Hail selected NPC
+                const npcs = this.playerIntegration.getNearbyNPCs();
+                if (this.selectedContactIndex < npcs.length) {
+                    const npc = npcs[this.selectedContactIndex];
+                    const result = this.playerIntegration.hailNPC(npc.id);
+                    if (result) {
+                        console.log(`📡 Hailed ${npc.name}: ${result.message}`);
+                    } else {
+                        console.log(`❌ Cannot hail ${npc.name} (too far or unresponsive)`);
+                    }
+                }
+                break;
+        }
     }
 
     private handleSensorsInput(key: string): void {
@@ -274,6 +312,9 @@ export class NavigationPanel {
                 break;
             case 'docking':
                 this.renderDockingMode();
+                break;
+            case 'contacts':
+                this.renderContactsMode();
                 break;
         }
 
@@ -603,7 +644,122 @@ export class NavigationPanel {
             case 'docking':
                 hints = 'I=Initiate  C=Capture  H=HardDock  U=Undock  TAB/M=Mode';
                 break;
+            case 'contacts':
+                hints = 'W/S=Select  H/ENTER=Hail  TAB/M=Mode';
+                break;
         }
         ctx.fillText(hints, 40, hintsY);
+    }
+
+    private renderContactsMode(): void {
+        if (!this.playerIntegration) {
+            const ctx = this.ctx;
+            ctx.fillStyle = this.palette.muted;
+            ctx.font = '14px "Courier New"';
+            ctx.fillText('Player integration not available', 40, 100);
+            return;
+        }
+
+        const ctx = this.ctx;
+        const state = this.playerIntegration.getState();
+        const npcs = this.playerIntegration.getNearbyNPCs();
+
+        // Left side: NPC Contacts
+        this.drawBox(40, 80, 580, 520, 'NEARBY CONTACTS');
+
+        let y = 110;
+        ctx.font = '13px "Courier New"';
+
+        if (npcs.length === 0) {
+            ctx.fillStyle = this.palette.muted;
+            ctx.fillText('No contacts detected', 60, y);
+        } else {
+            npcs.forEach((npc, i) => {
+                const isSelected = i === this.selectedContactIndex;
+                ctx.fillStyle = isSelected ? this.palette.info : (npc.hostile ? this.palette.danger : this.palette.primary);
+
+                if (isSelected) ctx.fillText('>', 50, y);
+                ctx.fillText(npc.name, 70, y);
+
+                ctx.font = '11px "Courier New"';
+                ctx.fillStyle = this.palette.secondary;
+                const distKm = (npc.distance / 1000).toFixed(1);
+                ctx.fillText(`${distKm} km | ${npc.faction}`, 90, y + 15);
+
+                if (npc.hostile) {
+                    ctx.fillStyle = this.palette.danger;
+                    ctx.fillText('⚠ HOSTILE', 300, y + 15);
+                }
+
+                ctx.font = '13px "Courier New"';
+                y += 40;
+            });
+        }
+
+        // Right side: Discovery and Reputation
+        this.drawBox(640, 80, 580, 260, 'DISCOVERIES');
+
+        y = 110;
+        ctx.font = '12px "Courier New"';
+        ctx.fillStyle = this.palette.primary;
+
+        const discovered = {
+            systems: state.discoveredSystems.size,
+            stations: state.discoveredStations.size,
+            pois: state.discoveredPOIs.size
+        };
+
+        ctx.fillText(`Systems: ${discovered.systems}`, 660, y);
+        y += 20;
+        ctx.fillText(`Stations: ${discovered.stations}`, 660, y);
+        y += 20;
+        ctx.fillText(`Points of Interest: ${discovered.pois}`, 660, y);
+        y += 40;
+
+        if (state.currentSystem) {
+            ctx.fillStyle = this.palette.info;
+            ctx.fillText(`Current System: ${state.currentSystem.name}`, 660, y);
+            y += 25;
+        }
+
+        // Reputation summary
+        this.drawBox(640, 360, 580, 240, 'FACTION STANDINGS');
+
+        y = 390;
+        const reputations = this.playerIntegration.getAllReputations();
+
+        if (reputations.size === 0) {
+            ctx.fillStyle = this.palette.muted;
+            ctx.fillText('No faction contacts yet', 660, y);
+        } else {
+            const sorted = Array.from(reputations.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 8);
+
+            sorted.forEach(([faction, rep]) => {
+                const standing = this.playerIntegration!.getReputationStanding(faction);
+                let color = this.palette.primary;
+                if (rep >= 50) color = this.palette.info;
+                else if (rep <= -50) color = this.palette.danger;
+                else if (rep <= -20) color = this.palette.warning;
+
+                ctx.fillStyle = color;
+                ctx.fillText(`${faction}: ${standing} (${rep.toFixed(0)})`, 660, y);
+                y += 20;
+            });
+        }
+    }
+
+    private drawBox(x: number, y: number, w: number, h: number, title: string): void {
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.palette.primary;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, w, h);
+
+        if (title) {
+            ctx.fillStyle = this.palette.primary;
+            ctx.font = 'bold 14px "Courier New"';
+            ctx.fillText(title, x + 10, y - 5);
+        }
     }
 }
