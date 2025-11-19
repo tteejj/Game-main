@@ -31,6 +31,9 @@ window.addEventListener('DOMContentLoaded', () => {
         const ui = new UIManager(canvas, game.spacecraft);
         const input = new InputManager();
 
+        // Initialize faction panel
+        ui.setStarSystem(game.starSystem);
+
         // Link input to UI
         input.onStationSwitch = (stationNum) => ui.setActiveStation(stationNum);
         input.onKeyPress = (key) => ui.handleInput(key);

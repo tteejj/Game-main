@@ -86,6 +86,7 @@ export class NPCShip implements ITrackableVessel {
   public readonly id: string;
   public name: string;
   public type: ShipType;
+  public faction: string = 'INDEPENDENT';  // Faction allegiance for diplomacy
   public status: ShipStatus = ShipStatus.IDLE;
 
   // Core systems
@@ -116,11 +117,13 @@ export class NPCShip implements ITrackableVessel {
     name: string,
     type: ShipType,
     position: Vector3 = new Vector3(0, 0, 0),
-    velocity: Vector3 = new Vector3(0, 0, 0)
+    velocity: Vector3 = new Vector3(0, 0, 0),
+    faction: string = 'INDEPENDENT'
   ) {
     this.id = id;
     this.name = name;
     this.type = type;
+    this.faction = faction;
 
     // Create physics based on ship type
     this.physics = this.createPhysicsForType(type, position, velocity);
