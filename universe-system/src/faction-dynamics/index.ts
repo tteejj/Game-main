@@ -35,3 +35,10 @@ export {
   EconomicAction,
   EconomicActionType
 } from './FactionEconomicNeeds';
+
+export {
+  FactionResearchAI,
+  FactionState,
+  ResearchPriority,
+  ResearchDecision
+} from './FactionResearchAI';

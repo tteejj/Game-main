@@ -39,6 +39,17 @@ import { Vector3 as Vector3Class } from '../../physics-modules/src/Vector3';
 import { FactionDiplomacyEngine } from './faction-dynamics/FactionDiplomacyEngine';
 import { FactionEconomicNeeds } from './faction-dynamics/FactionEconomicNeeds';
 
+// Phase 3 4X Systems
+import { ConstructionSystem } from './ConstructionSystem';
+import { FactionExpansionAI } from './faction-dynamics/FactionExpansionAI';
+import { ManufacturingSystem } from './ManufacturingSystem';
+import { ProductionChainManager } from './EconomyIntegration';
+import { ResearchSystem } from './ResearchSystem';
+import { FactionResearchAI } from './faction-dynamics/FactionResearchAI';
+import { PopulationSystem } from './PopulationSystem';
+import { ConquestSystem } from './ConquestSystem';
+import { FactionMilitaryAI } from './faction-dynamics/FactionMilitaryAI';
+
 export interface StarSystemConfig {
   seed?: number;
   starClass?: StarClass;
@@ -90,6 +101,29 @@ export class StarSystem {
   public position: Vector3;
   public factionDiplomacy: FactionDiplomacyEngine;
   public economicNeeds: FactionEconomicNeeds;
+
+  // ========================================================================
+  // PHASE 3: 4X GAMEPLAY SYSTEMS
+  // ========================================================================
+
+  // Construction & Expansion
+  public constructionSystem: ConstructionSystem;
+  public factionExpansionAIs: Map<string, FactionExpansionAI> = new Map();
+
+  // Manufacturing & Production
+  public manufacturingSystem: ManufacturingSystem;
+  public productionChainManager: ProductionChainManager;
+
+  // Research & Technology
+  public researchSystem: ResearchSystem;
+  public factionResearchAIs: Map<string, FactionResearchAI> = new Map();
+
+  // Population Simulation
+  public populationSystem: PopulationSystem;
+
+  // Conquest & Military
+  public conquestSystem: ConquestSystem;
+  public factionMilitaryAIs: Map<string, FactionMilitaryAI> = new Map();
 
   // INTEGRATED UNIVERSE - Complete living universe orchestration
   public integratedOrchestrator: any; // Will be set after initialization
@@ -193,6 +227,11 @@ export class StarSystem {
     // INTEGRATED UNIVERSE - Initialize complete living universe system
     // ========================================================================
     this.initializeIntegratedUniverse(config);
+
+    // ========================================================================
+    // PHASE 3: Initialize 4X Gameplay Systems
+    // ========================================================================
+    this.initializePhase3Systems(config);
   }
 
   /**
@@ -994,6 +1033,52 @@ export class StarSystem {
     }
 
     // ========================================================================
+    // PHASE 3: 4X SYSTEMS UPDATE
+    // ========================================================================
+
+    const currentTime = Date.now() / 1000; // Convert to seconds
+
+    // Update Construction System
+    if (this.constructionSystem) {
+      this.constructionSystem.update(deltaTime);
+    }
+
+    // Update Manufacturing System
+    if (this.manufacturingSystem) {
+      this.manufacturingSystem.update(deltaTime);
+    }
+
+    // Update Population System (every hour)
+    if (this.populationSystem && Math.floor(currentTime) % 3600 === 0) {
+      // this.populationSystem.update(3600, allCities);
+      // Note: Will be connected when city system is integrated
+    }
+
+    // Update Conquest System
+    if (this.conquestSystem) {
+      this.conquestSystem.update(deltaTime);
+    }
+
+    // Update Faction AI Systems
+    if (this.factionExpansionAIs) {
+      this.factionExpansionAIs.forEach((expansionAI, factionName) => {
+        expansionAI.update(deltaTime, currentTime);
+      });
+    }
+
+    if (this.factionResearchAIs) {
+      this.factionResearchAIs.forEach((researchAI, factionName) => {
+        researchAI.update(deltaTime);
+      });
+    }
+
+    if (this.factionMilitaryAIs) {
+      this.factionMilitaryAIs.forEach((militaryAI, factionName) => {
+        militaryAI.update(currentTime, deltaTime);
+      });
+    }
+
+    // ========================================================================
     // PHYSICS AND ORBITAL MECHANICS
     // ========================================================================
 
@@ -1330,6 +1415,183 @@ export class StarSystem {
         });
       });
     });
+  }
+
+  /**
+   * Initialize Phase 3 4X Gameplay Systems
+   */
+  private initializePhase3Systems(config: StarSystemConfig): void {
+    console.log(`[PHASE 3] Initializing 4X Gameplay Systems for ${this.name}...`);
+
+    // ========================================================================
+    // CONSTRUCTION SYSTEM
+    // ========================================================================
+    this.constructionSystem = new ConstructionSystem();
+
+    // ========================================================================
+    // MANUFACTURING SYSTEM
+    // ========================================================================
+    this.manufacturingSystem = new ManufacturingSystem();
+    this.productionChainManager = new ProductionChainManager(this.manufacturingSystem);
+
+    // Initialize manufacturing facilities for existing stations
+    this.stations.forEach(station => {
+      // Determine facility type based on station type
+      const facilityType = this.mapStationTypeToFacility(station.stationType);
+      if (facilityType) {
+        this.manufacturingSystem.createFacility(
+          station.id,
+          facilityType,
+          station.faction
+        );
+        console.log(`[MANUFACTURING] Created ${facilityType} at ${station.name}`);
+      }
+    });
+
+    // ========================================================================
+    // RESEARCH SYSTEM
+    // ========================================================================
+    this.researchSystem = new ResearchSystem();
+
+    // ========================================================================
+    // POPULATION SYSTEM
+    // ========================================================================
+    this.populationSystem = new PopulationSystem();
+
+    // ========================================================================
+    // CONQUEST SYSTEM
+    // ========================================================================
+    this.conquestSystem = new ConquestSystem();
+
+    // Register all stations with conquest system
+    this.stations.forEach(station => {
+      this.conquestSystem.registerTerritory({
+        id: station.id,
+        name: station.name,
+        type: 'STATION',
+        owner: station.faction,
+        position: station.position,
+        defenseRating: station.defenseRating || 5,
+        population: station.population || 10000,
+        strategicValue: this.calculateStrategicValue(station)
+      });
+    });
+
+    // ========================================================================
+    // FACTION AI SYSTEMS
+    // ========================================================================
+    // Initialize AI systems for each faction found in stations
+    const factions = new Set(this.stations.map(s => s.faction));
+
+    factions.forEach(factionName => {
+      // Get faction data
+      const factionStations = this.stations.filter(s => s.faction === factionName);
+      const factionShips = this.trafficManager.getAllVessels().filter((s: any) => s.faction === factionName);
+
+      // Create a simplified faction object for AI systems
+      const faction = {
+        name: factionName,
+        credits: 100000, // Starting credits
+        homeworld: factionStations[0]?.position || this.star.position,
+        personality: {
+          militaristic: Math.random(),
+          expansionist: Math.random(),
+          diplomatic: Math.random(),
+          economic: Math.random()
+        },
+        relations: new Map<string, number>(),
+        militaryStrength: factionShips.length * 10,
+        economicStrength: factionStations.length * 100,
+        technologyLevel: 1
+      };
+
+      // Initialize Expansion AI
+      const expansionAI = new FactionExpansionAI(
+        faction as any,
+        this,
+        this.constructionSystem
+      );
+      this.factionExpansionAIs.set(factionName, expansionAI);
+
+      // Initialize Research AI
+      const researchAI = new FactionResearchAI(
+        faction as any,
+        this.researchSystem
+      );
+      this.factionResearchAIs.set(factionName, researchAI);
+
+      // Initialize Military AI
+      const militaryAI = new FactionMilitaryAI(
+        this.conquestSystem,
+        this.factionDiplomacy,
+        this.economicNeeds
+      );
+
+      // Set faction doctrine based on personality
+      let doctrine: 'DEFENSIVE' | 'BALANCED' | 'AGGRESSIVE' | 'EXPANSIONIST' | 'OPPORTUNISTIC' = 'BALANCED';
+      if (faction.personality.militaristic > 0.7) doctrine = 'AGGRESSIVE';
+      else if (faction.personality.expansionist > 0.7) doctrine = 'EXPANSIONIST';
+      else if (faction.personality.militaristic < 0.3) doctrine = 'DEFENSIVE';
+
+      militaryAI.initializeFaction(factionName as any, doctrine);
+
+      // Register faction's territories
+      factionStations.forEach(station => {
+        militaryAI.registerStation(station as any);
+      });
+
+      this.factionMilitaryAIs.set(factionName, militaryAI);
+
+      console.log(`[FACTION AI] Initialized AI systems for ${factionName}: ${factionStations.length} stations, ${factionShips.length} ships`);
+    });
+
+    console.log(`[PHASE 3] 4X Systems initialized:`);
+    console.log(`  - Construction: Ready`);
+    console.log(`  - Manufacturing: ${this.manufacturingSystem.getAllFacilities().length} facilities`);
+    console.log(`  - Research: ${this.researchSystem.getAllTechnologies().length} technologies`);
+    console.log(`  - Population: Ready`);
+    console.log(`  - Conquest: ${this.conquestSystem.getAllTerritories().length} territories`);
+    console.log(`  - Faction AIs: ${factions.size} factions with expansion/research/military AI`);
+  }
+
+  /**
+   * Map station type to manufacturing facility type
+   */
+  private mapStationTypeToFacility(stationType: string): string | null {
+    const mapping: Record<string, string> = {
+      'REFINERY': 'REFINERY',
+      'MANUFACTURING_CENTER': 'FACTORY',
+      'INDUSTRIAL_COMPLEX': 'FACTORY',
+      'SHIPYARD': 'SHIPYARD',
+      'RESEARCH_FACILITY': 'ELECTRONICS_PLANT',
+      'MINING_PLATFORM': 'REFINERY'
+    };
+
+    return mapping[stationType] || null;
+  }
+
+  /**
+   * Calculate strategic value of a station
+   */
+  private calculateStrategicValue(station: SpaceStation): number {
+    let value = 1.0;
+
+    // Economic value
+    if (station.stationType === 'TRADING_HUB') value += 2.0;
+    if (station.stationType === 'REFINERY') value += 1.5;
+    if (station.stationType === 'MANUFACTURING_CENTER') value += 1.5;
+
+    // Military value
+    if (station.stationType === 'MILITARY_BASE') value += 3.0;
+    if (station.stationType === 'SHIPYARD') value += 2.0;
+
+    // Research value
+    if (station.stationType === 'RESEARCH_FACILITY') value += 2.0;
+
+    // Population value
+    value += (station.population || 0) / 50000;
+
+    return Math.min(value, 10.0);
   }
 
   /**

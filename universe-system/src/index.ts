@@ -419,6 +419,23 @@ export {
   TradeAgreement
 } from './faction-dynamics/FactionEconomicNeeds';
 
+export {
+  FactionResearchAI,
+  FactionState,
+  ResearchPriority,
+  ResearchDecision
+} from './faction-dynamics/FactionResearchAI';
+
+export {
+  ResearchSystem,
+  TechTree,
+  Technology,
+  TechCategory,
+  TechUnlocks,
+  ResearchProject,
+  CompletedResearch
+} from './ResearchSystem';
+
 // Phase 4: Storytelling Systems
 export {
   NewsGenerationEngine,
