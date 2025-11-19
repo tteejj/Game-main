@@ -87,6 +87,11 @@ export class StarSystem {
   public hazardSystem: HazardSystem;
   public position: Vector3;
 
+  // INTEGRATED UNIVERSE - Complete living universe orchestration
+  public integratedOrchestrator: any; // Will be set after initialization
+  private universeOrchestrator: any; // Base orchestrator
+  private contextProvider: any; // Universe context provider
+
   private planetGenerator: PlanetGenerator;
   private stationGenerator: StationGenerator;
   private rng: {
@@ -177,6 +182,11 @@ export class StarSystem {
     if (config.allowPOIs !== false) {
       this.generatePOIs(config.civilizationLevel || 5);
     }
+
+    // ========================================================================
+    // INTEGRATED UNIVERSE - Initialize complete living universe system
+    // ========================================================================
+    this.initializeIntegratedUniverse(config);
   }
 
   /**
@@ -968,6 +978,19 @@ export class StarSystem {
    * Update entire system
    */
   update(deltaTime: number): void {
+    // ========================================================================
+    // INTEGRATED UNIVERSE UPDATE - Complete living universe simulation
+    // ========================================================================
+
+    // If integrated orchestrator is initialized, it handles all NPC/faction AI
+    if (this.integratedOrchestrator) {
+      this.integratedOrchestrator.update(deltaTime);
+    }
+
+    // ========================================================================
+    // PHYSICS AND ORBITAL MECHANICS
+    // ========================================================================
+
     // Update star
     // Stars don't move much, but might rotate
 
@@ -1000,19 +1023,30 @@ export class StarSystem {
       satellite.update(deltaTime, stellarBody);
     }
 
-    // Update NPC ships
-    const allShips = this.trafficManager.getAllVessels();
-    for (const ship of allShips) {
-      // Get nearby ships for collision avoidance
-      const nearbyShips = this.trafficManager.getVesselsNear(ship.position, 50000) // 50 km radius
-        .filter(s => s.id !== ship.id); // Exclude self
+    // ========================================================================
+    // NPC SHIPS - Only update if NOT using integrated orchestrator
+    // (Integrated orchestrator handles NPC updates with universe-aware AI)
+    // ========================================================================
 
-      // Update ship with nearby ships for collision avoidance
-      ship.update(deltaTime, nearbyShips);
+    if (!this.integratedOrchestrator) {
+      // Fallback: Basic NPC ship updates without universe-aware AI
+      const allShips = this.trafficManager.getAllVessels();
+      for (const ship of allShips) {
+        // Get nearby ships for collision avoidance
+        const nearbyShips = this.trafficManager.getVesselsNear(ship.position, 50000) // 50 km radius
+          .filter(s => s.id !== ship.id); // Exclude self
+
+        // Update ship with nearby ships for collision avoidance
+        ship.update(deltaTime, nearbyShips);
+      }
     }
 
     // Update traffic manager (rebuild spatial grid)
     this.trafficManager.update(deltaTime);
+
+    // ========================================================================
+    // OTHER SYSTEMS
+    // ========================================================================
 
     // Update communications network
     this.communicationsManager.update(deltaTime);
@@ -1112,6 +1146,203 @@ export class StarSystem {
   private generatePlanetName(index: number): string {
     const romanNumerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
     return `${this.name} ${romanNumerals[index] || (index + 1)}`;
+  }
+
+  // ====================================================================
+  // INTEGRATED UNIVERSE SYSTEM - Complete living universe integration
+  // ====================================================================
+
+  /**
+   * Initialize the integrated universe system
+   * This connects all NPCs, factions, and AI systems together
+   */
+  private initializeIntegratedUniverse(config: StarSystemConfig): void {
+    // Dynamically import to avoid circular dependencies
+    import('./UniverseOrchestrator').then(({ UniverseOrchestrator }) => {
+      import('./integration/UniverseContextProvider').then(({ UniverseContextProvider }) => {
+        import('./integration/IntegratedUniverseOrchestrator').then(({ IntegratedUniverseOrchestrator }) => {
+          import('./integration/FactionAI').then(({ FactionAI, FactionStrategy }) => {
+            import('./entity-ai/ExtendedNPCMemory').then(({ ExtendedNPCMemory }) => {
+              // Create base orchestrator
+              this.universeOrchestrator = new UniverseOrchestrator({
+                enableEntityAI: true,
+                enableFactionDynamics: true,
+                enableStorytelling: true,
+                enableRumors: true,
+                enableChronicles: true
+              });
+
+              // Create context provider
+              this.contextProvider = new UniverseContextProvider(this);
+
+              // Create integrated orchestrator
+              this.integratedOrchestrator = new IntegratedUniverseOrchestrator(
+                this,
+                this.universeOrchestrator,
+                {
+                  enableDynamicEvents: true,
+                  enableFactionAI: true,
+                  npcUpdateFrequency: 10, // 10 Hz
+                  factionUpdateFrequency: 0.1 // 0.1 Hz
+                }
+              );
+
+              // Auto-register all existing NPCs with universe-aware AI
+              this.registerAllNPCsWithAI(config.civilizationLevel || 5);
+
+              // Auto-register factions from stations
+              this.registerFactionsFromStations();
+
+              console.log(`[INTEGRATED UNIVERSE] ${this.name} fully initialized with living universe systems`);
+              console.log(`  - NPCs: ${this.trafficManager.getAllVessels().length} ships with universe-aware AI`);
+              console.log(`  - Stations: ${this.stations.length} stations`);
+              console.log(`  - Hazards: ${this.hazardSystem.getActiveHazards().length} active hazards`);
+              console.log(`  - POIs: ${this.poiManager.getAllPOIs().length} points of interest`);
+            });
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * Register all NPCs with universe-aware AI
+   */
+  private registerAllNPCsWithAI(civilizationLevel: number): void {
+    if (!this.integratedOrchestrator) return;
+
+    const ships = this.trafficManager.getAllVessels();
+    const { ShipType } = require('./npc-traffic/npc-ship');
+
+    for (const ship of ships) {
+      // Generate personality based on ship type
+      const personality = this.generatePersonalityForShipType(ship.type);
+
+      // Determine faction from station ownership
+      let factionId: string | undefined;
+      if (ship.originName) {
+        const originStation = this.stations.find(s => s.name === ship.originName);
+        if (originStation) {
+          factionId = originStation.owningFaction;
+        }
+      }
+
+      // Register with integrated system
+      this.integratedOrchestrator.registerIntegratedNPC(ship, personality, factionId);
+    }
+  }
+
+  /**
+   * Register factions from stations
+   */
+  private registerFactionsFromStations(): void {
+    if (!this.integratedOrchestrator) return;
+
+    const { FactionStrategy } = require('./integration/FactionAI');
+
+    // Group stations by faction
+    const factionStations = new Map<string, typeof this.stations>();
+
+    for (const station of this.stations) {
+      if (station.owningFaction) {
+        if (!factionStations.has(station.owningFaction)) {
+          factionStations.set(station.owningFaction, []);
+        }
+        factionStations.get(station.owningFaction)!.push(station);
+      }
+    }
+
+    // Register each faction
+    for (const [factionId, stations] of factionStations) {
+      // Determine strategy from faction name/type
+      const strategy = this.determineFactionStrategy(factionId);
+
+      // Create territories from station locations
+      const territories = stations.map((station, i) => ({
+        id: `${factionId}-territory-${i}`,
+        center: station.position,
+        radius: 100000, // 100km radius
+        controlLevel: 0.8,
+        population: station.population || 10000,
+        economicValue: 500,
+        militaryPresence: 2,
+        strategicValue: 0.7,
+        threats: []
+      }));
+
+      // Register faction
+      this.integratedOrchestrator.registerFaction(factionId, strategy, territories);
+    }
+  }
+
+  /**
+   * Generate personality traits for ship type
+   */
+  private generatePersonalityForShipType(shipType: any): any {
+    const { ShipType } = require('./npc-traffic/npc-ship');
+
+    // Base personality
+    const base = {
+      aggression: 0.3,
+      greed: 0.5,
+      caution: 0.5,
+      curiosity: 0.5,
+      loyalty: 0.5,
+      trustingness: 0.5,
+      adaptability: 0.5,
+      patience: 0.5
+    };
+
+    // Modify based on ship type
+    switch (shipType) {
+      case ShipType.CARGO_FREIGHTER:
+        return { ...base, caution: 0.7, greed: 0.7, patience: 0.7 };
+
+      case ShipType.MINING_VESSEL:
+        return { ...base, greed: 0.9, patience: 0.9, caution: 0.8 };
+
+      case ShipType.PATROL_SHIP:
+        return { ...base, aggression: 0.6, loyalty: 0.9, caution: 0.6 };
+
+      case ShipType.RESEARCH:
+        return { ...base, curiosity: 0.9, patience: 0.8, caution: 0.5 };
+
+      case ShipType.PIRATE:
+        return { ...base, aggression: 0.9, greed: 0.9, caution: 0.3, trustingness: 0.2 };
+
+      case ShipType.PASSENGER_LINER:
+        return { ...base, caution: 0.9, patience: 0.8, loyalty: 0.7 };
+
+      default:
+        return base;
+    }
+  }
+
+  /**
+   * Determine faction strategy from faction ID
+   */
+  private determineFactionStrategy(factionId: string): any {
+    const { FactionStrategy } = require('./integration/FactionAI');
+
+    const id = factionId.toLowerCase();
+
+    if (id.includes('mining') || id.includes('guild')) {
+      return FactionStrategy.ECONOMIC;
+    } else if (id.includes('military') || id.includes('defense')) {
+      return FactionStrategy.MILITARISTIC;
+    } else if (id.includes('trade') || id.includes('merchant')) {
+      return FactionStrategy.ECONOMIC;
+    } else if (id.includes('federation') || id.includes('alliance')) {
+      return FactionStrategy.DIPLOMATIC;
+    } else if (id.includes('pirate') || id.includes('raider')) {
+      return FactionStrategy.MILITARISTIC;
+    } else if (id.includes('research') || id.includes('science')) {
+      return FactionStrategy.SCIENTIFIC;
+    } else if (id.includes('colonial') || id.includes('frontier')) {
+      return FactionStrategy.EXPANSIONIST;
+    }
+
+    return FactionStrategy.OPPORTUNISTIC;
   }
 }
 
