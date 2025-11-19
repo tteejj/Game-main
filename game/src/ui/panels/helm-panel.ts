@@ -85,11 +85,16 @@ export class HelmPanel {
                 console.log(`Gimbal Y: ${this.gimbalY}°`);
                 break;
 
-            // RCS Thrusters (1-9, 0)
+            // RCS Thrusters (1-9, 0, -, =)
             case '1': case '2': case '3': case '4':
             case '5': case '6': case '7': case '8':
-            case '9': case '0':
-                const num = key === '0' ? 9 : parseInt(key) - 1;
+            case '9': case '0': case '-': case '=':
+                let num: number;
+                if (key === '0') num = 9;
+                else if (key === '-') num = 10;
+                else if (key === '=') num = 11;
+                else num = parseInt(key) - 1;
+
                 this.rcsActive[num] = !this.rcsActive[num];
                 this.spacecraft.fireRCS(num, this.rcsActive[num]);
                 console.log(`RCS Thruster ${num + 1}: ${this.rcsActive[num] ? 'FIRING' : 'OFF'}`);

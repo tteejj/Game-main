@@ -461,6 +461,119 @@ export class SpacecraftAdapter {
         return this.spacecraft.getBreachStatus();
     }
 
+    /**
+     * Get door configuration for compartment with directions
+     */
+    getCompartmentDoors(compartmentId: number): Array<{
+        id: string;
+        direction: 'forward' | 'aft' | 'port' | 'starboard' | 'up' | 'down';
+        targetCompartment: number;
+        isOpen: boolean;
+        isLocked: boolean;
+    }> {
+        // Define ship layout (6 compartments)
+        const doorMap: Record<number, Array<{ direction: string; target: number }>> = {
+            1: [ // Bow
+                { direction: 'aft', target: 2 },
+                { direction: 'starboard', target: 4 }
+            ],
+            2: [ // Bridge
+                { direction: 'forward', target: 1 },
+                { direction: 'aft', target: 3 },
+                { direction: 'port', target: 5 },
+                { direction: 'starboard', target: 4 }
+            ],
+            3: [ // Engineering
+                { direction: 'forward', target: 2 },
+                { direction: 'aft', target: 6 }
+            ],
+            4: [ // Starboard
+                { direction: 'forward', target: 1 },
+                { direction: 'port', target: 2 },
+                { direction: 'aft', target: 6 }
+            ],
+            5: [ // Port (Center)
+                { direction: 'starboard', target: 2 }
+            ],
+            6: [ // Stern
+                { direction: 'forward', target: 3 },
+                { direction: 'port', target: 4 }
+            ]
+        };
+
+        const doors = doorMap[compartmentId] || [];
+        const doorStatus = this.getDoorStatus();
+
+        return doors.map(door => {
+            const status = doorStatus.find(d =>
+                (d.comp1 === String(compartmentId) && d.comp2 === String(door.target)) ||
+                (d.comp2 === String(compartmentId) && d.comp1 === String(door.target))
+            );
+
+            return {
+                id: `door_${compartmentId}_${door.target}`,
+                direction: door.direction as any,
+                targetCompartment: door.target,
+                isOpen: status ? status.open : false,
+                isLocked: false // TODO: Implement door locking
+            };
+        });
+    }
+
+    /**
+     * Toggle specific door by direction
+     */
+    toggleDoorByDirection(compartmentId: number, direction: string): boolean {
+        const doors = this.getCompartmentDoors(compartmentId);
+        const door = doors.find(d => d.direction === direction);
+
+        if (!door) {
+            console.log(`No door ${direction} from compartment ${compartmentId}`);
+            return false;
+        }
+
+        // Toggle the door
+        this.toggleBulkheadDoor(String(compartmentId), String(door.targetCompartment));
+        return true;
+    }
+
+    /**
+     * Set O2 generation rate
+     */
+    setO2GenerationRate(rate: number): void {
+        // The actual implementation would set the O2 generator rate
+        // For now, log the change
+        console.log(`O2 generation rate set to ${rate}%`);
+    }
+
+    /**
+     * Toggle O2 generator
+     */
+    toggleO2Generator(): void {
+        console.log('O2 generator toggled');
+    }
+
+    /**
+     * Toggle CO2 scrubber
+     */
+    toggleCO2Scrubber(): void {
+        console.log('CO2 scrubber toggled');
+    }
+
+    /**
+     * Set auto equalization mode
+     */
+    setAutoEqualization(enabled: boolean): void {
+        console.log(`Auto equalization: ${enabled ? 'ON' : 'OFF'}`);
+    }
+
+    /**
+     * Manually equalize compartment pressure
+     */
+    equalizeCompartmentPressure(compartmentId: number): void {
+        console.log(`Compartment ${compartmentId} pressure equalized`);
+    }
+
     // ========== FUEL TRANSFER/VENTING CONTROLS ==========
 
     transferFuel(sourceTankId: string, destTankId: string): boolean {

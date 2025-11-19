@@ -9,6 +9,7 @@ export class InputManager {
     // Callbacks
     onStationSwitch: ((station: number) => void) | null = null;
     onKeyPress: ((key: string) => void) | null = null;
+    onRenderingControl: ((control: string) => void) | null = null;
 
     constructor() {
         this.setupListeners();
@@ -23,7 +24,16 @@ export class InputManager {
         const key = e.key;
         this.keysPressed.add(key);
 
-        // Station switching (F1-F7 keys)
+        // Rendering controls (higher priority than station switching)
+        if (key === '[' || key === ']' || key === 't' || key === 'h') {
+            if (this.onRenderingControl) {
+                this.onRenderingControl(key);
+            }
+            e.preventDefault();
+            return;
+        }
+
+        // Station switching (F1-F7 keys, F3 can be used for both rendering toggle and navigation)
         if (key === 'F1' || key === 'F2' || key === 'F3' || key === 'F4' || key === 'F5' || key === 'F6' || key === 'F7') {
             const stationNum = parseInt(key.substring(1)); // Extract number from F1, F2, etc.
             if (this.onStationSwitch) {

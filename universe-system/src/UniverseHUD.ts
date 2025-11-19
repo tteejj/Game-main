@@ -456,8 +456,38 @@ export class UniverseHUD {
   private getFactionsInSystem(systemId?: string): string[] {
     if (!systemId) return [];
 
-    // Would query orchestrator for factions with presence in system
-    return ['UEC', 'MCA']; // Placeholder
+    // Query orchestrator for actual factions
+    if (!this.orchestrator) {
+      return []; // No orchestrator, no factions
+    }
+
+    const system = this.orchestrator.getStarSystem(systemId);
+    if (!system) {
+      return [];
+    }
+
+    // Get unique factions from stations in system
+    const factions = new Set<string>();
+
+    if (system.stations) {
+      system.stations.forEach(station => {
+        if (station.faction) {
+          factions.add(station.faction);
+        }
+      });
+    }
+
+    // Get factions from NPC ships if available
+    const npcShips = this.orchestrator.getAllNPCShips();
+    if (npcShips) {
+      npcShips.forEach(ship => {
+        if (ship.faction && ship.currentSystemId === systemId) {
+          factions.add(ship.faction);
+        }
+      });
+    }
+
+    return Array.from(factions).sort();
   }
 
   private getIconForType(type: string): string {
