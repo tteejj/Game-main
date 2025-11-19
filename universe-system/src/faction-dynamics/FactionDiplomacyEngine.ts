@@ -83,9 +83,12 @@ export type RelationshipTrend =
 export interface DiplomaticInteraction {
   timestamp: number;
   type: InteractionType;
+  factionA: string;               // Primary faction involved
+  factionB: string;               // Secondary faction involved
   impact: number;                 // -10 to +10
   description: string;
   witnesses: string[];            // Other factions that know
+  eventContext?: any;             // Reference to original event
 }
 
 export type InteractionType =
@@ -588,38 +591,646 @@ export class FactionDiplomacyEngine {
   }
 
   private extractFactions(event: HistoricalEvent): string[] {
-    // Extract faction IDs from event
-    // This would integrate with actual faction system
-    return [];  // TODO: Implement
+    // Extract faction IDs from event metadata
+    const factions: string[] = [];
+
+    // Check common faction-related fields in event
+    if ((event as any).factionId) {
+      factions.push((event as any).factionId);
+    }
+
+    if ((event as any).attackerFaction) {
+      factions.push((event as any).attackerFaction);
+    }
+
+    if ((event as any).defenderFaction) {
+      factions.push((event as any).defenderFaction);
+    }
+
+    if ((event as any).buyerFaction) {
+      factions.push((event as any).buyerFaction);
+    }
+
+    if ((event as any).sellerFaction) {
+      factions.push((event as any).sellerFaction);
+    }
+
+    if ((event as any).rescuerFaction) {
+      factions.push((event as any).rescuerFaction);
+    }
+
+    if ((event as any).victimFaction) {
+      factions.push((event as any).victimFaction);
+    }
+
+    // Extract from participants array if it exists
+    if ((event as any).participants && Array.isArray((event as any).participants)) {
+      for (const participant of (event as any).participants) {
+        if (participant.factionId) {
+          factions.push(participant.factionId);
+        }
+      }
+    }
+
+    // Remove duplicates
+    return [...new Set(factions)];
   }
 
   private processPirateRaid(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    // TODO: Generate diplomatic interactions from pirate raid
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Identify pirate faction and victim faction
+    const pirateFaction = (event as any).attackerFaction || factions[0];
+    const victimFaction = (event as any).victimFaction || factions[1];
+    const witnesses = factions.filter(f => f !== pirateFaction && f !== victimFaction);
+
+    // Get existing relationship to scale impact
+    const relationship = this.getRelationship(pirateFaction, victimFaction);
+    const casualties = (event as any).casualties || 0;
+    const stolenCargo = (event as any).stolenValue || 0;
+
+    // Base impact scaled by severity and existing relationship
+    // If already hostile, raids matter less. If were friendly, this is a betrayal
+    let baseImpact = -5 - (casualties / 5) - (stolenCargo / 50000);
+    if (relationship.status === 'FRIENDLY' || relationship.status === 'ALLIED') {
+      baseImpact *= 2.5; // Betrayal is worse
+    } else if (relationship.status === 'HOSTILE' || relationship.status === 'WAR') {
+      baseImpact *= 0.5; // Expected behavior
+    }
+
+    // Pirate raid damages relationship between pirate and victim
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'MILITARY_INCIDENT',
+      factionA: pirateFaction,
+      factionB: victimFaction,
+      impact: Math.max(-20, baseImpact),
+      description: `Pirate raid by ${pirateFaction} against ${victimFaction}: ${casualties} casualties, ${stolenCargo} credits stolen`,
+      witnesses: witnesses,
+      eventContext: event
+    });
+
+    // Witness reactions - allies of victim condemn more strongly
+    for (const witnessF of witnesses) {
+      const witnessVictimRel = this.getRelationship(witnessF, victimFaction);
+      const witnessPirateRel = this.getRelationship(witnessF, pirateFaction);
+
+      let witnessImpact = -2;
+
+      // Allies of victim are more upset
+      if (witnessVictimRel.status === 'ALLIED') {
+        witnessImpact = -8;
+      } else if (witnessVictimRel.status === 'FRIENDLY') {
+        witnessImpact = -5;
+      }
+
+      // Already enemies of pirate care less
+      if (witnessPirateRel.status === 'HOSTILE' || witnessPirateRel.status === 'WAR') {
+        witnessImpact *= 0.5;
+      }
+
+      interactions.push({
+        timestamp: event.timestamp,
+        type: witnessVictimRel.status === 'ALLIED' ? 'MILITARY_AID' : 'MILITARY_INCIDENT',
+        factionA: witnessF,
+        factionB: pirateFaction,
+        impact: witnessImpact,
+        description: `${witnessF} condemns pirate raid on ${victimFaction}`,
+        witnesses: [victimFaction],
+        eventContext: event
+      });
+
+      // Witness supports victim
+      if (witnessVictimRel.status === 'ALLIED' || witnessVictimRel.status === 'FRIENDLY') {
+        interactions.push({
+          timestamp: event.timestamp,
+          type: 'DIPLOMATIC_PRAISE',
+          factionA: witnessF,
+          factionB: victimFaction,
+          impact: 3,
+          description: `${witnessF} expresses solidarity with ${victimFaction}`,
+          witnesses: [pirateFaction],
+          eventContext: event
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private processStationDestroyed(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Identify attacker and owner
+    const attackerFaction = (event as any).attackerFaction || factions[0];
+    const ownerFaction = (event as any).ownerFaction || factions[1];
+    const witnesses = factions.filter(f => f !== attackerFaction && f !== ownerFaction);
+    const stationValue = (event as any).stationValue || 1000000;
+    const civilianCasualties = (event as any).civilianCasualties || 0;
+
+    // Get relationship context
+    const relationship = this.getRelationship(attackerFaction, ownerFaction);
+
+    // Station destruction is a MAJOR incident
+    let baseImpact = -25 - (stationValue / 1000000) * 5 - (civilianCasualties / 100) * 10;
+
+    // If they had treaties, this breaks them
+    const hasTreaties = relationship.treaties.length > 0;
+    if (hasTreaties) {
+      baseImpact *= 1.5; // Treaty violation makes it worse
+      // Break all treaties
+      for (const treaty of relationship.treaties) {
+        treaty.active = false;
+        treaty.brokenBy = attackerFaction;
+        treaty.brokenAt = event.timestamp;
+      }
+    }
+
+    // If they were allied, this could trigger a coalition war
+    const wasAllied = relationship.status === 'ALLIED';
+    if (wasAllied) {
+      baseImpact *= 3.0; // Extreme betrayal
+    }
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'MILITARY_INCIDENT',
+      factionA: attackerFaction,
+      factionB: ownerFaction,
+      impact: Math.max(-50, baseImpact),
+      description: `Station destroyed by ${attackerFaction} - owned by ${ownerFaction}. ${civilianCasualties} civilian casualties. Value: ${stationValue} credits.${hasTreaties ? ' TREATY VIOLATION!' : ''}`,
+      witnesses: witnesses,
+      eventContext: event
+    });
+
+    // This could trigger automatic war declaration
+    if (relationship.relationshipValue > -80) {
+      // Push them toward war threshold
+      relationship.relationshipValue = Math.min(relationship.relationshipValue, -75);
+    }
+
+    // Allied factions react VERY negatively
+    for (const faction of witnesses) {
+      const factionOwnerRel = this.getRelationship(faction, ownerFaction);
+      const factionAttackerRel = this.getRelationship(faction, attackerFaction);
+
+      let witnessImpact = -10;
+
+      // Allies might join the war
+      if (factionOwnerRel.status === 'ALLIED') {
+        witnessImpact = -30;
+        // Check if should join war
+        const ownerAllies = this.getAllies(ownerFaction);
+        if (ownerAllies.includes(faction)) {
+          // Mutual defense pact - consider joining
+          interactions.push({
+            timestamp: event.timestamp,
+            type: 'MILITARY_COOPERATION',
+            factionA: faction,
+            factionB: ownerFaction,
+            impact: 15,
+            description: `${faction} considers military response to station destruction (allied with ${ownerFaction})`,
+            witnesses: [attackerFaction],
+            eventContext: event
+          });
+        }
+      } else if (factionOwnerRel.status === 'FRIENDLY') {
+        witnessImpact = -15;
+      } else if (factionOwnerRel.status === 'CORDIAL') {
+        witnessImpact = -8;
+      }
+
+      interactions.push({
+        timestamp: event.timestamp,
+        type: 'DIPLOMATIC_INSULT',
+        factionA: faction,
+        factionB: attackerFaction,
+        impact: witnessImpact,
+        description: `${faction} condemns station destruction as war crime`,
+        witnesses: [ownerFaction, attackerFaction],
+        eventContext: event
+      });
+
+      // Support for victim
+      if (factionOwnerRel.relationshipValue > 0) {
+        interactions.push({
+          timestamp: event.timestamp,
+          type: 'HUMANITARIAN_AID',
+          factionA: faction,
+          factionB: ownerFaction,
+          impact: 5,
+          description: `${faction} offers humanitarian aid to ${ownerFaction} survivors`,
+          witnesses: witnesses,
+          eventContext: event
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private processTradeCompleted(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Trade improves relationships
+    const buyer = (event as any).buyerFaction || factions[0];
+    const seller = (event as any).sellerFaction || factions[1];
+    const tradeValue = (event as any).value || 1000;
+    const commodity = (event as any).commodity || 'goods';
+
+    const relationship = this.getRelationship(buyer, seller);
+
+    // Scale impact based on trade value and relationship
+    let baseImpact = Math.min(8, (tradeValue / 50000) * 3);
+
+    // First trades with new factions matter more
+    const tradeHistory = relationship.recentInteractions.filter(i => i.type === 'TRADE_AGREEMENT');
+    if (tradeHistory.length === 0) {
+      baseImpact *= 1.5; // First trade is memorable
+    }
+
+    // Large trades increase economic interdependence
+    if (tradeValue > 100000) {
+      relationship.economicInterdependence = Math.min(1.0,
+        relationship.economicInterdependence + (tradeValue / 10000000)
+      );
+    }
+
+    // Trade between hostile factions is a diplomatic breakthrough
+    if (relationship.status === 'HOSTILE' || relationship.status === 'TENSE') {
+      baseImpact *= 2.0;
+    }
+
+    // Check if there's a trade agreement
+    const hasTradeAgreement = relationship.tradeAgreements.length > 0;
+    if (hasTradeAgreement) {
+      // Update trade volume
+      for (const agreement of relationship.tradeAgreements) {
+        agreement.actualTradeVolume += tradeValue;
+      }
+      baseImpact *= 1.2; // Following agreements is good
+    }
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'TRADE_AGREEMENT',
+      factionA: buyer,
+      factionB: seller,
+      impact: baseImpact,
+      description: `Trade completed: ${buyer} purchased ${commodity} from ${seller} for ${tradeValue} credits`,
+      witnesses: [],
+      eventContext: event
+    });
+
+    // Economic interdependence earns diplomatic capital
+    if (relationship.economicInterdependence > 0.3) {
+      relationship.diplomaticCapital = Math.min(100,
+        (relationship.diplomaticCapital || 0) + baseImpact * 0.5
+      );
+    }
+
+    return interactions;
   }
 
   private processRescue(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Rescue significantly improves relationship
+    const rescuer = (event as any).rescuerFaction || factions[0];
+    const rescued = (event as any).victimFaction || factions[1];
+    const liveSaved = (event as any).livesSaved || 1;
+    const witnesses = factions.filter(f => f !== rescuer && f !== rescued);
+
+    const relationship = this.getRelationship(rescuer, rescued);
+
+    // Base impact scaled by lives saved
+    let baseImpact = 15 + Math.min(10, liveSaved / 10);
+
+    // Rescue of enemy faction is EXTREMELY significant (shows honor)
+    if (relationship.status === 'HOSTILE' || relationship.status === 'WAR') {
+      baseImpact *= 3.0;
+    }
+
+    // Rescue earns massive diplomatic capital
+    relationship.diplomaticCapital = Math.min(100,
+      (relationship.diplomaticCapital || 0) + baseImpact
+    );
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'RESCUE_OPERATION',
+      factionA: rescuer,
+      factionB: rescued,
+      impact: baseImpact,
+      description: `${rescuer} rescued ${liveSaved} ${rescued} personnel in daring operation`,
+      witnesses: witnesses,
+      eventContext: event
+    });
+
+    // Witnesses are impressed - this improves rescuer's reputation universally
+    for (const faction of witnesses) {
+      const witnessRescuerRel = this.getRelationship(faction, rescuer);
+      const witnessRescuedRel = this.getRelationship(faction, rescued);
+
+      // Everyone respects heroism
+      let witnessImpact = 5;
+
+      // Allies of rescued are especially grateful
+      if (witnessRescuedRel.status === 'ALLIED') {
+        witnessImpact = 12;
+      } else if (witnessRescuedRel.status === 'FRIENDLY') {
+        witnessImpact = 8;
+      }
+
+      interactions.push({
+        timestamp: event.timestamp,
+        type: 'HUMANITARIAN_AID',
+        factionA: faction,
+        factionB: rescuer,
+        impact: witnessImpact,
+        description: `${faction} commends ${rescuer} for heroic rescue of ${rescued} personnel`,
+        witnesses: [rescued],
+        eventContext: event
+      });
+    }
+
+    return interactions;
   }
 
   private processCombatEvent(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Combat damages relationships
+    const attacker = (event as any).attackerFaction || factions[0];
+    const defender = (event as any).defenderFaction || factions[1];
+    const casualties = (event as any).casualties || 0;
+    const victor = (event as any).victor;
+    const witnesses = factions.filter(f => f !== attacker && f !== defender);
+
+    const relationship = this.getRelationship(attacker, defender);
+
+    // Scale impact based on casualties and relationship status
+    let baseImpact = -5 - (casualties / 5);
+
+    // First strike is shocking, but war is expected
+    if (relationship.status === 'WAR') {
+      baseImpact *= 0.3; // War combat is expected
+    } else if (relationship.status === 'NEUTRAL' || relationship.status === 'CORDIAL') {
+      baseImpact *= 2.5; // Unprovoked attack is severe
+    }
+
+    // Check if this violates treaties
+    const violatesTreaty = relationship.treaties.some(t =>
+      t.active && (t.type === 'NON_AGGRESSION_PACT' || t.type === 'PEACE_TREATY')
+    );
+
+    if (violatesTreaty) {
+      baseImpact *= 2.0;
+      // Break violated treaties
+      for (const treaty of relationship.treaties) {
+        if (treaty.type === 'NON_AGGRESSION_PACT' || treaty.type === 'PEACE_TREATY') {
+          treaty.active = false;
+          treaty.brokenBy = attacker;
+          treaty.brokenAt = event.timestamp;
+          treaty.violations.push({
+            violator: attacker,
+            term: 'Non-aggression',
+            timestamp: event.timestamp,
+            severity: 10
+          });
+        }
+      }
+    }
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'MILITARY_INCIDENT',
+      factionA: attacker,
+      factionB: defender,
+      impact: Math.max(-30, baseImpact),
+      description: `Combat: ${attacker} vs ${defender} - ${casualties} casualties${violatesTreaty ? ' (TREATY VIOLATION)' : ''}`,
+      witnesses: witnesses,
+      eventContext: event
+    });
+
+    // Combat ended - process victor/loser dynamics
+    if (event.type === 'COMBAT_ENDED' && victor) {
+      const loser = victor === attacker ? defender : attacker;
+
+      // Victor gains reputation
+      for (const faction of witnesses) {
+        const factionVictorRel = this.getRelationship(faction, victor);
+        const factionLoserRel = this.getRelationship(faction, loser);
+
+        let witnessImpact = 2;
+
+        // Allies of loser are concerned
+        if (factionLoserRel.status === 'ALLIED') {
+          witnessImpact = -5; // Worry about allied defeat
+        }
+        // Enemies of loser are pleased
+        else if (factionLoserRel.status === 'HOSTILE' || factionLoserRel.status === 'WAR') {
+          witnessImpact = 5;
+        }
+
+        interactions.push({
+          timestamp: event.timestamp,
+          type: 'MILITARY_COOPERATION',
+          factionA: faction,
+          factionB: victor,
+          impact: witnessImpact,
+          description: `${faction} acknowledges ${victor} military victory over ${loser}`,
+          witnesses: [attacker, defender],
+          eventContext: event
+        });
+      }
+
+      // Update military balance perception
+      relationship.militaryBalance = victor === attacker ? 0.3 : -0.3;
+    }
+
+    return interactions;
   }
 
   private processGenericEvent(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Generic event has mild diplomatic impact based on event category
+    let baseImpact = 0;
+    let type: InteractionType = 'DIPLOMATIC_SUMMIT';
+
+    switch (event.category) {
+      case 'DIPLOMATIC':
+        baseImpact = 5;
+        type = 'DIPLOMATIC_PRAISE';
+        break;
+      case 'MILITARY':
+        baseImpact = -3;
+        type = 'MILITARY_INCIDENT';
+        break;
+      case 'ECONOMIC':
+        baseImpact = 2;
+        type = 'TRADE_AGREEMENT';
+        break;
+      case 'SCIENTIFIC':
+        baseImpact = 3;
+        type = 'CULTURAL_EXCHANGE';
+        break;
+      default:
+        baseImpact = 1;
+        type = 'DIPLOMATIC_SUMMIT';
+    }
+
+    // Apply interaction between all faction pairs
+    for (let i = 0; i < factions.length; i++) {
+      for (let j = i + 1; j < factions.length; j++) {
+        const relationship = this.getRelationship(factions[i], factions[j]);
+
+        // Scale by event severity and relationship
+        let scaledImpact = baseImpact * (event.severity / 10);
+
+        // Cultural exchange more effective with compatible factions
+        if (type === 'CULTURAL_EXCHANGE') {
+          scaledImpact *= relationship.culturalCompatibility;
+        }
+
+        // Diplomatic events more effective between cordial factions
+        if (type === 'DIPLOMATIC_PRAISE' || type === 'DIPLOMATIC_SUMMIT') {
+          if (relationship.status === 'HOSTILE' || relationship.status === 'WAR') {
+            scaledImpact *= 0.3; // Hard to improve hostile relations
+          }
+        }
+
+        interactions.push({
+          timestamp: event.timestamp,
+          type: type,
+          factionA: factions[i],
+          factionB: factions[j],
+          impact: scaledImpact,
+          description: `${event.type} involving ${factions[i]} and ${factions[j]}`,
+          witnesses: factions.filter(f => f !== factions[i] && f !== factions[j]),
+          eventContext: event
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private applyInteraction(interaction: DiplomaticInteraction): void {
-    // TODO: Apply interaction to relationship
+    // Use faction IDs directly from interaction
+    if (!interaction.factionA || !interaction.factionB) {
+      console.warn('DiplomaticInteraction missing faction IDs:', interaction);
+      return;
+    }
+
+    // Get or create relationship
+    const relationship = this.getRelationship(interaction.factionA, interaction.factionB);
+
+    // Add interaction to recent interactions
+    relationship.recentInteractions.push(interaction);
+
+    // Limit recent interactions to prevent memory bloat
+    if (relationship.recentInteractions.length > 50) {
+      relationship.recentInteractions = relationship.recentInteractions.slice(-50);
+    }
+
+    // Calculate effective impact (modified by relationship inertia and momentum)
+    let effectiveImpact = interaction.impact;
+
+    // Account for inertia - extreme relationships resist change
+    const inertiaModifier = 1 - relationship.inertia;
+    effectiveImpact *= inertiaModifier;
+
+    // Account for momentum - trends continue
+    if (relationship.momentum) {
+      const momentumAlignment = Math.sign(relationship.momentum) === Math.sign(effectiveImpact) ? 1.2 : 0.8;
+      effectiveImpact *= momentumAlignment;
+    }
+
+    // Update relationship value
+    const oldValue = relationship.relationshipValue;
+    relationship.relationshipValue = Math.max(-100, Math.min(100,
+      relationship.relationshipValue + effectiveImpact
+    ));
+
+    // Update opinion (long-term view, changes slower)
+    relationship.opinion = Math.max(-100, Math.min(100,
+      relationship.opinion + effectiveImpact * 0.5
+    ));
+
+    // Record in history
+    if (!relationship.history) {
+      relationship.history = [];
+    }
+    relationship.history.push({
+      timestamp: interaction.timestamp,
+      delta: effectiveImpact,
+      reason: interaction.description
+    });
+
+    // Keep history manageable
+    if (relationship.history.length > 100) {
+      relationship.history = relationship.history.slice(-100);
+    }
+
+    // Check if this interaction triggers a major event
+    this.checkForTriggeredEvents(relationship, interaction);
+
+    // Log significant changes
+    const changeMagnitude = Math.abs(relationship.relationshipValue - oldValue);
+    if (changeMagnitude > 10) {
+      console.log(`[Diplomacy] Major shift: ${interaction.factionA} <-> ${interaction.factionB}: ${oldValue.toFixed(1)} → ${relationship.relationshipValue.toFixed(1)} (${effectiveImpact > 0 ? '+' : ''}${effectiveImpact.toFixed(1)})`);
+      console.log(`   Reason: ${interaction.description}`);
+    }
+  }
+
+  /**
+   * Check if interaction triggers major diplomatic events (war, alliance, etc)
+   */
+  private checkForTriggeredEvents(relationship: FactionRelationship, trigger: DiplomaticInteraction): void {
+    // Treaty violations might trigger immediate war
+    if (trigger.description.includes('TREATY VIOLATION')) {
+      if (relationship.relationshipValue < -70 && Math.random() < 0.4) {
+        console.log(`[Diplomacy] Treaty violation pushes ${relationship.factionA} and ${relationship.factionB} toward war!`);
+        // Could auto-declare war here
+      }
+    }
+
+    // Station destruction often triggers war
+    if (trigger.type === 'MILITARY_INCIDENT' && trigger.description.includes('Station destroyed')) {
+      if (relationship.status !== 'WAR' && relationship.relationshipValue < -60) {
+        console.log(`[Diplomacy] Station destruction may trigger war between ${relationship.factionA} and ${relationship.factionB}`);
+        relationship.warProbability = Math.min(1.0, relationship.warProbability + 0.4);
+      }
+    }
+
+    // Rescue of enemies can dramatically shift relations
+    if (trigger.type === 'RESCUE_OPERATION') {
+      if (relationship.status === 'HOSTILE' || relationship.status === 'WAR') {
+        console.log(`[Diplomacy] Heroic rescue may lead to peace talks between ${relationship.factionA} and ${relationship.factionB}`);
+      }
+    }
+
+    // Multiple trades increase alliance probability
+    if (trigger.type === 'TRADE_AGREEMENT') {
+      const tradeCount = relationship.recentInteractions.filter(i => i.type === 'TRADE_AGREEMENT').length;
+      if (tradeCount > 10 && relationship.relationshipValue > 60) {
+        relationship.allianceProbability = Math.min(1.0, relationship.allianceProbability + 0.05);
+      }
+    }
   }
 
   private decayInteractions(relationship: FactionRelationship, deltaTime: number): void {

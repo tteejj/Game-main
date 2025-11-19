@@ -552,7 +552,6 @@ export class Game {
      */
     private checkCollisions(): void {
         const shipPos = this.spacecraft.getPosition();
-        const shipState = this.spacecraft.getState();
 
         // Check collisions with celestial bodies
         for (const body of this.starSystem.getAllBodies()) {
@@ -564,13 +563,40 @@ export class Game {
             const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
             if (dist < body.physical.radius + 50) { // Ship size ~50m
+                const velocity = this.spacecraft.getVelocity();
+                const impactSpeed = Math.sqrt(
+                    velocity.x ** 2 +
+                    velocity.y ** 2 +
+                    velocity.z ** 2
+                );
+
                 console.log(`💥 COLLISION with ${body.name}!`);
-                console.log(`   └─ Impact speed: ${Math.sqrt(
-                    shipState.velocity.x ** 2 +
-                    shipState.velocity.y ** 2 +
-                    shipState.velocity.z ** 2
-                ).toFixed(0)} m/s`);
-                this.paused = true;
+                console.log(`   └─ Impact speed: ${impactSpeed.toFixed(0)} m/s`);
+
+                // Calculate damage based on impact speed
+                // Speed > 100 m/s = catastrophic damage (100%)
+                // Speed < 10 m/s = minor damage (5%)
+                const damageFactor = Math.min(impactSpeed / 100, 1.0);
+                const damagePercent = 5 + (damageFactor * 95); // 5-100% damage
+
+                // Apply hull damage
+                this.spacecraft.applyHullDamage(damagePercent, 'compartment_1');
+
+                // Check hull integrity
+                const hullIntegrity = this.spacecraft.getHullIntegrity();
+                console.log(`   └─ Hull integrity: ${hullIntegrity.toFixed(1)}%`);
+
+                if (hullIntegrity <= 0) {
+                    console.log('💀 CRITICAL HULL FAILURE - Mission Failed');
+                    // Game over - hull destroyed
+                    this.paused = true;
+                    // TODO: Trigger game over state/screen
+                } else if (hullIntegrity < 30) {
+                    console.log('⚠️  WARNING: Critical hull damage! Recommend immediate landing.');
+                    this.paused = true;
+                } else {
+                    this.paused = true;
+                }
             }
         }
 
@@ -583,8 +609,36 @@ export class Game {
             const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
             if (dist < 100) { // Collision threshold
+                // Calculate relative velocity for collision damage
+                const shipVel = this.spacecraft.getVelocity();
+                const relVelX = shipVel.x - npc.velocity.x;
+                const relVelY = shipVel.y - npc.velocity.y;
+                const relVelZ = shipVel.z - npc.velocity.z;
+                const relSpeed = Math.sqrt(relVelX ** 2 + relVelY ** 2 + relVelZ ** 2);
+
                 console.log(`💥 COLLISION with NPC ${npc.id}!`);
-                this.paused = true;
+                console.log(`   └─ Relative speed: ${relSpeed.toFixed(0)} m/s`);
+
+                // Calculate damage based on relative speed
+                const damageFactor = Math.min(relSpeed / 50, 1.0);
+                const damagePercent = 10 + (damageFactor * 40); // 10-50% damage (less than planetary collision)
+
+                // Apply hull damage
+                this.spacecraft.applyHullDamage(damagePercent, 'compartment_1');
+
+                // Check hull integrity
+                const hullIntegrity = this.spacecraft.getHullIntegrity();
+                console.log(`   └─ Hull integrity: ${hullIntegrity.toFixed(1)}%`);
+
+                if (hullIntegrity <= 0) {
+                    console.log('💀 CRITICAL HULL FAILURE - Mission Failed');
+                    this.paused = true;
+                } else if (hullIntegrity < 30) {
+                    console.log('⚠️  WARNING: Critical hull damage!');
+                    this.paused = true;
+                } else {
+                    this.paused = true;
+                }
             }
         }
 

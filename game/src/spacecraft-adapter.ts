@@ -286,6 +286,62 @@ export class SpacecraftAdapter {
         return this.spacecraft.getSensorTelemetry();
     }
 
+    getHullIntegrity(): number {
+        // Calculate hull integrity from environmental system breach data
+        // 100% = no breaches, decreases with breach severity
+        const breaches = this.getBreachStatus();
+        if (breaches.length === 0) {
+            return 100;
+        }
+
+        // Calculate total damage from all breaches
+        let totalDamage = 0;
+        for (const breach of breaches) {
+            if (breach.breached) {
+                // breachSize is 0-1, convert to percentage damage
+                totalDamage += breach.breachSize * 100;
+            }
+        }
+
+        // Hull integrity is 100% minus accumulated damage, minimum 0%
+        return Math.max(0, 100 - totalDamage);
+    }
+
+    getRadiationDose(): number {
+        // Get radiation exposure from environmental system
+        const radiation = this.spacecraft.environmental.radiationShielding;
+        return radiation.currentRadiationLevel;
+    }
+
+    getCumulativeRadiationExposure(): number {
+        // Get cumulative radiation from environmental system
+        const radiation = this.spacecraft.environmental.radiationShielding;
+        return radiation.cumulativeExposure;
+    }
+
+    // Apply hull damage (called from collision handler or hazards)
+    applyHullDamage(damagePercent: number, location: string = 'compartment_1'): void {
+        // Convert damage to breach size (0-1 scale)
+        const breachSize = Math.min(1.0, damagePercent / 100);
+
+        // Find the compartment and apply breach
+        const compartment = this.spacecraft.environmental.compartments.get(location);
+        if (compartment) {
+            // Unseal compartment and mark as breached
+            compartment.sealed = false;
+            compartment.pressurized = false;
+
+            // Update hull integrity tracking
+            const hullStatus = this.spacecraft.environmental.hullIntegrity;
+            hullStatus.breachDetected = true;
+            hullStatus.leakRate += breachSize * 10; // kg/hr per breach size
+            hullStatus.micrometeoriteHits += 1;
+
+            console.log(`⚠️  Hull breach in ${location}: ${(breachSize * 100).toFixed(1)}% damage`);
+            console.log(`   Leak rate: ${hullStatus.leakRate.toFixed(1)} kg/hr`);
+        }
+    }
+
     toggleO2Generator(on: boolean): void {
         this.spacecraft.toggleO2Generator(on);
     }

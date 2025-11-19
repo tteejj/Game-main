@@ -36,6 +36,7 @@ import {
   PointOfInterest
 } from './poi';
 import { Vector3 as Vector3Class } from '../../physics-modules/src/Vector3';
+import { FactionDiplomacyEngine } from './faction-dynamics/FactionDiplomacyEngine';
 
 export interface StarSystemConfig {
   seed?: number;
@@ -86,6 +87,7 @@ export class StarSystem {
   public poiManager: POIManager;
   public hazardSystem: HazardSystem;
   public position: Vector3;
+  public factionDiplomacy: FactionDiplomacyEngine;
 
   // INTEGRATED UNIVERSE - Complete living universe orchestration
   public integratedOrchestrator: any; // Will be set after initialization
@@ -132,6 +134,7 @@ export class StarSystem {
     this.relayNetwork = new RelayNetwork(1e10); // 10 million km max range
     this.communicationsManager = new CommunicationsManager(this.relayNetwork);
     this.poiManager = new POIManager();
+    this.factionDiplomacy = new FactionDiplomacyEngine();
 
     // Generate the star
     this.star = this.generateStar(config.starClass);
@@ -1061,6 +1064,31 @@ export class StarSystem {
 
     // Update hazards
     this.hazardSystem.update(deltaTime);
+
+    // Update faction diplomacy (process relationship decay, trends, automatic events)
+    this.factionDiplomacy.update(deltaTime);
+  }
+
+  /**
+   * Process diplomatic event
+   * Call this when significant events occur (combat, trade, rescue, etc.)
+   */
+  processDiplomaticEvent(event: any): void {
+    if (this.factionDiplomacy) {
+      const interactions = this.factionDiplomacy.processEvent(event);
+
+      // Log major diplomatic shifts
+      if (interactions.length > 0) {
+        console.log(`[StarSystem] Processed diplomatic event: ${event.type} - ${interactions.length} interactions generated`);
+      }
+    }
+  }
+
+  /**
+   * Get relationship between two factions
+   */
+  getFactionRelationship(factionA: string, factionB: string): any {
+    return this.factionDiplomacy.getRelationship(factionA, factionB);
   }
 
   /**
