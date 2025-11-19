@@ -310,28 +310,11 @@ export class EngineeringPanel {
     }
 
     /**
-     * Get hull integrity percentage (mock data for now - would come from ship state)
+     * Get hull integrity percentage from spacecraft environmental system
      */
     private getHullIntegrity(): number {
-        // TODO: Get actual hull integrity from spacecraft state
-        // For now, return a simulated value based on various damage factors
-        const thermal = this.spacecraft.getThermalState();
-        const electrical = this.spacecraft.getElectricalState();
-
-        // Base integrity
-        let integrity = 100;
-
-        // Reduce integrity if reactor is damaged or offline
-        if (electrical.reactor.status !== 'online') {
-            integrity -= 5;
-        }
-
-        // Reduce integrity if thermal damage
-        if (thermal.nodes?.reactor?.temperature > 800) {
-            integrity -= Math.min(20, (thermal.nodes.reactor.temperature - 800) / 10);
-        }
-
-        return Math.max(0, Math.min(100, integrity));
+        // Get real hull integrity from spacecraft adapter
+        return this.spacecraft.getHullIntegrity();
     }
 
     /**

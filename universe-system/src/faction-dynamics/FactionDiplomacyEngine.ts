@@ -588,38 +588,324 @@ export class FactionDiplomacyEngine {
   }
 
   private extractFactions(event: HistoricalEvent): string[] {
-    // Extract faction IDs from event
-    // This would integrate with actual faction system
-    return [];  // TODO: Implement
+    // Extract faction IDs from event metadata
+    const factions: string[] = [];
+
+    // Check common faction-related fields in event
+    if ((event as any).factionId) {
+      factions.push((event as any).factionId);
+    }
+
+    if ((event as any).attackerFaction) {
+      factions.push((event as any).attackerFaction);
+    }
+
+    if ((event as any).defenderFaction) {
+      factions.push((event as any).defenderFaction);
+    }
+
+    if ((event as any).buyerFaction) {
+      factions.push((event as any).buyerFaction);
+    }
+
+    if ((event as any).sellerFaction) {
+      factions.push((event as any).sellerFaction);
+    }
+
+    if ((event as any).rescuerFaction) {
+      factions.push((event as any).rescuerFaction);
+    }
+
+    if ((event as any).victimFaction) {
+      factions.push((event as any).victimFaction);
+    }
+
+    // Extract from participants array if it exists
+    if ((event as any).participants && Array.isArray((event as any).participants)) {
+      for (const participant of (event as any).participants) {
+        if (participant.factionId) {
+          factions.push(participant.factionId);
+        }
+      }
+    }
+
+    // Remove duplicates
+    return [...new Set(factions)];
   }
 
   private processPirateRaid(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    // TODO: Generate diplomatic interactions from pirate raid
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Identify pirate faction and victim faction
+    const pirateFaction = (event as any).attackerFaction || factions[0];
+    const victimFaction = (event as any).victimFaction || factions[1];
+
+    // Pirate raid damages relationship between pirate and victim
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'MILITARY_INCIDENT',
+      impact: -5,
+      description: `Pirate raid by ${pirateFaction} against ${victimFaction}`,
+      witnesses: factions.filter(f => f !== pirateFaction && f !== victimFaction)
+    });
+
+    // If there are other factions (witnesses), they may sympathize with victim
+    for (const witnessF of factions) {
+      if (witnessF !== pirateFaction && witnessF !== victimFaction) {
+        // Witness factions view pirates more negatively
+        interactions.push({
+          timestamp: event.timestamp,
+          type: 'MILITARY_INCIDENT',
+          impact: -2,
+          description: `${witnessF} condemns pirate raid`,
+          witnesses: [victimFaction]
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private processStationDestroyed(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Identify attacker and owner
+    const attackerFaction = (event as any).attackerFaction || factions[0];
+    const ownerFaction = (event as any).ownerFaction || factions[1];
+
+    // Station destruction severely damages relationship
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'MILITARY_INCIDENT',
+      impact: -20,
+      description: `Station destroyed by ${attackerFaction} - owned by ${ownerFaction}`,
+      witnesses: factions.filter(f => f !== attackerFaction && f !== ownerFaction)
+    });
+
+    // Allied factions react negatively to attacker
+    for (const faction of factions) {
+      if (faction !== attackerFaction && faction !== ownerFaction) {
+        interactions.push({
+          timestamp: event.timestamp,
+          type: 'DIPLOMATIC_INSULT',
+          impact: -8,
+          description: `${faction} condemns station destruction`,
+          witnesses: [ownerFaction, attackerFaction]
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private processTradeCompleted(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Trade improves relationships
+    const buyer = (event as any).buyerFaction || factions[0];
+    const seller = (event as any).sellerFaction || factions[1];
+    const tradeValue = (event as any).value || 1000;
+
+    // Scale impact based on trade value (larger trades = better relations)
+    const impact = Math.min(5, tradeValue / 10000);
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'TRADE_AGREEMENT',
+      impact: impact,
+      description: `Trade completed between ${buyer} and ${seller}`,
+      witnesses: []
+    });
+
+    return interactions;
   }
 
   private processRescue(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Rescue significantly improves relationship
+    const rescuer = (event as any).rescuerFaction || factions[0];
+    const rescued = (event as any).victimFaction || factions[1];
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'RESCUE_OPERATION',
+      impact: 15,
+      description: `${rescuer} rescued ${rescued} personnel`,
+      witnesses: factions.filter(f => f !== rescuer && f !== rescued)
+    });
+
+    // Other factions view rescuer more favorably
+    for (const faction of factions) {
+      if (faction !== rescuer && faction !== rescued) {
+        interactions.push({
+          timestamp: event.timestamp,
+          type: 'HUMANITARIAN_AID',
+          impact: 3,
+          description: `${faction} commends ${rescuer} for rescue operation`,
+          witnesses: [rescued]
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private processCombatEvent(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Combat damages relationships
+    const attacker = (event as any).attackerFaction || factions[0];
+    const defender = (event as any).defenderFaction || factions[1];
+    const casualties = (event as any).casualties || 0;
+
+    // Scale impact based on casualties
+    const impact = -Math.min(15, 3 + casualties / 10);
+
+    interactions.push({
+      timestamp: event.timestamp,
+      type: 'MILITARY_INCIDENT',
+      impact: impact,
+      description: `Combat between ${attacker} and ${defender} - ${casualties} casualties`,
+      witnesses: factions.filter(f => f !== attacker && f !== defender)
+    });
+
+    // If combat ended in surrender/victory, additional diplomatic effects
+    if (event.type === 'COMBAT_ENDED') {
+      const victor = (event as any).victor;
+      if (victor) {
+        // Victor gains reputation with witnesses
+        for (const faction of factions) {
+          if (faction !== attacker && faction !== defender) {
+            interactions.push({
+              timestamp: event.timestamp,
+              type: 'MILITARY_COOPERATION',
+              impact: 2,
+              description: `${faction} acknowledges ${victor} military victory`,
+              witnesses: [attacker, defender]
+            });
+          }
+        }
+      }
+    }
+
+    return interactions;
   }
 
   private processGenericEvent(event: HistoricalEvent, factions: string[]): DiplomaticInteraction[] {
-    return [];
+    const interactions: DiplomaticInteraction[] = [];
+
+    if (factions.length < 2) return interactions;
+
+    // Generic event has mild diplomatic impact based on event category
+    let impact = 0;
+    let type: InteractionType = 'DIPLOMATIC_SUMMIT';
+
+    switch (event.category) {
+      case 'DIPLOMATIC':
+        impact = 5;
+        type = 'DIPLOMATIC_PRAISE';
+        break;
+      case 'MILITARY':
+        impact = -3;
+        type = 'MILITARY_INCIDENT';
+        break;
+      case 'ECONOMIC':
+        impact = 2;
+        type = 'TRADE_AGREEMENT';
+        break;
+      case 'SCIENTIFIC':
+        impact = 3;
+        type = 'CULTURAL_EXCHANGE';
+        break;
+      default:
+        impact = 1;
+        type = 'DIPLOMATIC_SUMMIT';
+    }
+
+    // Apply interaction between all faction pairs
+    for (let i = 0; i < factions.length; i++) {
+      for (let j = i + 1; j < factions.length; j++) {
+        interactions.push({
+          timestamp: event.timestamp,
+          type: type,
+          impact: impact * (event.severity / 10),
+          description: `${event.type} involving ${factions[i]} and ${factions[j]}`,
+          witnesses: factions.filter(f => f !== factions[i] && f !== factions[j])
+        });
+      }
+    }
+
+    return interactions;
   }
 
   private applyInteraction(interaction: DiplomaticInteraction): void {
-    // TODO: Apply interaction to relationship
+    // Extract factions from interaction description
+    // This is a simplified approach - in practice, interaction should contain faction IDs
+    const matches = interaction.description.match(/between ([^\s]+) and ([^\s]+)/);
+    if (!matches || matches.length < 3) {
+      // Try alternative pattern: "by X against Y" or "by X - owned by Y"
+      const altMatches = interaction.description.match(/by ([^\s]+).+(?:against|owned by) ([^\s]+)/);
+      if (!altMatches || altMatches.length < 3) {
+        return; // Cannot determine factions
+      }
+      const factionA = altMatches[1];
+      const factionB = altMatches[2];
+
+      const relationship = this.getRelationship(factionA, factionB);
+      relationship.recentInteractions.push(interaction);
+
+      // Update relationship value
+      relationship.relationshipValue = Math.max(-100, Math.min(100,
+        relationship.relationshipValue + interaction.impact
+      ));
+
+      return;
+    }
+
+    const factionA = matches[1];
+    const factionB = matches[2];
+
+    // Get or create relationship
+    const relationship = this.getRelationship(factionA, factionB);
+
+    // Add interaction to recent interactions
+    relationship.recentInteractions.push(interaction);
+
+    // Limit recent interactions to prevent memory bloat
+    if (relationship.recentInteractions.length > 50) {
+      relationship.recentInteractions = relationship.recentInteractions.slice(-50);
+    }
+
+    // Update relationship value
+    relationship.relationshipValue = Math.max(-100, Math.min(100,
+      relationship.relationshipValue + interaction.impact
+    ));
+
+    // Update opinion (long-term view)
+    relationship.opinion = Math.max(-100, Math.min(100,
+      relationship.opinion + interaction.impact * 0.5
+    ));
+
+    // Record in history
+    if (!relationship.history) {
+      relationship.history = [];
+    }
+    relationship.history.push({
+      timestamp: interaction.timestamp,
+      delta: interaction.impact,
+      reason: interaction.description
+    });
   }
 
   private decayInteractions(relationship: FactionRelationship, deltaTime: number): void {
