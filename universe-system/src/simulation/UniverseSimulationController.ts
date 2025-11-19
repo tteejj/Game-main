@@ -455,32 +455,157 @@ export class UniverseSimulationController {
   // ====================================================================
 
   private isSystemActive(system: StarSystem): boolean {
-    // TODO: Check if system is near player or has recent activity
-    return true;
+    // System is active if:
+    // 1. Player is in it, or
+    // 2. Recent player activity (last hour), or
+    // 3. Has active ships/events
+    // For now, simulate all active systems (can optimize later)
+    return this.state.activeSystems.includes(system);
   }
 
   private getNearbyShips(system: StarSystem, radius: number): NPCShip[] {
-    // TODO: Use spatial hash to find ships within radius
-    return this.state.activeShips.filter(ship => ship.system === system);
+    // Filter ships in this system and within radius
+    // TODO: Optimize with spatial hash in future
+    return this.state.activeShips.filter(ship => {
+      if (ship.system !== system) return false;
+
+      // Check distance if position available
+      if (ship.position && system.star?.position) {
+        const dx = ship.position.x - system.star.position.x;
+        const dy = ship.position.y - system.star.position.y;
+        const dz = ship.position.z - system.star.position.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        return distSq <= radius * radius;
+      }
+
+      return true; // Include if can't check distance
+    });
   }
 
   private evaluateFactionGoals(faction: Faction): any[] {
-    // TODO: Implement faction goal evaluation
-    return [];
+    const goals: any[] = [];
+
+    // Resource needs drive goals
+    if ((faction as any).economy) {
+      const economy = (faction as any).economy;
+
+      // Check for critical shortages
+      if (economy.criticalResources) {
+        for (const [resource, need] of economy.criticalResources) {
+          if (need.inCrisis) {
+            goals.push({
+              type: 'ACQUIRE_RESOURCE',
+              priority: 100,
+              resource,
+              deficit: need.deficit
+            });
+          }
+        }
+      }
+
+      // Check for expansion opportunities
+      if (economy.gdpGrowth > 0.05) {
+        goals.push({
+          type: 'EXPAND_TERRITORY',
+          priority: 60
+        });
+      }
+    }
+
+    // Diplomatic goals based on relationships
+    if ((faction as any).relationships) {
+      for (const [otherId, relationship] of Object.entries((faction as any).relationships || {})) {
+        const rel = relationship as any;
+        if (rel.value < -50) {
+          goals.push({
+            type: 'IMPROVE_RELATIONS',
+            priority: 40,
+            target: otherId
+          });
+        }
+      }
+    }
+
+    return goals;
   }
 
   private planFactionAction(faction: Faction, goal: any): any {
-    // TODO: Implement action planning
-    return null;
+    switch (goal.type) {
+      case 'ACQUIRE_RESOURCE':
+        return {
+          type: 'TRADE_NEGOTIATION',
+          target: goal.resource,
+          faction: faction.id
+        };
+
+      case 'EXPAND_TERRITORY':
+        return {
+          type: 'ESTABLISH_OUTPOST',
+          faction: faction.id
+        };
+
+      case 'IMPROVE_RELATIONS':
+        return {
+          type: 'DIPLOMATIC_MISSION',
+          faction: faction.id,
+          target: goal.target
+        };
+
+      default:
+        return null;
+    }
   }
 
   private executeFactionAction(action: any): void {
-    // TODO: Execute faction action
+    // Create historical event for this action
+    const event: HistoricalEvent = {
+      id: this.generateEventId(),
+      timestamp: this.state.simulationTime,
+      type: 'CUSTOM_EVENT',
+      category: 'DIPLOMATIC',
+      severity: 5,
+      location: { x: 0, y: 0, z: 0 },
+      participants: [action.faction],
+      description: `Faction ${action.faction} executed ${action.type}`,
+      data: action,
+      consequences: [],
+      witnessed: false,
+      priority: 5,
+      tags: ['faction', 'action']
+    };
+
+    this.pendingEvents.push(event);
   }
 
   private generateEconomicEvents(): HistoricalEvent[] {
-    // TODO: Generate economic events (booms, recessions, etc.)
-    return [];
+    const events: HistoricalEvent[] = [];
+
+    // 5% chance of economic event per macro tick
+    if (Math.random() < 0.05) {
+      const eventTypes = ['ECONOMIC_BOOM', 'ECONOMIC_RECESSION', 'MARKET_CRASH'];
+      const type = eventTypes[Math.floor(Math.random() * eventTypes.length)] as EventType;
+
+      events.push({
+        id: this.generateEventId(),
+        timestamp: this.state.simulationTime,
+        type,
+        category: 'ECONOMIC',
+        severity: 6,
+        location: { x: 0, y: 0, z: 0 },
+        participants: [],
+        description: `Universe-wide ${type.replace(/_/g, ' ').toLowerCase()}`,
+        data: {
+          gdpImpact: type === 'ECONOMIC_BOOM' ? 0.2 : -0.15,
+          duration: 604800 // 1 week
+        },
+        consequences: [],
+        witnessed: false,
+        priority: 7,
+        tags: ['economy', 'macro']
+      });
+    }
+
+    return events;
   }
 
   private selectMajorEventType(): string {
@@ -489,24 +614,219 @@ export class UniverseSimulationController {
   }
 
   private createMajorEvent(type: string): HistoricalEvent | null {
-    // TODO: Create event based on type
+    // Create major universe-altering event
+    switch (type) {
+      case 'WAR':
+        if (this.state.activeFactions.length >= 2) {
+          const factionA = this.state.activeFactions[Math.floor(Math.random() * this.state.activeFactions.length)];
+          const factionB = this.state.activeFactions.filter(f => f !== factionA)[0];
+
+          return {
+            id: this.generateEventId(),
+            timestamp: this.state.simulationTime,
+            type: 'WAR_DECLARED',
+            category: 'MILITARY',
+            severity: 9,
+            location: { x: 0, y: 0, z: 0 },
+            participants: [factionA.id, factionB.id],
+            description: `War declared between ${factionA.name} and ${factionB.name}`,
+            data: { factionA: factionA.id, factionB: factionB.id, casusBelli: 'territorial_dispute' },
+            consequences: [],
+            witnessed: false,
+            priority: 10,
+            tags: ['war', 'major', 'diplomatic']
+          };
+        }
+        break;
+
+      case 'DISCOVERY':
+        return {
+          id: this.generateEventId(),
+          timestamp: this.state.simulationTime,
+          type: 'POI_DISCOVERED',
+          category: 'DISCOVERY',
+          severity: 7,
+          location: { x: Math.random() * 1e9, y: Math.random() * 1e9, z: Math.random() * 1e9 },
+          participants: [],
+          description: 'Major scientific discovery made',
+          data: { discoveryType: 'ANCIENT_ARTIFACT', value: 1000000 },
+          consequences: [],
+          witnessed: false,
+          priority: 8,
+          tags: ['discovery', 'science']
+        };
+
+      case 'DISASTER':
+        if (this.state.activeSystems.length > 0) {
+          const system = this.state.activeSystems[Math.floor(Math.random() * this.state.activeSystems.length)];
+          return {
+            id: this.generateEventId(),
+            timestamp: this.state.simulationTime,
+            type: 'SOLAR_FLARE',
+            category: 'ENVIRONMENTAL',
+            severity: 8,
+            location: system.star?.position || { x: 0, y: 0, z: 0 },
+            systemId: system.id,
+            participants: [],
+            description: `Massive solar flare in ${system.name}`,
+            data: { duration: 7200, intensity: 9 },
+            consequences: [],
+            witnessed: false,
+            priority: 9,
+            tags: ['disaster', 'environmental']
+          };
+        }
+        break;
+
+      case 'BREAKTHROUGH':
+        return {
+          id: this.generateEventId(),
+          timestamp: this.state.simulationTime,
+          type: 'CUSTOM_EVENT',
+          category: 'DISCOVERY',
+          severity: 7,
+          location: { x: 0, y: 0, z: 0 },
+          participants: [],
+          description: 'Technological breakthrough achieved',
+          data: { technologyType: 'FTL_IMPROVEMENT', benefit: 0.2 },
+          consequences: [],
+          witnessed: false,
+          priority: 7,
+          tags: ['technology', 'breakthrough']
+        };
+    }
+
     return null;
   }
 
   private updateRelationship(factionA: Faction, factionB: Faction): void {
-    // TODO: Update faction relationship based on recent interactions
+    // Update faction relationship based on recent interactions
+    const recentEvents = this.history.getRecentEvents(this.config.macroTickRate);
+
+    let relationshipDelta = 0;
+
+    for (const event of recentEvents) {
+      // Check if both factions involved
+      if (event.participants.includes(factionA.id) && event.participants.includes(factionB.id)) {
+        // Positive events improve relations
+        if (event.type === 'TRADE_COMPLETED' || event.type === 'TRADE_AGREEMENT') {
+          relationshipDelta += 2;
+        }
+
+        // Negative events worsen relations
+        if (event.type === 'COMBAT_STARTED' || event.type === 'PIRATE_RAID') {
+          relationshipDelta -= 5;
+        }
+
+        if (event.type === 'STATION_DESTROYED' || event.type === 'STATION_ATTACKED') {
+          relationshipDelta -= 10;
+        }
+      }
+    }
+
+    // Apply natural drift toward neutral (very slow)
+    const currentRel = (factionA as any).relationships?.[factionB.id] || 0;
+    const drift = -currentRel * 0.01; // 1% drift toward 0
+
+    relationshipDelta += drift;
+
+    // Update relationship (would integrate with FactionDiplomacyEngine in full implementation)
+    if ((factionA as any).relationships) {
+      (factionA as any).relationships[factionB.id] = Math.max(-100, Math.min(100,
+        ((factionA as any).relationships[factionB.id] || 0) + relationshipDelta
+      ));
+    }
   }
 
   private updateTradeRoutes(system: StarSystem): void {
-    // TODO: Update profitable trade routes
+    // Update trade route profitability based on prices
+    // This would integrate with EconomySystem in full implementation
+    if (!system.stations || system.stations.length < 2) return;
+
+    for (let i = 0; i < system.stations.length; i++) {
+      for (let j = i + 1; j < system.stations.length; j++) {
+        const stationA = system.stations[i];
+        const stationB = system.stations[j];
+
+        // Check price differences for profitable routes
+        if (stationA.economy && stationB.economy) {
+          const pricesA = (stationA.economy as any).prices || {};
+          const pricesB = (stationB.economy as any).prices || {};
+
+          // Find arbitrage opportunities
+          for (const commodity in pricesA) {
+            if (pricesB[commodity]) {
+              const profit = pricesB[commodity] - pricesA[commodity];
+              if (Math.abs(profit) > pricesA[commodity] * 0.2) {
+                // Profitable route - spawn trader (simplified)
+                // Full implementation would use TrafficManager
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   private checkEconomicImbalances(system: StarSystem): void {
-    // TODO: Check for shortages/surpluses
+    // Check for supply/demand imbalances that could cause events
+    if (!system.stations) return;
+
+    for (const station of system.stations) {
+      if (!station.economy) continue;
+
+      const inventory = (station.economy as any).inventory || {};
+      const consumption = (station.economy as any).consumption || {};
+
+      for (const commodity in consumption) {
+        const stock = inventory[commodity] || 0;
+        const consumptionRate = consumption[commodity] || 0;
+        const daysRemaining = consumptionRate > 0 ? stock / (consumptionRate / 86400) : Infinity;
+
+        // Critical shortage - generate event
+        if (daysRemaining < 3 && daysRemaining > 0) {
+          const event: HistoricalEvent = {
+            id: this.generateEventId(),
+            timestamp: this.state.simulationTime,
+            type: 'SHORTAGE',
+            category: 'ECONOMIC',
+            severity: 7,
+            location: station.position,
+            stationId: station.id,
+            participants: [station.id],
+            description: `Critical shortage of ${commodity} at ${station.name}`,
+            data: { commodity, daysRemaining, station: station.id },
+            consequences: [],
+            witnessed: false,
+            priority: 8,
+            tags: ['shortage', 'economy', 'crisis']
+          };
+
+          this.pendingEvents.push(event);
+        }
+      }
+    }
   }
 
   private spawnTrafficShips(system: StarSystem): void {
-    // TODO: Spawn ships based on economic activity
+    // Spawn ships based on economic activity and station populations
+    if (!system.stations || system.stations.length === 0) return;
+
+    // Calculate spawn probability based on system activity
+    const totalPopulation = system.stations.reduce((sum, s) => sum + ((s as any).population || 0), 0);
+    const economicActivity = system.stations.reduce((sum, s) => {
+      const economy = (s as any).economy;
+      return sum + (economy?.gdp || 0);
+    }, 0);
+
+    // Base spawn rate: 1 ship per 10,000 population per hour
+    const spawnProbability = (totalPopulation / 10000) * (this.config.mesoTickRate / 3600);
+
+    if (Math.random() < spawnProbability && this.state.activeShips.length < this.config.maxActiveEntities) {
+      // Would spawn ship using TrafficManager in full implementation
+      // For now, just log
+      console.log(`[TRAFFIC] Would spawn ship in ${system.name}`);
+    }
   }
 
   private getSystemShips(system: StarSystem): NPCShip[] {
@@ -514,21 +834,112 @@ export class UniverseSimulationController {
   }
 
   private cullDistantShips(system: StarSystem): void {
-    // TODO: Despawn ships far from player
+    // Remove ships far from player to manage performance
+    const MAX_DISTANCE = 1000000; // 1000 km
+
+    this.state.activeShips = this.state.activeShips.filter(ship => {
+      if (ship.system !== system) {
+        // Keep ships in other systems for now
+        return true;
+      }
+
+      // Check distance from system center
+      if (ship.position && system.star?.position) {
+        const dx = ship.position.x - system.star.position.x;
+        const dy = ship.position.y - system.star.position.y;
+        const dz = ship.position.z - system.star.position.z;
+        const distSq = dx * dx + dy * dy + dz * dz;
+
+        if (distSq > MAX_DISTANCE * MAX_DISTANCE) {
+          console.log(`[CULL] Removing distant ship ${ship.name || ship.id}`);
+          return false;
+        }
+      }
+
+      return true;
+    });
   }
 
   private generateTrafficMessages(system: StarSystem): void {
-    // TODO: Generate traffic control messages
+    // Generate traffic control messages for realism
+    const ships = this.getSystemShips(system);
+
+    if (ships.length > 0 && Math.random() < 0.1) {
+      // 10% chance of traffic message
+      const ship = ships[Math.floor(Math.random() * ships.length)];
+      const messages = [
+        `Traffic Control: ${ship.name || ship.id} cleared for departure`,
+        `Traffic Control: ${ship.name || ship.id} on approach vector`,
+        `Traffic Control: Course deviation detected for ${ship.name || ship.id}`,
+        `Traffic Control: ${ships.length} vessels in system traffic`
+      ];
+
+      const message = messages[Math.floor(Math.random() * messages.length)];
+      console.log(`[TRAFFIC] ${system.name}: ${message}`);
+    }
   }
 
   private checkCollisions(ship: NPCShip, system: StarSystem): any {
-    // TODO: Check for collisions
+    // Check for potential collisions with other ships
+    const nearbyShips = this.getNearbyShips(system, 1000); // 1km radius
+
+    for (const other of nearbyShips) {
+      if (other === ship || !other.position || !ship.position) continue;
+
+      const dx = other.position.x - ship.position.x;
+      const dy = other.position.y - ship.position.y;
+      const dz = other.position.z - ship.position.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+
+      // Collision threshold: 100m
+      if (distSq < 100 * 100) {
+        return {
+          otherId: other.id,
+          otherName: other.name || other.id,
+          distance: Math.sqrt(distSq),
+          relativeVelocity: this.calculateRelativeVelocity(ship, other)
+        };
+      }
+    }
+
     return null;
   }
 
   private checkEncounters(ship: NPCShip, system: StarSystem): any {
-    // TODO: Check for encounters
+    // Check for non-collision encounters (e.g., hailing distance)
+    const nearbyShips = this.getNearbyShips(system, 10000); // 10km radius
+
+    for (const other of nearbyShips) {
+      if (other === ship || !other.position || !ship.position) continue;
+
+      const dx = other.position.x - ship.position.x;
+      const dy = other.position.y - ship.position.y;
+      const dz = other.position.z - ship.position.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+
+      // Encounter threshold: 1-10km
+      if (distSq > 1000 * 1000 && distSq < 10000 * 10000 && Math.random() < 0.01) {
+        return {
+          otherId: other.id,
+          otherName: other.name || other.id,
+          distance: Math.sqrt(distSq),
+          encounterType: 'HAILING_DISTANCE'
+        };
+      }
+    }
+
     return null;
+  }
+
+  private calculateRelativeVelocity(shipA: NPCShip, shipB: NPCShip): number {
+    const velA = (shipA as any).velocity || { x: 0, y: 0, z: 0 };
+    const velB = (shipB as any).velocity || { x: 0, y: 0, z: 0 };
+
+    const dvx = velA.x - velB.x;
+    const dvy = velA.y - velB.y;
+    const dvz = velA.z - velB.z;
+
+    return Math.sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
   }
 
   private createCollisionEvent(ship: NPCShip, collision: any): HistoricalEvent {
@@ -562,15 +973,151 @@ export class UniverseSimulationController {
   }
 
   private applyEconomicConsequence(consequence: Consequence): void {
-    // TODO: Apply economic changes
+    // Apply economic consequences to the universe
+    switch (consequence.type) {
+      case 'PRICE_CHANGE':
+        this.applyPriceChange(consequence);
+        break;
+
+      case 'SUPPLY_DISRUPTION':
+        this.applySupplyDisruption(consequence);
+        break;
+
+      case 'COMMODITY_SHORTAGE':
+        this.applyCommodityShortage(consequence);
+        break;
+
+      case 'TRADE_ROUTE_BLOCKED':
+        this.applyTradeRouteBlock(consequence);
+        break;
+
+      default:
+        console.log(`[ECONOMIC] Applied ${consequence.type}`);
+    }
   }
 
   private applyDiplomaticConsequence(consequence: Consequence): void {
-    // TODO: Apply diplomatic changes
+    // Apply diplomatic consequences
+    switch (consequence.type) {
+      case 'REPUTATION_CHANGE':
+        if (consequence.data.faction && consequence.data.change) {
+          const faction = this.state.activeFactions.find(f => f.id === consequence.data.faction);
+          if (faction && (faction as any).reputation) {
+            (faction as any).reputation += consequence.data.change;
+            console.log(`[DIPLOMATIC] ${faction.name} reputation changed by ${consequence.data.change}`);
+          }
+        }
+        break;
+
+      case 'RELATIONSHIP_DETERIORATION':
+      case 'RELATIONSHIP_IMPROVEMENT':
+        if (consequence.data.entityA && consequence.data.entityB) {
+          const change = consequence.type === 'RELATIONSHIP_IMPROVEMENT'
+            ? consequence.data.change || 10
+            : -(consequence.data.change || 10);
+
+          // Update relationship (simplified)
+          const factionA = this.state.activeFactions.find(f => f.id === consequence.data.entityA);
+          const factionB = this.state.activeFactions.find(f => f.id === consequence.data.entityB);
+
+          if (factionA && factionB) {
+            if (!(factionA as any).relationships) (factionA as any).relationships = {};
+            (factionA as any).relationships[factionB.id] =
+              Math.max(-100, Math.min(100,
+                ((factionA as any).relationships[factionB.id] || 0) + change
+              ));
+
+            console.log(`[DIPLOMATIC] Relationship between ${factionA.name} and ${factionB.name} changed by ${change}`);
+          }
+        }
+        break;
+
+      case 'WAR_LIKELIHOOD_INCREASE':
+        console.log(`[DIPLOMATIC] War probability increased between ${consequence.data.factionA} and ${consequence.data.factionB}`);
+        // Would integrate with FactionDiplomacyEngine
+        break;
+
+      default:
+        console.log(`[DIPLOMATIC] Applied ${consequence.type}`);
+    }
   }
 
   private triggerEntityAction(consequence: Consequence): void {
-    // TODO: Trigger entity action
+    // Trigger actions for specific entities
+    if (consequence.data.entityType === 'TRADER') {
+      // Trader behavioral change
+      console.log(`[ENTITY] Trader behavior change: ${consequence.data.behaviorChange}`);
+    }
+
+    if (consequence.data.type === 'GOAL_CREATED') {
+      // Create new goal for entity (would integrate with NPCGoalSystem)
+      console.log(`[ENTITY] New goal created for ${consequence.affectedEntities.join(', ')}`);
+    }
+
+    if (consequence.data.type === 'BEHAVIOR_CHANGE') {
+      // Apply behavior modification (would integrate with ExtendedNPCMemory)
+      console.log(`[ENTITY] Behavior change for ${consequence.affectedEntities.join(', ')}`);
+    }
+  }
+
+  // Helper methods for economic consequences
+  private applyPriceChange(consequence: Consequence): void {
+    const { commodity, priceMultiplier, region } = consequence.data;
+
+    // Apply to all stations in region
+    for (const system of this.state.activeSystems) {
+      if (region && system.id !== region) continue;
+
+      if (system.stations) {
+        for (const station of system.stations) {
+          if (station.economy && (station.economy as any).prices) {
+            const currentPrice = (station.economy as any).prices[commodity] || 100;
+            (station.economy as any).prices[commodity] = currentPrice * priceMultiplier;
+          }
+        }
+      }
+    }
+
+    console.log(`[ECONOMIC] Price of ${commodity} changed by ${(priceMultiplier - 1) * 100}%`);
+  }
+
+  private applySupplyDisruption(consequence: Consequence): void {
+    const { stationId, commodity } = consequence.data;
+
+    for (const system of this.state.activeSystems) {
+      const station = system.stations?.find(s => s.id === stationId);
+      if (station && station.economy) {
+        const inventory = (station.economy as any).inventory || {};
+        inventory[commodity] = Math.max(0, (inventory[commodity] || 0) * 0.5); // Cut supply in half
+        (station.economy as any).inventory = inventory;
+
+        console.log(`[ECONOMIC] Supply disruption of ${commodity} at ${station.name}`);
+      }
+    }
+  }
+
+  private applyCommodityShortage(consequence: Consequence): void {
+    const { commodities, affectedStations, severityMultiplier } = consequence.data;
+
+    for (const stationId of affectedStations || []) {
+      for (const system of this.state.activeSystems) {
+        const station = system.stations?.find(s => s.id === stationId);
+        if (station && station.economy) {
+          for (const commodity of commodities || []) {
+            const prices = (station.economy as any).prices || {};
+            prices[commodity] = (prices[commodity] || 100) * (severityMultiplier || 2);
+            (station.economy as any).prices = prices;
+          }
+        }
+      }
+    }
+
+    console.log(`[ECONOMIC] Commodity shortage affecting ${affectedStations?.length || 0} stations`);
+  }
+
+  private applyTradeRouteBlock(consequence: Consequence): void {
+    console.log(`[ECONOMIC] Trade route blocked: ${JSON.stringify(consequence.data)}`);
+    // Would integrate with TrafficManager to actually block routes
   }
 
   private generateEventId(): string {
