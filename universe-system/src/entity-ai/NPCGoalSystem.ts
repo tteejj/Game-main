@@ -1073,8 +1073,17 @@ export class NPCGoalSystem {
     // Distance-based goals (exploration, escape, etc.)
     if ((goal.type === 'EXPLORE_UNKNOWN' || goal.type === 'ESCAPE_DANGER') && state.location) {
       const targetLoc = goal.relatedEntities?.[0]; // Simplified
-      if (targetLoc) {
-        h += 100; // Placeholder distance estimate
+      if (targetLoc && goal.targetPosition && state.location.position) {
+        // Calculate actual distance heuristic
+        const current = state.location.position;
+        const target = goal.targetPosition;
+        const dx = current.x - target.x;
+        const dy = current.y - target.y;
+        const dz = current.z - target.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        h += distance / 1000; // Convert to km for scaling
+      } else {
+        h += 100; // Fallback if position data not available
       }
     }
 

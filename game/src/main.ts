@@ -37,6 +37,22 @@ window.addEventListener('DOMContentLoaded', () => {
         // Link input to UI
         input.onStationSwitch = (stationNum) => ui.setActiveStation(stationNum);
         input.onKeyPress = (key) => ui.handleInput(key);
+        input.onRenderingControl = (control) => {
+            switch (control) {
+                case '[':
+                    game.zoomOut();
+                    break;
+                case ']':
+                    game.zoomIn();
+                    break;
+                case 't':
+                    game.toggleTrajectory();
+                    break;
+                case 'F3':
+                    game.togglePerfStats();
+                    break;
+            }
+        };
 
         // Connect player integration to UI (Station 6: Operations)
         ui.setPlayerIntegration(game.playerIntegration);

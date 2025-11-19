@@ -13,7 +13,10 @@ export class LifeSupportPanel {
 
     // State
     private selectedCompartment: number = 5; // Center compartment
-    // Removed unused state variables - to be re-added when functionality is implemented
+    private fireSuppressionArmed: boolean = false;
+    private ventSafetyOverride: boolean = false;
+    private o2GenerationRate: number = 100; // Percentage
+    private autoEqualization: boolean = true;
 
     constructor(ctx: CanvasRenderingContext2D, palette: any, spacecraft: SpacecraftAdapter) {
         this.ctx = ctx;
@@ -27,43 +30,130 @@ export class LifeSupportPanel {
         const compartmentId = this.getCompartmentId(this.selectedCompartment);
 
         switch (keyLower) {
+            // Compartment selection (1-6)
             case '1': case '2': case '3': case '4': case '5': case '6':
                 this.selectedCompartment = parseInt(key);
                 console.log(`Selected compartment: ${this.selectedCompartment}`);
                 break;
-            case 'o':
-                this.spacecraft.toggleO2Generator(!lifeSupport.o2GeneratorOn);
-                console.log(`O2 Generator: ${!lifeSupport.o2GeneratorOn ? 'ON' : 'OFF'}`);
+
+            // Individual door controls by direction
+            case 'q':
+                // Forward door
+                this.spacecraft.toggleDoorByDirection(this.selectedCompartment, 'forward');
                 break;
+
+            case 'w':
+                // Aft door
+                this.spacecraft.toggleDoorByDirection(this.selectedCompartment, 'aft');
+                break;
+
+            case 'e':
+                // Port door
+                this.spacecraft.toggleDoorByDirection(this.selectedCompartment, 'port');
+                break;
+
+            case 'r':
+                // Starboard door
+                this.spacecraft.toggleDoorByDirection(this.selectedCompartment, 'starboard');
+                break;
+
+            case 't':
+                // Up door (if multi-deck)
+                this.spacecraft.toggleDoorByDirection(this.selectedCompartment, 'up');
+                break;
+
+            // Fire suppression sequence
+            case 'a':
+                // Arm fire suppression
+                this.fireSuppressionArmed = true;
+                console.log('Fire suppression ARMED - press S to activate');
+                break;
+
             case 's':
-                this.spacecraft.toggleCO2Scrubber(!lifeSupport.co2ScrubberOn);
-                console.log(`CO2 Scrubber: ${!lifeSupport.co2ScrubberOn ? 'ON' : 'OFF'}`);
-                break;
-            case 'd':
-                // Toggle door - prompt for adjacent compartment
-                // For now, toggle all doors connected to selected compartment
-                const adjacentComps = this.getAdjacentCompartments(this.selectedCompartment);
-                if (adjacentComps.length > 0) {
-                    const adjId = this.getCompartmentId(adjacentComps[0]);
-                    this.spacecraft.toggleBulkheadDoor(compartmentId, adjId);
-                    console.log(`Toggled door between ${compartmentId} and ${adjId}`);
+                // Fire suppression (only if armed)
+                if (this.fireSuppressionArmed) {
+                    this.spacecraft.suppressFire(compartmentId);
+                    this.fireSuppressionArmed = false;
+                    console.log('Fire suppression ACTIVATED');
+                } else {
+                    console.log('Fire suppression not armed - press A first');
                 }
                 break;
+
+            // Vent sequence with safety
+            case 'z':
+                // Override safety interlock
+                this.ventSafetyOverride = true;
+                console.log('⚠️  VENT SAFETY OVERRIDE - press X to vent');
+                break;
+
+            case 'x':
+                // Vent to space (only if override active)
+                if (this.ventSafetyOverride) {
+                    this.spacecraft.ventCompartment(compartmentId);
+                    this.ventSafetyOverride = false;
+                    console.log('💨 VENTING TO SPACE');
+                } else {
+                    console.log('Safety interlock active - press Z to override');
+                }
+                break;
+
+            // Breach seal
             case 'b':
-                // Seal breach in selected compartment
-                const sealed = this.spacecraft.sealBreach(compartmentId);
-                console.log(sealed ? `Breach sealed in ${compartmentId}` : `No breach to seal in ${compartmentId}`);
+                this.spacecraft.sealBreach(compartmentId);
                 break;
+
+            // O2 generation rate
+            case 'Q':
+                // Shift+Q - increase O2 rate
+                this.adjustO2Rate(+5);
+                break;
+
+            case 'A':
+                // Shift+A - decrease O2 rate
+                this.adjustO2Rate(-5);
+                break;
+
+            // Pressure equalization
+            case 'c':
+                this.togglePressureEqualization();
+                break;
+
             case 'v':
-                // Vent compartment to space
-                this.spacecraft.ventCompartment(compartmentId);
-                console.log(`Venting ${compartmentId} to space...`);
+                this.openEqualizationValve();
                 break;
-            case 'f':
-                // Suppress fire
-                const suppressed = this.spacecraft.suppressFire(compartmentId);
-                console.log(suppressed ? `Fire suppressed in ${compartmentId}` : `No fire in ${compartmentId}`);
+
+            // Global systems
+            case 'o':
+                this.spacecraft.toggleO2Generator();
                 break;
+
+            case 'S':
+                // Shift+S - toggle CO2 scrubber
+                this.spacecraft.toggleCO2Scrubber();
+                break;
+        }
+    }
+
+    private adjustO2Rate(delta: number): void {
+        this.o2GenerationRate = Math.max(0, Math.min(200, this.o2GenerationRate + delta));
+        // Apply to spacecraft
+        this.spacecraft.setO2GenerationRate(this.o2GenerationRate);
+        console.log(`O2 generation: ${this.o2GenerationRate}%`);
+    }
+
+    private togglePressureEqualization(): void {
+        this.autoEqualization = !this.autoEqualization;
+        this.spacecraft.setAutoEqualization(this.autoEqualization);
+        console.log(`Auto equalization: ${this.autoEqualization ? 'ON' : 'OFF'}`);
+    }
+
+    private openEqualizationValve(): void {
+        if (!this.autoEqualization) {
+            this.spacecraft.equalizeCompartmentPressure(this.selectedCompartment);
+            console.log('Manual equalization valve opened');
+        } else {
+            console.log('Set to manual mode (C) first');
         }
     }
 
