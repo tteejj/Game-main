@@ -33,6 +33,7 @@ export interface IntegratedNPCShip {
   memory: ExtendedNPCMemory;
   goals: NPCGoalSystem;
   ai: UniverseAwareAI;
+  factionId?: string; // CRITICAL: Track faction for interactions
   lastDecision?: any;
   lastContext?: UniverseContext;
 }
@@ -112,6 +113,9 @@ export class IntegratedUniverseOrchestrator {
     this.cascadeSystem = new EventCascadeSystem();
     this.economicSim = new EconomicSimulation();
     this.reputationSystem = this.interactionManager.reputationSystem; // Reference the same system
+
+    // Wire systems together
+    this.interactionManager.setEconomicSimulation(this.economicSim);
 
     // Create markets for all stations
     if (starSystem.objects.stations) {
@@ -273,7 +277,8 @@ export class IntegratedUniverseOrchestrator {
       ship,
       memory,
       goals,
-      ai
+      ai,
+      factionId // Store faction ID for interactions
     };
 
     this.integratedShips.set(ship.id, integrated);

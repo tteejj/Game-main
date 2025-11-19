@@ -116,6 +116,9 @@ export class NPCInteractionManager {
   // Faction relations (set externally by orchestrator)
   private factionRelations: Map<string, Map<string, DiplomaticStatus>> = new Map();
 
+  // Economic simulation (set externally by orchestrator)
+  private economicSim: any = null; // EconomicSimulation - will be set by orchestrator
+
   // Proximity thresholds
   private readonly COMBAT_RANGE = 5000; // 5km
   private readonly TRADE_RANGE = 10000; // 10km
@@ -371,22 +374,24 @@ export class NPCInteractionManager {
     attackerDamage: number;
     defenderDamage: number;
   } {
-    let attackerDamage = 0;
-    let defenderDamage = 0;
-
-    // Base damage based on ship type
+    // Base damage based on ship type (per second)
     const attackerBaseDamage = this.getBaseDamage(attacker.ship.type);
     const defenderBaseDamage = this.getBaseDamage(defender.ship.type);
 
     // Tactic modifiers
-    const attackerMod = this.getTacticModifier(encounter.attackerTactic, 'offense');
-    const defenderMod = this.getTacticModifier(encounter.defenderTactic, 'defense');
+    const attackerOffenseMod = this.getTacticModifier(encounter.attackerTactic, 'offense');
+    const defenderDefenseMod = this.getTacticModifier(encounter.defenderTactic, 'defense');
+    const defenderOffenseMod = this.getTacticModifier(encounter.defenderTactic, 'offense');
+    const attackerDefenseMod = this.getTacticModifier(encounter.attackerTactic, 'defense');
 
-    // Calculate damage
-    attackerDamage = attackerBaseDamage * attackerMod * deltaTime;
-    defenderDamage = defenderBaseDamage * defenderMod * deltaTime * 0.5; // Defender does half damage
+    // Calculate damage dealt to each ship
+    // Attacker's damage modified by attacker offense and defender defense
+    let attackerDamage = attackerBaseDamage * attackerOffenseMod * defenderDefenseMod * deltaTime;
 
-    // Random variance
+    // Defender's counter-attack (usually weaker)
+    let defenderDamage = defenderBaseDamage * defenderOffenseMod * attackerDefenseMod * deltaTime * 0.5;
+
+    // Random variance (80% to 120% of calculated damage)
     attackerDamage *= (0.8 + Math.random() * 0.4);
     defenderDamage *= (0.8 + Math.random() * 0.4);
 
@@ -663,13 +668,22 @@ export class NPCInteractionManager {
   }
 
   /**
+   * Set economic simulation (called by orchestrator)
+   */
+  public setEconomicSimulation(economicSim: any): void {
+    this.economicSim = economicSim;
+  }
+
+  /**
    * Get faction relation between two ships
    */
   private getFactionRelation(shipA: any, shipB: any): DiplomaticStatus | null {
-    const factionA = shipA.memory?.entityId || shipA.factionId;
-    const factionB = shipB.memory?.entityId || shipB.factionId;
+    // Get faction IDs from IntegratedNPCShip structure
+    const factionA = shipA.factionId;
+    const factionB = shipB.factionId;
 
-    if (!factionA || !factionB) return null;
+    // No relation if same faction or no faction
+    if (!factionA || !factionB || factionA === factionB) return null;
 
     const aRelations = this.factionRelations.get(factionA);
     if (!aRelations) return null;
