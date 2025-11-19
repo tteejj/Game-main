@@ -101,7 +101,8 @@ export class WeaponsPanel {
                         const result = this.playerIntegration.firePrimaryWeapon();
                         console.log(`Weapon fired: ${result.hit ? 'HIT' : 'MISS'}`);
                         if (result.hit && result.damage) {
-                            console.log(`  Damage: ${result.damage.totalDamage} HP`);
+                            const damageVal = typeof result.damage === 'number' ? result.damage : (result.damage as any).totalDamage || result.damage;
+                            console.log(`  Damage: ${damageVal} HP`);
                         }
                     } else {
                         // Fallback to spacecraft weapons

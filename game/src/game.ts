@@ -194,7 +194,7 @@ export class Game {
     private getNearbyShipsForCombat(): any[] {
         const playerPos = this.spacecraft.getPosition();
         const nearbyNPCs = this.trafficManager.getVesselsNear(
-            playerPos.x, playerPos.y, playerPos.z,
+            playerPos,
             50000 // 50km range
         );
 
@@ -203,7 +203,7 @@ export class Game {
             name: npc.name,
             position: npc.position,
             faction: npc.faction,
-            hostile: npc.isHostile ? npc.isHostile() : false
+            hostile: npc.hostile || false
         }));
     }
 

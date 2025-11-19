@@ -85,13 +85,18 @@ export class OperationsPanel {
                 }
                 break;
             case 'research':
-                const projects = this.playerIntegration.getAvailableResearch();
-                const active = this.playerIntegration.getActiveResearch();
-                if (!active && this.selectedIndex < projects.length) {
-                    const project = projects[this.selectedIndex];
-                    const state = this.playerIntegration.getState();
-                    this.playerIntegration.startResearch(project.id, state.credits);
-                    console.log(`🔬 Research started: ${project.name}`);
+                try {
+                    const projects = this.playerIntegration.getAvailableResearch();
+                    const active = this.playerIntegration.getActiveResearch();
+                    if (!active && this.selectedIndex < projects.length) {
+                        const project = projects[this.selectedIndex];
+                        const state = this.playerIntegration.getState();
+                        const projectId = (project as any).techId || (project as any).id || 'unknown';
+                        this.playerIntegration.startResearch(projectId, state.credits);
+                        console.log(`🔬 Research started: ${projectId}`);
+                    }
+                } catch (e) {
+                    console.error('Research action failed:', e);
                 }
                 break;
         }
@@ -210,14 +215,17 @@ export class OperationsPanel {
 
             ctx.font = '12px "Courier New"';
             ctx.fillStyle = this.palette.secondary;
-            ctx.fillText(`Level ${member.skillLevel} | XP: ${member.experience}/${member.experienceForNextLevel}`, 80, y + 18);
+            const level = (member as any).skillLevel || (member as any).level || 1;
+            const exp = member.experience || 0;
+            const expNext = (member as any).experienceForNextLevel || (member as any).nextLevelExp || 100;
+            ctx.fillText(`Level ${level} | XP: ${exp}/${expNext}`, 80, y + 18);
             ctx.fillText(`Salary: ${member.salary} CR/day | Morale: ${Math.floor(member.morale * 100)}%`, 80, y + 33);
 
             // Skills
             const skills = Object.entries(member.skills);
             let skillX = 500;
             skills.forEach(([skill, value]) => {
-                ctx.fillText(`${skill}: ${Math.floor(value * 100)}%`, skillX, y + 18);
+                ctx.fillText(`${skill}: ${Math.floor((value as number) * 100)}%`, skillX, y + 18);
                 skillX += 150;
             });
 
@@ -237,18 +245,20 @@ export class OperationsPanel {
             this.drawBox(40, 100, 1180, 100, 'ACTIVE RESEARCH');
             ctx.font = '14px "Courier New"';
             ctx.fillStyle = this.palette.info;
-            ctx.fillText(active.name, 60, 130);
+            const activeName = (active as any).techId || (active as any).name || 'Research Project';
+            ctx.fillText(activeName, 60, 130);
 
             // Progress bar
-            const progress = active.progress || 0;
+            const progress = (active as any).progress || 0;
+            const progressNorm = progress > 1 ? progress / 1000 : progress; // Normalize if needed
             ctx.strokeStyle = this.palette.primary;
             ctx.strokeRect(60, 145, 800, 20);
             ctx.fillStyle = this.palette.info;
-            ctx.fillRect(60, 145, 800 * progress, 20);
+            ctx.fillRect(60, 145, 800 * Math.min(1, progressNorm), 20);
 
             ctx.fillStyle = this.palette.primary;
             ctx.font = '12px "Courier New"';
-            ctx.fillText(`${Math.floor(progress * 100)}% complete`, 870, 160);
+            ctx.fillText(`${Math.floor(progressNorm * 100)}% complete`, 870, 160);
         }
 
         // Available
@@ -258,17 +268,21 @@ export class OperationsPanel {
         let y = availY + 40;
         ctx.font = '13px "Courier New"';
 
-        available.slice(0, 8).forEach((project, i) => {
+        available.slice(0, 8).forEach((project: any, i) => {
             const isSelected = i === this.selectedIndex;
             ctx.fillStyle = isSelected ? this.palette.info : this.palette.primary;
 
             if (isSelected) ctx.fillText('>', 50, y);
-            ctx.fillText(project.name, 70, y);
+            const name = project.techId || project.name || 'Research';
+            ctx.fillText(name, 70, y);
 
             ctx.font = '11px "Courier New"';
             ctx.fillStyle = this.palette.secondary;
-            ctx.fillText(project.description.substring(0, 60), 70, y + 15);
-            ctx.fillText(`Cost: ${project.cost} CR | Time: ${project.timeRequired} days`, 70, y + 30);
+            const desc = project.description || 'Advanced research';
+            ctx.fillText(desc.substring(0, 60), 70, y + 15);
+            const cost = project.cost || project.researchCost || 1000;
+            const time = project.timeRequired || 30;
+            ctx.fillText(`Cost: ${cost} CR | Time: ${time} days`, 70, y + 30);
 
             ctx.font = '13px "Courier New"';
             y += 50;
