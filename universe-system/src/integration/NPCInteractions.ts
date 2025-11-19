@@ -13,6 +13,8 @@
 
 import { Vector3 } from '../CelestialBody';
 import { HistoricalEvent } from '../simulation/HistoricalMemorySystem';
+import { ShipReputationSystem } from './ShipReputationSystem';
+import { DiplomaticStatus } from '../faction-dynamics/FactionDiplomacyEngine';
 
 export enum InteractionType {
   COMBAT = 'COMBAT',
@@ -106,6 +108,13 @@ export class NPCInteractionManager {
   private tradeOffers: Map<string, TradeOffer> = new Map();
   private alliances: Map<string, Alliance> = new Map();
   private rivalries: Map<string, Rivalry> = new Map();
+  private distressCalls: Map<string, { shipId: string; location: Vector3; timestamp: number }> = new Map();
+
+  // Reputation system
+  public reputationSystem: ShipReputationSystem = new ShipReputationSystem();
+
+  // Faction relations (set externally by orchestrator)
+  private factionRelations: Map<string, Map<string, DiplomaticStatus>> = new Map();
 
   // Proximity thresholds
   private readonly COMBAT_RANGE = 5000; // 5km
@@ -165,28 +174,64 @@ export class NPCInteractionManager {
    * Check if combat should occur
    */
   private checkCombatInteraction(shipA: any, shipB: any): Interaction | null {
+    // Check faction relations - allies/neutral don't attack
+    const factionStatus = this.getFactionRelation(shipA, shipB);
+    if (factionStatus === 'ALLIED' || factionStatus === 'FRIENDLY') {
+      return null; // Don't attack allies
+    }
+
+    // Check reputation - don't attack friends
+    const reputation = this.reputationSystem.getReputation(shipA.ship.id, shipB.ship.id);
+    if (reputation >= 50) {
+      return null; // Too friendly to attack
+    }
+
     const aIsHostile = this.isHostileShipType(shipA.ship.type);
     const bIsHostile = this.isHostileShipType(shipB.ship.type);
 
-    // Pirate attacks non-pirate
-    if (aIsHostile && !bIsHostile && Math.random() < 0.1) {
+    // Evaluate combat odds before attacking
+    const aCanWin = this.evaluateCombatOdds(shipA, shipB) > 0.6;
+    const bCanWin = this.evaluateCombatOdds(shipB, shipA) > 0.6;
+
+    // Hostile reputation makes combat more likely
+    const isHostileRep = reputation <= -30;
+
+    // Pirate attacks non-pirate (if odds are good)
+    if (aIsHostile && !bIsHostile && aCanWin && Math.random() < 0.1) {
+      this.reputationSystem.recordInteraction(shipB.ship.id, shipA.ship.id, 'ATTACKED', 'Unprovoked pirate attack');
       return this.initiateCombat(shipA, shipB);
     }
-    if (bIsHostile && !aIsHostile && Math.random() < 0.1) {
+    if (bIsHostile && !aIsHostile && bCanWin && Math.random() < 0.1) {
+      this.reputationSystem.recordInteraction(shipA.ship.id, shipB.ship.id, 'ATTACKED', 'Unprovoked pirate attack');
       return this.initiateCombat(shipB, shipA);
     }
 
-    // Patrol ship attacks pirate
+    // Patrol ship attacks pirate (regardless of odds - duty)
     if (this.isPatrolShip(shipA.ship.type) && bIsHostile && Math.random() < 0.2) {
+      this.reputationSystem.recordInteraction(shipB.ship.id, shipA.ship.id, 'ATTACKED', 'Law enforcement action');
       return this.initiateCombat(shipA, shipB);
     }
     if (this.isPatrolShip(shipB.ship.type) && aIsHostile && Math.random() < 0.2) {
+      this.reputationSystem.recordInteraction(shipA.ship.id, shipB.ship.id, 'ATTACKED', 'Law enforcement action');
       return this.initiateCombat(shipB, shipA);
+    }
+
+    // Hostile faction relations
+    if (factionStatus === 'WAR' && Math.random() < 0.15) {
+      this.reputationSystem.recordInteraction(shipB.ship.id, shipA.ship.id, 'ATTACKED', 'Faction warfare');
+      return this.initiateCombat(shipA, shipB);
     }
 
     // Check rivalries
     const rivalry = this.getRivalry(shipA.ship.id, shipB.ship.id);
     if (rivalry && rivalry.intensity > 0.7 && Math.random() < 0.15) {
+      this.reputationSystem.recordInteraction(shipB.ship.id, shipA.ship.id, 'ATTACKED', 'Personal rivalry');
+      return this.initiateCombat(shipA, shipB);
+    }
+
+    // Hostile reputation + good odds = possible attack
+    if (isHostileRep && aCanWin && Math.random() < 0.05) {
+      this.reputationSystem.recordInteraction(shipB.ship.id, shipA.ship.id, 'ATTACKED', 'Revenge attack');
       return this.initiateCombat(shipA, shipB);
     }
 
@@ -608,5 +653,152 @@ export class NPCInteractionManager {
       activeAlliances: Array.from(this.alliances.values()).filter(a => a.active).length,
       activeRivalries: this.rivalries.size
     };
+  }
+
+  /**
+   * Set faction relations (called by orchestrator)
+   */
+  public setFactionRelations(relations: Map<string, Map<string, DiplomaticStatus>>): void {
+    this.factionRelations = relations;
+  }
+
+  /**
+   * Get faction relation between two ships
+   */
+  private getFactionRelation(shipA: any, shipB: any): DiplomaticStatus | null {
+    const factionA = shipA.memory?.entityId || shipA.factionId;
+    const factionB = shipB.memory?.entityId || shipB.factionId;
+
+    if (!factionA || !factionB) return null;
+
+    const aRelations = this.factionRelations.get(factionA);
+    if (!aRelations) return null;
+
+    return aRelations.get(factionB) || null;
+  }
+
+  /**
+   * Evaluate combat odds - returns 0-1 probability of winning
+   */
+  private evaluateCombatOdds(attacker: any, defender: any): number {
+    let attackerScore = 0;
+    let defenderScore = 0;
+
+    // Health advantage
+    attackerScore += attacker.ship.health * 40;
+    defenderScore += defender.ship.health * 40;
+
+    // Ship type advantages
+    const attackerType = attacker.ship.type;
+    const defenderType = defender.ship.type;
+
+    if (attackerType === 'PATROL_SHIP' || attackerType === 'PIRATE') {
+      attackerScore += 30; // Combat ships
+    }
+    if (defenderType === 'PATROL_SHIP' || defenderType === 'PIRATE') {
+      defenderScore += 30;
+    }
+
+    // Cargo ships are weak
+    if (defenderType === 'CARGO_FREIGHTER' || defenderType === 'CARGO_SHUTTLE') {
+      attackerScore += 20;
+    }
+    if (attackerType === 'CARGO_FREIGHTER' || attackerType === 'CARGO_SHUTTLE') {
+      defenderScore += 20;
+    }
+
+    // Personality factors
+    const attackerPersonality = attacker.memory?.getCurrentPersonality();
+    const defenderPersonality = defender.memory?.getCurrentPersonality();
+
+    if (attackerPersonality) {
+      attackerScore += attackerPersonality.aggression * 15;
+      attackerScore += attackerPersonality.courage * 10;
+    }
+
+    if (defenderPersonality) {
+      defenderScore += defenderPersonality.aggression * 15;
+      defenderScore += defenderPersonality.courage * 10;
+    }
+
+    // Calculate win probability
+    const totalScore = attackerScore + defenderScore;
+    return totalScore > 0 ? attackerScore / totalScore : 0.5;
+  }
+
+  /**
+   * Handle distress call responses
+   */
+  public checkDistressResponse(ships: any[]): Interaction[] {
+    const responses: Interaction[] = [];
+    const now = Date.now() / 1000;
+
+    // Find ships in distress
+    for (const ship of ships) {
+      if (ship.ship.needsAssistance && ship.ship.needsAssistance()) {
+        // Record distress call
+        if (!this.distressCalls.has(ship.ship.id)) {
+          this.distressCalls.set(ship.ship.id, {
+            shipId: ship.ship.id,
+            location: ship.ship.position,
+            timestamp: now
+          });
+        }
+
+        // Find nearby ships that can help
+        for (const responder of ships) {
+          if (responder.ship.id === ship.ship.id) continue;
+
+          const distance = this.getDistance(ship.ship.position, responder.ship.position);
+
+          if (distance < this.COMM_RANGE) {
+            // Check if willing to help
+            const reputation = this.reputationSystem.getReputation(responder.ship.id, ship.ship.id);
+            const personality = responder.memory?.getCurrentPersonality();
+
+            const helpProbability =
+              (reputation > 0 ? 0.3 : 0.1) + // Reputation bonus
+              (personality?.altruism || 0) * 0.4 + // Altruistic ships more likely to help
+              (responder.ship.type === 'PATROL_SHIP' ? 0.4 : 0); // Patrol ships have duty to help
+
+            if (Math.random() < helpProbability * 0.1) {
+              // Record rescue
+              this.reputationSystem.recordInteraction(ship.ship.id, responder.ship.id, 'RESCUED', 'Responded to distress call');
+              this.reputationSystem.recordInteraction(responder.ship.id, ship.ship.id, 'HELPED', 'Rescued ship in distress');
+
+              responses.push({
+                id: `rescue_${Date.now()}_${Math.random()}`,
+                type: InteractionType.DISTRESS,
+                initiator: responder.ship.id,
+                target: ship.ship.id,
+                timestamp: now,
+                location: ship.ship.position,
+                outcome: 'SUCCESS',
+                data: {
+                  rescuer: responder.ship.id,
+                  rescued: ship.ship.id,
+                  assistanceProvided: 'fuel, repairs'
+                }
+              });
+
+              // Actually help the ship
+              if (ship.ship.health < 0.5) {
+                ship.ship.repair(0.3); // Provide emergency repairs
+              }
+              if (ship.ship.fuel < 0.3) {
+                ship.ship.refuel(0.5); // Provide fuel
+              }
+            } else {
+              // Ignored distress call - negative reputation
+              if (Math.random() < 0.05) {
+                this.reputationSystem.recordInteraction(ship.ship.id, responder.ship.id, 'IGNORED_DISTRESS', 'Failed to respond to distress call');
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return responses;
   }
 }

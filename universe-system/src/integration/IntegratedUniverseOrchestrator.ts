@@ -19,6 +19,8 @@ import { FactionAI, FactionStrategy, Territory } from './FactionAI';
 import { UniverseDashboard, LiveEvent } from './UniverseDashboard';
 import { NPCInteractionManager, Interaction, InteractionType } from './NPCInteractions';
 import { EventCascadeSystem, CascadeChain } from './EventCascadeSystem';
+import { ShipReputationSystem } from './ShipReputationSystem';
+import { EconomicSimulation } from './EconomicSimulation';
 
 import { NPCShip, ShipType, ShipStatus } from '../npc-traffic/npc-ship';
 import { Vector3 as Vector3Class } from '../../../physics-modules/src/Vector3';
@@ -60,6 +62,8 @@ export class IntegratedUniverseOrchestrator {
   public dashboard: UniverseDashboard;
   private interactionManager: NPCInteractionManager;
   private cascadeSystem: EventCascadeSystem;
+  public economicSim: EconomicSimulation;
+  public reputationSystem: ShipReputationSystem;
 
   // NPCs
   private integratedShips: Map<string, IntegratedNPCShip> = new Map();
@@ -106,11 +110,22 @@ export class IntegratedUniverseOrchestrator {
 
     this.interactionManager = new NPCInteractionManager();
     this.cascadeSystem = new EventCascadeSystem();
+    this.economicSim = new EconomicSimulation();
+    this.reputationSystem = this.interactionManager.reputationSystem; // Reference the same system
+
+    // Create markets for all stations
+    if (starSystem.objects.stations) {
+      for (const station of starSystem.objects.stations) {
+        this.economicSim.createMarket(station.id, station.name);
+      }
+    }
 
     console.log('[INTEGRATED ORCHESTRATOR] Initialized with AWESOME features!');
     console.log('  ✓ Real-time Dashboard');
     console.log('  ✓ NPC-to-NPC Interactions (combat, trade, communication)');
     console.log('  ✓ Event Cascade System (emergent storytelling)');
+    console.log('  ✓ Ship Reputation System (ships remember each other)');
+    console.log('  ✓ Economic Simulation (dynamic prices, trade routes)');
   }
 
   /**
@@ -138,13 +153,33 @@ export class IntegratedUniverseOrchestrator {
     // ========================================================================
     if (this.config.enableNPCInteractions) {
       const ships = Array.from(this.integratedShips.values());
+
+      // Update faction relations for interaction manager
+      this.updateFactionRelationsForInteractions();
+
       const interactions = this.interactionManager.update(deltaTime, ships);
 
       // Record interaction events
       for (const interaction of interactions) {
         this.recordInteractionEvent(interaction);
       }
+
+      // Check distress call responses
+      const distressResponses = this.interactionManager.checkDistressResponse(ships);
+      for (const response of distressResponses) {
+        this.recordInteractionEvent(response);
+      }
     }
+
+    // ========================================================================
+    // UPDATE REPUTATION SYSTEM (decay over time)
+    // ========================================================================
+    this.reputationSystem.update(deltaTime);
+
+    // ========================================================================
+    // UPDATE ECONOMIC SIMULATION
+    // ========================================================================
+    this.economicSim.update(deltaTime);
 
     // ========================================================================
     // UPDATE EVENT CASCADES (emergent storytelling)
@@ -488,6 +523,42 @@ export class IntegratedUniverseOrchestrator {
     for (const factionAI of this.factionAIs.values()) {
       factionAI.update(deltaTime);
     }
+  }
+
+  /**
+   * Update faction relations for interaction manager
+   */
+  private updateFactionRelationsForInteractions(): void {
+    // Build faction relations map from faction AIs
+    const relations = new Map<string, Map<string, any>>();
+
+    for (const [factionId, factionAI] of this.factionAIs) {
+      const factionRelations = new Map<string, any>();
+
+      // Get diplomatic status with other factions
+      for (const [otherFactionId, otherFactionAI] of this.factionAIs) {
+        if (factionId !== otherFactionId) {
+          // Get diplomatic status (would need to access faction AI's internal state)
+          // For now, default to neutral unless at war
+          const status = this.getDiplomaticStatus(factionAI, otherFactionAI);
+          factionRelations.set(otherFactionId, status);
+        }
+      }
+
+      relations.set(factionId, factionRelations);
+    }
+
+    this.interactionManager.setFactionRelations(relations);
+  }
+
+  /**
+   * Get diplomatic status between two faction AIs
+   */
+  private getDiplomaticStatus(factionA: FactionAI, factionB: FactionAI): string {
+    // This would ideally access the faction's diplomacy engine
+    // For now, return 'NEUTRAL' as default
+    // In a full implementation, you'd get this from FactionDiplomacyEngine
+    return 'NEUTRAL';
   }
 
   // ====================================================================

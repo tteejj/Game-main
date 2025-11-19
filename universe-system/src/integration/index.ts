@@ -21,6 +21,10 @@ export { UniverseDashboard, DashboardConfig, DashboardEvent } from './UniverseDa
 export { NPCInteractionManager, Interaction, InteractionType, CombatEncounter, TradeEncounter, CombatTactic } from './NPCInteractions';
 export { EventCascadeSystem, CascadeRule, CascadeChain, CascadeTriggerCondition, CascadeEventTemplate } from './EventCascadeSystem';
 
+// Depth features - Reputation, economy
+export { ShipReputationSystem, ReputationRecord, ReputationInteraction } from './ShipReputationSystem';
+export { EconomicSimulation, Commodity, Market, TradeRoute, EconomicEvent } from './EconomicSimulation';
+
 // Re-export commonly used types for convenience
 export { ShipType, ShipStatus } from '../npc-traffic/npc-ship';
 export { PersonalityTraits } from '../entity-ai/ExtendedNPCMemory';
