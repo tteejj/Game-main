@@ -154,6 +154,32 @@ export class NavigationPanel {
                     console.log(`Plot intercept to contact ${contact.id}`);
                 }
                 break;
+            case 'h':
+                // Provide assistance to nearest distressed ship
+                const game = (window as any).game;
+                if (game && game.getNearestDistressedShip && game.processRescue) {
+                    const distressedShip = game.getNearestDistressedShip(50000); // 50km range
+                    if (distressedShip) {
+                        // Determine assistance type based on ship status
+                        const health = distressedShip.getSystemHealth();
+                        let assistanceType: 'REPAIR' | 'REFUEL' | 'TOW' = 'REPAIR';
+
+                        if (health.propulsion < 0.1) {
+                            assistanceType = 'REFUEL';
+                        } else if (health.hull < 0.3) {
+                            assistanceType = 'REPAIR';
+                        } else {
+                            assistanceType = 'TOW';
+                        }
+
+                        game.processRescue(distressedShip, assistanceType);
+                    } else {
+                        console.log('No distressed ships in range (50km)');
+                    }
+                } else {
+                    console.log('Rescue system unavailable');
+                }
+                break;
         }
     }
 
@@ -569,7 +595,7 @@ export class NavigationPanel {
         let hints = '';
         switch (this.currentMode) {
             case 'sensors':
-                hints = 'R=Radar C=Mode Z/X=Range O=Optical 1-9=Contact T=Track Q=Drop A=Auto P=Plot TAB/M=SwitchMode';
+                hints = 'R=Radar C=Mode Z/X=Range O=Optical 1-9=Contact T=Track Q=Drop A=Auto P=Plot H=Rescue TAB/M=Mode';
                 break;
             case 'landing':
                 hints = 'G=Deploy  R=Retract  L=Lights  T=Terrain  S=Safety  TAB/M=Mode';
