@@ -131,6 +131,9 @@ export class AdaptiveAI {
   // Strategy evolution tracking
   private strategySeedCounter: number = 0;
 
+  // Simulated time tracking for decay
+  private simulatedTime: number = 0;
+
   // Configuration
   private readonly LEARNING_RATE = 0.1;          // How fast to adapt
   private readonly EXPLORATION_RATE = 0.2;       // Chance to try new strategies
@@ -454,7 +457,7 @@ export class AdaptiveAI {
         practiceCount: 0,
         practiceHours: 0,
         successRate: 0,
-        lastPracticed: Date.now() / 1000,
+        lastPracticed: this.simulatedTime,
         learningRate: 1.0,
         maxLevel: 10,
         baseLevel: 1,
@@ -462,6 +465,9 @@ export class AdaptiveAI {
       };
       expertise.skills.set(skillName, skill);
     }
+
+    // Update last practiced time
+    skill.lastPracticed = this.simulatedTime;
 
     // Improve skill using power law of practice
     const practiceAmount = event.outcome === 'SUCCESS' ? 1 : 0.25;
@@ -594,14 +600,16 @@ export class AdaptiveAI {
    * Infer expertise domain from situation
    */
   private inferDomain(situation: string): ExpertiseDomain | null {
-    if (situation.includes('trade') || situation.includes('market')) return 'TRADING';
-    if (situation.includes('combat') || situation.includes('fight')) return 'COMBAT';
-    if (situation.includes('navigate') || situation.includes('travel')) return 'NAVIGATION';
-    if (situation.includes('negotiate') || situation.includes('diplomacy')) return 'DIPLOMACY';
-    if (situation.includes('explore') || situation.includes('discover')) return 'EXPLORATION';
-    if (situation.includes('mine') || situation.includes('extract')) return 'MINING';
-    if (situation.includes('salvage') || situation.includes('scavenge')) return 'SALVAGE';
-    if (situation.includes('survive') || situation.includes('escape')) return 'SURVIVAL';
+    const lower = situation.toLowerCase();
+
+    if (lower.includes('trad') || lower.includes('market') || lower.includes('buy') || lower.includes('sell')) return 'TRADING';
+    if (lower.includes('combat') || lower.includes('fight') || lower.includes('attack') || lower.includes('weapon')) return 'COMBAT';
+    if (lower.includes('navigat') || lower.includes('travel') || lower.includes('route') || lower.includes('asteroid')) return 'NAVIGATION';
+    if (lower.includes('negotiat') || lower.includes('diplomacy') || lower.includes('alliance')) return 'DIPLOMACY';
+    if (lower.includes('explor') || lower.includes('discover') || lower.includes('unknown')) return 'EXPLORATION';
+    if (lower.includes('min') || lower.includes('extract') || lower.includes('ore')) return 'MINING';
+    if (lower.includes('salvage') || lower.includes('scavenge') || lower.includes('wreck')) return 'SALVAGE';
+    if (lower.includes('surviv') || lower.includes('escape') || lower.includes('flee') || lower.includes('threat')) return 'SURVIVAL';
 
     return null;
   }
@@ -847,7 +855,7 @@ export class AdaptiveAI {
 
     skill.practiceCount += practiceAmount;
     skill.practiceHours += 0.1;
-    skill.lastPracticed = Date.now() / 1000;
+    skill.lastPracticed = this.simulatedTime;
 
     // Skill improves with diminishing returns
     const improvement = practiceEffect * skill.learningRate * 100;
@@ -876,12 +884,38 @@ export class AdaptiveAI {
    * Skill decay: Use it or lose it
    */
   public decaySkills(deltaTime: number): void {
-    const daysSince = deltaTime / 86400;
-    const now = Date.now() / 1000;
+    // Advance simulated time
+    this.simulatedTime += deltaTime;
 
     for (const expertise of this.expertise.values()) {
+      // Find most recent practice time for this domain
+      let mostRecentPractice = 0;
       for (const skill of expertise.skills.values()) {
-        const timeSincePractice = now - skill.lastPracticed;
+        mostRecentPractice = Math.max(mostRecentPractice, skill.lastPracticed);
+      }
+
+      // Decay expertise XP if domain hasn't been practiced
+      if (expertise.skills.size > 0) {
+        const timeSincePractice = this.simulatedTime - mostRecentPractice;
+        const daysSincePractice = timeSincePractice / 86400;
+
+        if (daysSincePractice > 7) {
+          // Decay starts after 1 week of no practice
+          const decayRate = 0.01; // 1% per day
+          const decay = decayRate * (daysSincePractice - 7);
+
+          // Decay expertise XP
+          expertise.experiencePoints *= (1 - decay);
+          expertise.experiencePoints = Math.max(0, expertise.experiencePoints);
+
+          // Recalculate level from XP
+          expertise.level = Math.floor(expertise.experiencePoints / 100);
+        }
+      }
+
+      // Decay individual skills
+      for (const skill of expertise.skills.values()) {
+        const timeSincePractice = this.simulatedTime - skill.lastPracticed;
         const daysSincePractice = timeSincePractice / 86400;
 
         if (daysSincePractice > 7) {
