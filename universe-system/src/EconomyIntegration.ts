@@ -5,10 +5,11 @@
  */
 
 import { MiningSystem, OreType } from './MiningSystem';
-import { ManufacturingSystem, FacilityType, RecipeDatabase } from './ManufacturingSystem';
+import { ManufacturingSystem, FacilityType, RecipeDatabase, ProductionRecipe } from './ManufacturingSystem';
 import { EconomySystem } from './EconomySystem';
 import { CommodityType, getCommodity } from './economy/commodity';
 import { SpaceStation } from './StationGenerator';
+import { ProductionEconomyBridge } from './ProductionEconomyBridge';
 
 /**
  * Production chain tracker
@@ -124,42 +125,68 @@ export class ProductionChainManager {
 
   /**
    * Transfer manufactured goods from facility to station market
+   * Now uses ProductionEconomyBridge for proper commodity handling
    */
   transferGoodsToMarket(
     facilityId: string,
     stationId: string,
     commodity: CommodityType,
     amount: number
-  ): { success: boolean; message: string } {
-    // Remove from facility
+  ): { success: boolean; message: string; revenue: number } {
+    const bridge = this.manufacturingSystem.getEconomyBridge();
+
+    if (!bridge) {
+      // Fallback to legacy mode
+      const removed = this.manufacturingSystem.removeFromInventory(facilityId, commodity, amount);
+      if (!removed) {
+        return {
+          success: false,
+          message: 'Failed to remove goods from facility inventory',
+          revenue: 0
+        };
+      }
+
+      console.log(`[INTEGRATION] No economy bridge - stored ${amount.toFixed(1)}kg ${commodity} in facility`);
+      return {
+        success: true,
+        message: `Stored ${amount.toFixed(1)}kg in facility (no market integration)`,
+        revenue: 0
+      };
+    }
+
+    // Validate facility has the goods
     const removed = this.manufacturingSystem.removeFromInventory(facilityId, commodity, amount);
     if (!removed) {
       return {
         success: false,
-        message: 'Failed to remove goods from facility inventory'
+        message: 'Insufficient goods in facility inventory',
+        revenue: 0
       };
     }
 
-    // Add to station market (by selling to the station)
-    const result = this.economySystem.executeTrade(stationId, commodity, amount, false);
+    // Use bridge to sell to market
+    const outputs = new Map<CommodityType, number>([[commodity, amount]]);
+    const result = bridge.produceOutputs(stationId, facilityId, outputs);
 
     if (result.success) {
       this.stats.commoditiesSold += amount;
-      this.stats.creditsEarned += result.total;
+      this.stats.creditsEarned += result.revenue;
       this.stats.goodsProduced += amount;
 
-      console.log(`[INTEGRATION] Sold ${amount.toFixed(1)}kg of ${commodity} to market for ${result.total.toFixed(0)} credits`);
+      console.log(`[INTEGRATION] Sold ${amount.toFixed(1)}kg of ${commodity} to market for ${result.revenue.toFixed(0)} credits`);
 
       return {
         success: true,
-        message: `Sold ${amount.toFixed(1)}kg for ${result.total.toFixed(0)} credits`
+        message: result.message,
+        revenue: result.revenue
       };
     } else {
       // Failed to sell, add back to inventory
       this.manufacturingSystem.addToInventory(facilityId, commodity, amount);
       return {
         success: false,
-        message: 'Market rejected goods (low demand)'
+        message: result.message,
+        revenue: 0
       };
     }
   }
@@ -167,36 +194,76 @@ export class ProductionChainManager {
   /**
    * Execute full production chain: Mine → Refine → Manufacture → Sell
    * This is a convenience method for automated production
+   * With economy integration, purchasing and selling happens automatically during production
    */
   executeFullChain(
     stationId: string,
     refineryId: string,
     factoryId: string,
     recipeId: string
-  ): { success: boolean; message: string; creditsEarned: number } {
+  ): { success: boolean; message: string; estimatedCost: number; estimatedRevenue: number } {
     const steps: string[] = [];
+    const bridge = this.manufacturingSystem.getEconomyBridge();
 
-    // Step 1: Transfer ore to refinery
+    // Step 1: Transfer ore to refinery (if available from mining)
     const transferResult = this.transferOreToRefinery(stationId, refineryId);
-    if (!transferResult.success) {
-      return { success: false, message: transferResult.message, creditsEarned: 0 };
+    if (transferResult.success) {
+      steps.push(`Transferred ${transferResult.transferred.size} ore types to refinery`);
+    } else {
+      steps.push(`No ore to transfer (will purchase from market if needed)`);
     }
-    steps.push(`Transferred ${transferResult.transferred.size} ore types to refinery`);
 
-    // Step 2: Start manufacturing with recipe
+    // Step 2: Validate recipe and estimate costs
+    const recipe = RecipeDatabase.getRecipe(recipeId);
+    if (!recipe) {
+      return {
+        success: false,
+        message: 'Recipe not found',
+        estimatedCost: 0,
+        estimatedRevenue: 0
+      };
+    }
+
+    // Estimate production economics
+    let estimatedCost = 0;
+    let estimatedRevenue = 0;
+
+    if (bridge) {
+      const estimate = bridge.estimateProductionProfit(stationId, recipe.inputs, recipe.outputs);
+      estimatedCost = estimate.inputCost;
+      estimatedRevenue = estimate.outputValue;
+
+      steps.push(
+        `Estimated: Cost ${estimatedCost.toFixed(0)} credits, Revenue ${estimatedRevenue.toFixed(0)} credits, Profit ${estimate.profit.toFixed(0)} (${estimate.margin.toFixed(1)}% margin)`
+      );
+    }
+
+    // Step 3: Start manufacturing with recipe
+    // With economy integration, this will automatically:
+    // - Purchase inputs from market
+    // - Consume them
+    // - When complete, sell outputs to market
     const productionResult = this.manufacturingSystem.startProduction(factoryId, recipeId);
     if (!productionResult.success) {
-      return { success: false, message: productionResult.message, creditsEarned: 0 };
+      return {
+        success: false,
+        message: productionResult.message,
+        estimatedCost,
+        estimatedRevenue
+      };
     }
     steps.push(`Started production: ${productionResult.job!.recipe.name}`);
+    steps.push(`ETA: ${((productionResult.job!.estimatedCompletion - Date.now()) / 60000).toFixed(1)} minutes`);
 
-    // Note: Selling happens after production completes, not immediately
-    // This is just the setup
+    // Note: With economy integration, buying/selling happens automatically
+    // Input purchase: At production start (already completed above)
+    // Output sale: When production completes (happens in ManufacturingSystem.completeJob)
 
     return {
       success: true,
       message: steps.join('\n'),
-      creditsEarned: 0 // Will earn after production completes
+      estimatedCost,
+      estimatedRevenue
     };
   }
 
@@ -257,19 +324,29 @@ export class ProductionChainManager {
 
   /**
    * Suggest profitable production chains based on market conditions
+   * Now uses economy bridge for accurate pricing
    */
   suggestProfitableChains(stationId: string, limit: number = 5): {
     commodity: CommodityType;
     recipe: string;
     profit: number;
-    demand: number;
+    margin: number;
+    inputCost: number;
+    outputValue: number;
+    inputsAvailable: boolean;
   }[] {
     const suggestions: {
       commodity: CommodityType;
       recipe: string;
       profit: number;
-      demand: number;
+      margin: number;
+      inputCost: number;
+      outputValue: number;
+      inputsAvailable: boolean;
     }[] = [];
+
+    const bridge = this.manufacturingSystem.getEconomyBridge();
+    if (!bridge) return suggestions;
 
     const market = this.economySystem.getMarket(stationId);
     if (!market) return suggestions;
@@ -278,44 +355,128 @@ export class ProductionChainManager {
     const allRecipes = RecipeDatabase.getAllRecipes();
 
     for (const recipe of allRecipes) {
-      // Get first output commodity (simplified)
-      const outputs = Array.from(recipe.outputs.entries());
-      if (outputs.length === 0) continue;
+      // Check if inputs are available
+      const validation = bridge.checkInputsAvailable(stationId, recipe.inputs);
 
-      const [commodity, outputAmount] = outputs[0];
+      // Estimate profitability
+      const estimate = bridge.estimateProductionProfit(stationId, recipe.inputs, recipe.outputs);
 
-      // Get market data
-      const marketData = market.get(commodity);
-      if (!marketData) continue;
+      // Only suggest if profitable
+      if (estimate.profit > 0) {
+        // Get primary output commodity
+        const outputs = Array.from(recipe.outputs.entries());
+        if (outputs.length === 0) continue;
+        const [commodity] = outputs[0];
 
-      // Calculate input cost (simplified - using base prices)
-      let inputCost = 0;
-      for (const [inputCommodity, inputAmount] of recipe.inputs) {
-        const inputCommodityDef = getCommodity(inputCommodity);
-        inputCost += inputAmount * inputCommodityDef.basePrice;
-      }
-
-      // Calculate output value at market price
-      const outputValue = outputAmount * marketData.price * recipe.efficiency;
-
-      // Calculate profit
-      const profit = outputValue - inputCost;
-
-      // Only suggest if profitable and has demand
-      if (profit > 0 && marketData.demand > 0) {
         suggestions.push({
           commodity,
           recipe: recipe.id,
-          profit,
-          demand: marketData.demand
+          profit: estimate.profit,
+          margin: estimate.margin,
+          inputCost: estimate.inputCost,
+          outputValue: estimate.outputValue,
+          inputsAvailable: validation.available
         });
       }
     }
 
-    // Sort by profit
-    suggestions.sort((a, b) => b.profit - a.profit);
+    // Sort by profit, prioritizing recipes with available inputs
+    suggestions.sort((a, b) => {
+      // Prioritize available inputs
+      if (a.inputsAvailable && !b.inputsAvailable) return -1;
+      if (!a.inputsAvailable && b.inputsAvailable) return 1;
+      // Then by profit
+      return b.profit - a.profit;
+    });
 
     return suggestions.slice(0, limit);
+  }
+
+  /**
+   * Check resource availability for a recipe
+   */
+  checkResourceAvailability(
+    stationId: string,
+    recipeId: string
+  ): {
+    available: boolean;
+    missing: Map<CommodityType, number>;
+    details: string[];
+    estimatedCost: number;
+  } {
+    const recipe = RecipeDatabase.getRecipe(recipeId);
+    if (!recipe) {
+      return {
+        available: false,
+        missing: new Map(),
+        details: ['Recipe not found'],
+        estimatedCost: 0
+      };
+    }
+
+    const bridge = this.manufacturingSystem.getEconomyBridge();
+    if (!bridge) {
+      return {
+        available: false,
+        missing: new Map(),
+        details: ['Economy bridge not initialized'],
+        estimatedCost: 0
+      };
+    }
+
+    const check = bridge.checkInputsAvailable(stationId, recipe.inputs);
+    const estimate = bridge.estimateProductionProfit(stationId, recipe.inputs, recipe.outputs);
+
+    return {
+      available: check.available,
+      missing: check.missing,
+      details: check.details,
+      estimatedCost: estimate.inputCost
+    };
+  }
+
+  /**
+   * Get supply chain status across multiple stations
+   */
+  getSupplyChainStatus(stationIds: string[]): {
+    stationId: string;
+    stationName: string;
+    bottlenecks: number;
+    productionCapacity: number;
+    marketHealth: number;
+  }[] {
+    const bridge = this.manufacturingSystem.getEconomyBridge();
+    if (!bridge) return [];
+
+    const status = [];
+
+    for (const stationId of stationIds) {
+      const facilities = this.manufacturingSystem.getFacilitiesByStation(stationId);
+      const bottlenecks = bridge.getStationBottlenecks(stationId);
+      const chainStatus = bridge.getProductionChainStatus(stationId);
+
+      // Calculate production capacity (active jobs / max jobs)
+      let activeJobs = 0;
+      let maxJobs = 0;
+      for (const facility of facilities) {
+        activeJobs += facility.activeJobs.length;
+        maxJobs += facility.maxConcurrentJobs;
+      }
+      const productionCapacity = maxJobs > 0 ? activeJobs / maxJobs : 0;
+
+      // Calculate market health (simple: based on efficiency and bottlenecks)
+      const marketHealth = Math.max(0, chainStatus.efficiency - (bottlenecks.length * 0.1));
+
+      status.push({
+        stationId,
+        stationName: stationId, // Would need to look up actual name
+        bottlenecks: bottlenecks.length,
+        productionCapacity,
+        marketHealth
+      });
+    }
+
+    return status;
   }
 
   /**

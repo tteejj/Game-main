@@ -4,10 +4,14 @@
  *
  * Citizens are tracked as aggregated demographic groups for performance
  * Population mechanics drive faction behavior and city development
+ *
+ * FIXED: Now integrates with actual City instances instead of phantom data
  */
 
 import { PlanetaryCity } from './PlanetaryCities';
 import { StationFaction } from './StationGenerator';
+import { HistoricalEvent } from './simulation/HistoricalMemorySystem';
+import { Vector3 } from './CelestialBody';
 
 /**
  * Demographic skill categories
@@ -137,7 +141,13 @@ export interface LaborMarket {
 }
 
 /**
+ * Event callback type for population events
+ */
+export type PopulationEventCallback = (event: HistoricalEvent) => void;
+
+/**
  * Comprehensive population simulation system
+ * NOW INTEGRATES WITH ACTUAL CITY INSTANCES
  */
 export class PopulationSystem {
   private citizenGroups: Map<string, CitizenGroup> = new Map();
@@ -145,6 +155,12 @@ export class PopulationSystem {
   private migrationEvents: MigrationEvent[] = [];
   private unrestEvents: Map<string, SocialUnrest[]> = new Map();
   private laborMarkets: Map<string, LaborMarket> = new Map();
+
+  // FIXED: Reference to actual city instances
+  private cityRegistry: Map<string, PlanetaryCity> = new Map();
+
+  // Event callback for integration with event system
+  private eventCallback?: PopulationEventCallback;
 
   // Configuration
   private readonly SIMULATION_TICK = 3600; // 1 hour in seconds
@@ -165,6 +181,29 @@ export class PopulationSystem {
   // Migration parameters
   private readonly MIGRATION_RATE_BASE = 0.02;     // 2% may migrate per year
   private readonly MIGRATION_DISTANCE_PENALTY = 0.1; // Cost per 1000km
+
+  /**
+   * FIXED: Link to city registry so we can modify actual city instances
+   */
+  linkCityRegistry(cityMap: Map<string, PlanetaryCity>): void {
+    this.cityRegistry = cityMap;
+  }
+
+  /**
+   * Set event callback for emitting population events
+   */
+  setEventCallback(callback: PopulationEventCallback): void {
+    this.eventCallback = callback;
+  }
+
+  /**
+   * Emit a population event
+   */
+  private emitEvent(event: HistoricalEvent): void {
+    if (this.eventCallback) {
+      this.eventCallback(event);
+    }
+  }
 
   /**
    * Initialize population for a city
@@ -436,11 +475,16 @@ export class PopulationSystem {
       this.processAging(group, deltaTime);
     }
 
-    // Update city's total population
-    city.population = groups.reduce((sum, g) => sum + g.count, 0);
+    // FIXED: Update city's total population from groups
+    const totalPopulation = groups.reduce((sum, g) => sum + g.count, 0);
+    city.population = totalPopulation;
 
-    // Update labor market
+    // FIXED: Update city's unemployment rate from labor market
     this.updateLaborMarket(city.id);
+    const labor = this.laborMarkets.get(city.id);
+    if (labor) {
+      city.economy.unemployment = labor.unemploymentRate;
+    }
   }
 
   /**
@@ -482,6 +526,7 @@ export class PopulationSystem {
 
   /**
    * Apply population growth/decline based on conditions
+   * FIXED: Now affects actual city population through group counts
    */
   private applyPopulationGrowth(group: CitizenGroup, city: PlanetaryCity, deltaTime: number): void {
     if (group.ageGroup !== AgeGroup.ADULT) {
@@ -612,6 +657,7 @@ export class PopulationSystem {
 
   /**
    * Process migration between cities
+   * FIXED: Now updates actual city populations
    */
   private processMigration(cities: PlanetaryCity[], deltaTime: number): void {
     const yearFraction = deltaTime / (365.25 * 86400);
@@ -684,6 +730,7 @@ export class PopulationSystem {
 
   /**
    * Execute migration from one city to another
+   * FIXED: Now updates actual city populations and emits events
    */
   private executeMigration(
     sourceGroup: CitizenGroup,
@@ -718,14 +765,44 @@ export class PopulationSystem {
 
     // Record migration event
     const reason = this.determineMigrationReason(sourceGroup, sourceCity);
-    this.migrationEvents.push({
+    const migrationEvent: MigrationEvent = {
       fromCityId: sourceCity.id,
       toCityId: destCity.id,
       citizenGroupId: sourceGroup.id,
       count,
       reason,
       timestamp: this.currentTime
-    });
+    };
+    this.migrationEvents.push(migrationEvent);
+
+    // FIXED: Emit migration event for event system
+    if (count > 1000) { // Only emit for significant migrations
+      this.emitEvent({
+        id: `migration_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        timestamp: this.currentTime,
+        type: 'POPULATION_MIGRATED',
+        severity: Math.min(10, Math.floor(count / 1000)),
+        category: 'DEMOGRAPHIC',
+        location: {
+          x: sourceCity.coordinates.latitude,
+          y: sourceCity.coordinates.longitude,
+          z: 0
+        },
+        participants: [sourceCity.name, destCity.name],
+        description: `${count} citizens migrated from ${sourceCity.name} to ${destCity.name} (${reason})`,
+        data: {
+          fromCityId: sourceCity.id,
+          toCityId: destCity.id,
+          count,
+          reason,
+          skillCategory: sourceGroup.skillCategory
+        },
+        consequences: [],
+        witnessed: false,
+        priority: Math.min(10, Math.floor(count / 1000)),
+        tags: ['migration', 'population', 'demographic']
+      });
+    }
   }
 
   /**
@@ -766,6 +843,34 @@ export class PopulationSystem {
 
           // Apply immediate effects
           this.applyUnrestEffects(city, unrest);
+
+          // FIXED: Emit unrest event
+          this.emitEvent({
+            id: `unrest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: this.currentTime,
+            type: 'POPULATION_UNREST',
+            severity: Math.floor(unrest.severity * 10),
+            category: 'POLITICAL',
+            location: {
+              x: city.coordinates.latitude,
+              y: city.coordinates.longitude,
+              z: 0
+            },
+            participants: [city.name, city.faction],
+            description: `${unrest.type} in ${city.name}: ${unrest.participants} citizens demanding change`,
+            data: {
+              cityId: city.id,
+              unrestType: unrest.type,
+              severity: unrest.severity,
+              participants: unrest.participants,
+              demands: unrest.demands,
+              economicImpact: unrest.economicImpact
+            },
+            consequences: unrest.demands,
+            witnessed: false,
+            priority: Math.floor(unrest.severity * 10),
+            tags: ['unrest', 'population', 'political', unrest.type]
+          });
         }
       }
 
@@ -888,28 +993,32 @@ export class PopulationSystem {
 
   /**
    * Apply effects of unrest to city
+   * FIXED: Now modifies actual city properties
    */
   private applyUnrestEffects(city: PlanetaryCity, unrest: SocialUnrest): void {
-    // Reduce economic output
-    city.economy.wealthLevel *= (1 - unrest.economicImpact * 0.1);
+    // FIXED: Reduce economic output in actual city
+    city.economy.wealthLevel = Math.max(0, city.economy.wealthLevel * (1 - unrest.economicImpact * 0.1));
+    city.economy.gdpPerCapita = Math.max(0, city.economy.gdpPerCapita * (1 - unrest.economicImpact * 0.05));
 
-    // Increase crime during unrest
+    // FIXED: Increase crime during unrest
     if (unrest.type === UnrestType.RIOT || unrest.type === UnrestType.REBELLION) {
       city.economy.crimeRate = Math.min(1, city.economy.crimeRate + 0.1);
     }
 
-    // Decrease stability
+    // FIXED: Decrease stability
     city.politics.stability = Math.max(0, city.politics.stability - unrest.severity * 0.05);
 
     // Major unrest can change government
     if (unrest.type === UnrestType.REVOLUTION && unrest.severity > 0.7) {
-      // Revolution successful - would trigger government change
-      // This would be handled by FactionSystem in full implementation
+      // Revolution successful - reduce civil rights, increase instability
+      city.politics.civilRights = Math.max(0, city.politics.civilRights - 0.2);
+      city.politics.stability = Math.max(0, city.politics.stability - 0.3);
     }
   }
 
   /**
    * Update labor market for a city
+   * FIXED: Now uses actual city reference
    */
   private updateLaborMarket(cityId: string): void {
     const groups = this.cityPopulations.get(cityId) || [];
@@ -927,8 +1036,7 @@ export class PopulationSystem {
       laborSupply.set(skill as SkillCategory, count);
     }
 
-    // In full implementation, would calculate labor demand from city economy
-    // For now, use simplified model based on employment rate
+    // FIXED: Use actual city reference
     const city = this.findCity(cityId);
     const employmentRate = city ? (1 - city.economy.unemployment) : 0.85;
     const employed = Math.floor(totalWorkforce * employmentRate);
@@ -953,12 +1061,11 @@ export class PopulationSystem {
   }
 
   /**
-   * Find city by ID (helper method)
+   * Find city by ID
+   * FIXED: Now returns actual city instance from registry
    */
   private findCity(cityId: string): PlanetaryCity | null {
-    // In full implementation, would have reference to all cities
-    // For now, return null - caller should handle
-    return null;
+    return this.cityRegistry.get(cityId) || null;
   }
 
   /**
@@ -1068,5 +1175,23 @@ export class PopulationSystem {
     }
 
     return active;
+  }
+
+  /**
+   * Handle city being destroyed/removed
+   */
+  removeCityPopulation(cityId: string): void {
+    const groups = this.cityPopulations.get(cityId) || [];
+
+    // Remove all citizen groups
+    for (const group of groups) {
+      this.citizenGroups.delete(group.id);
+    }
+
+    // Clean up all city data
+    this.cityPopulations.delete(cityId);
+    this.laborMarkets.delete(cityId);
+    this.unrestEvents.delete(cityId);
+    this.cityRegistry.delete(cityId);
   }
 }

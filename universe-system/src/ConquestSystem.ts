@@ -13,6 +13,7 @@
 import { Vector3 } from './CelestialBody';
 import { SpaceStation, StationFaction } from './StationGenerator';
 import { PlanetaryCity } from './PlanetaryCities';
+import { Faction, Territory } from './FactionSystem';
 
 export interface SiegeOperation {
   id: string;
@@ -182,10 +183,65 @@ export interface ConquestConsequences {
   controllingPower: StationFaction;    // Who controls this space now
 }
 
+/**
+ * Event emitter interface for conquest events
+ */
+export interface ConquestEventListener {
+  onTerritoryCapture?(event: TerritoryCapturEvent): void;
+  onTerritoryLiberated?(event: TerritoryLiberationEvent): void;
+  onSiegeStarted?(event: SiegeStartEvent): void;
+  onSiegeEnded?(event: SiegeEndEvent): void;
+}
+
+export interface TerritoryCapturEvent {
+  type: 'TERRITORY_CAPTURED';
+  timestamp: number;
+  stationId: string;
+  stationName: string;
+  previousOwner: StationFaction;
+  newOwner: StationFaction;
+  consequences: ConquestConsequences;
+  siegeId: string;
+}
+
+export interface TerritoryLiberationEvent {
+  type: 'TERRITORY_LIBERATED';
+  timestamp: number;
+  territoryId: string;
+  territoryName: string;
+  liberator: StationFaction;
+  occupier: StationFaction;
+  occupationDuration: number;
+}
+
+export interface SiegeStartEvent {
+  type: 'SIEGE_STARTED';
+  timestamp: number;
+  siegeId: string;
+  targetId: string;
+  targetName: string;
+  attacker: StationFaction;
+  defender: StationFaction;
+}
+
+export interface SiegeEndEvent {
+  type: 'SIEGE_ENDED';
+  timestamp: number;
+  siegeId: string;
+  outcome: SiegeOutcome;
+  winner: StationFaction;
+}
+
 export class ConquestSystem {
   private activeSieges: Map<string, SiegeOperation> = new Map();
   private occupations: Map<string, OccupationState> = new Map();
   private conquestHistory: ConquestRecord[] = [];
+
+  // Integration points
+  private stations: Map<string, SpaceStation> = new Map();
+  private cities: Map<string, PlanetaryCity> = new Map();
+  private factions: Map<string, Faction> = new Map();
+  private eventListeners: ConquestEventListener[] = [];
 
   // Configuration - siege dynamics
   private readonly BASE_SIEGE_DAYS_PER_DEFENSE_POINT = 5;  // Base: 5 days per defense rating point
@@ -197,6 +253,298 @@ export class ConquestSystem {
   constructor() {
     console.log('[ConquestSystem] Initialized - Wars now have consequences');
   }
+
+  // ====================================================================
+  // INTEGRATION METHODS
+  // ====================================================================
+
+  /**
+   * Link to universe system to access actual stations
+   */
+  public linkStations(stations: SpaceStation[]): void {
+    this.stations.clear();
+    for (const station of stations) {
+      this.stations.set(station.id, station);
+    }
+    console.log(`[ConquestSystem] Linked ${stations.length} stations`);
+  }
+
+  /**
+   * Link to planetary cities
+   */
+  public linkCities(cities: PlanetaryCity[]): void {
+    this.cities.clear();
+    for (const city of cities) {
+      this.cities.set(city.id, city);
+    }
+    console.log(`[ConquestSystem] Linked ${cities.length} cities`);
+  }
+
+  /**
+   * Link to faction system
+   */
+  public linkFactions(factions: Map<string, Faction>): void {
+    this.factions = factions;
+    console.log(`[ConquestSystem] Linked ${factions.size} factions`);
+  }
+
+  /**
+   * Register event listener
+   */
+  public addEventListener(listener: ConquestEventListener): void {
+    this.eventListeners.push(listener);
+  }
+
+  /**
+   * Remove event listener
+   */
+  public removeEventListener(listener: ConquestEventListener): void {
+    const index = this.eventListeners.indexOf(listener);
+    if (index !== -1) {
+      this.eventListeners.splice(index, 1);
+    }
+  }
+
+  /**
+   * Get station by ID (with safety checks)
+   */
+  private getStation(stationId: string): SpaceStation | null {
+    const station = this.stations.get(stationId);
+    if (!station) {
+      console.warn(`[ConquestSystem] Station ${stationId} not found`);
+      return null;
+    }
+    return station;
+  }
+
+  /**
+   * Get city by ID (with safety checks)
+   */
+  private getCity(cityId: string): PlanetaryCity | null {
+    const city = this.cities.get(cityId);
+    if (!city) {
+      console.warn(`[ConquestSystem] City ${cityId} not found`);
+      return null;
+    }
+    return city;
+  }
+
+  // ====================================================================
+  // OWNERSHIP TRANSFER - THE ACTUAL FIX
+  // ====================================================================
+
+  /**
+   * Transfer station ownership - THIS IS THE KEY FIX
+   */
+  public transferStationOwnership(
+    stationId: string,
+    newOwner: StationFaction,
+    consequences: ConquestConsequences
+  ): boolean {
+    const station = this.getStation(stationId);
+    if (!station) {
+      console.error(`[ConquestSystem] Cannot transfer ownership - station ${stationId} not found`);
+      return false;
+    }
+
+    const oldOwner = station.faction;
+
+    console.log(`[ConquestSystem] 🔄 Transferring ownership: ${station.name}`);
+    console.log(`  Old owner: ${oldOwner} → New owner: ${newOwner}`);
+
+    // 1. ACTUALLY CHANGE THE STATION FACTION
+    station.faction = newOwner;
+
+    // 2. Update defense rating based on damage
+    const damageMultiplier = 1 - consequences.infrastructureDamage;
+    const oldDefense = station.defenseRating;
+    station.defenseRating = Math.max(1, Math.floor(station.defenseRating * damageMultiplier));
+
+    console.log(`  Defense: ${oldDefense} → ${station.defenseRating} (damage: ${(consequences.infrastructureDamage * 100).toFixed(0)}%)`);
+
+    // 3. Update population (casualties + refugees)
+    station.population = Math.max(100, station.population - consequences.populationLoss);
+
+    // 4. Update faction territories
+    this.updateFactionTerritories(stationId, oldOwner, newOwner);
+
+    // 5. Update station reputation - new owner gets positive, old owner gets negative
+    station.reputation.set(newOwner, 75);  // Loyalty to new owner
+    station.reputation.set(oldOwner, -50); // Resentment from old loyalists
+
+    // 6. Emit TERRITORY_CAPTURED event
+    this.emitTerritoryCapture({
+      type: 'TERRITORY_CAPTURED',
+      timestamp: Date.now() / 1000,
+      stationId: station.id,
+      stationName: station.name,
+      previousOwner: oldOwner,
+      newOwner: newOwner,
+      consequences: consequences,
+      siegeId: `siege_${stationId}_${Date.now()}`
+    });
+
+    console.log(`[ConquestSystem] ✓ Ownership transferred successfully`);
+    return true;
+  }
+
+  /**
+   * Transfer city ownership
+   */
+  public transferCityOwnership(
+    cityId: string,
+    newOwner: StationFaction,
+    consequences: ConquestConsequences
+  ): boolean {
+    const city = this.getCity(cityId);
+    if (!city) {
+      console.error(`[ConquestSystem] Cannot transfer ownership - city ${cityId} not found`);
+      return false;
+    }
+
+    const oldOwner = city.faction;
+
+    console.log(`[ConquestSystem] 🔄 Transferring city ownership: ${city.name}`);
+    console.log(`  Old owner: ${oldOwner} → New owner: ${newOwner}`);
+
+    // 1. Change city faction
+    city.faction = newOwner;
+
+    // 2. Update defense
+    const damageMultiplier = 1 - consequences.infrastructureDamage;
+    city.defense.defenseRating = Math.max(1, Math.floor(city.defense.defenseRating * damageMultiplier));
+
+    // 3. Update population
+    city.population = Math.max(1000, city.population - consequences.populationLoss);
+
+    // 4. Update faction territories
+    this.updateFactionTerritories(cityId, oldOwner, newOwner);
+
+    // 5. Emit event
+    this.emitTerritoryCapture({
+      type: 'TERRITORY_CAPTURED',
+      timestamp: Date.now() / 1000,
+      stationId: city.id,
+      stationName: city.name,
+      previousOwner: oldOwner,
+      newOwner: newOwner,
+      consequences: consequences,
+      siegeId: `siege_${cityId}_${Date.now()}`
+    });
+
+    console.log(`[ConquestSystem] ✓ City ownership transferred successfully`);
+    return true;
+  }
+
+  /**
+   * Update faction territory lists
+   */
+  private updateFactionTerritories(
+    territoryId: string,
+    oldOwner: StationFaction,
+    newOwner: StationFaction
+  ): void {
+    // Remove from old owner's territory
+    const oldFaction = this.factions.get(oldOwner);
+    if (oldFaction) {
+      for (const territory of oldFaction.territory) {
+        const index = territory.stations.indexOf(territoryId);
+        if (index !== -1) {
+          territory.stations.splice(index, 1);
+          console.log(`  Removed ${territoryId} from ${oldOwner} territory`);
+          break;
+        }
+      }
+    }
+
+    // Add to new owner's territory
+    const newFaction = this.factions.get(newOwner);
+    if (newFaction) {
+      // Find or create territory for this system
+      let territory = newFaction.territory.find(t => t.systemId === 'current_system'); // TODO: Get actual system ID
+      if (!territory) {
+        territory = {
+          systemId: 'current_system',
+          controlLevel: 0,
+          stations: [],
+          contested: false
+        };
+        newFaction.territory.push(territory);
+      }
+
+      territory.stations.push(territoryId);
+      territory.controlLevel = territory.stations.length / 10; // Rough estimate
+      console.log(`  Added ${territoryId} to ${newOwner} territory`);
+    }
+  }
+
+  /**
+   * Emit territory capture event to all listeners
+   */
+  private emitTerritoryCapture(event: TerritoryCapturEvent): void {
+    console.log(`[ConquestSystem] 📢 Event: TERRITORY_CAPTURED - ${event.stationName}`);
+    for (const listener of this.eventListeners) {
+      if (listener.onTerritoryCapture) {
+        try {
+          listener.onTerritoryCapture(event);
+        } catch (error) {
+          console.error('[ConquestSystem] Error in event listener:', error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Emit territory liberation event
+   */
+  private emitTerritoryLiberation(event: TerritoryLiberationEvent): void {
+    console.log(`[ConquestSystem] 📢 Event: TERRITORY_LIBERATED - ${event.territoryName}`);
+    for (const listener of this.eventListeners) {
+      if (listener.onTerritoryLiberated) {
+        try {
+          listener.onTerritoryLiberated(event);
+        } catch (error) {
+          console.error('[ConquestSystem] Error in event listener:', error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Emit siege started event
+   */
+  private emitSiegeStarted(event: SiegeStartEvent): void {
+    console.log(`[ConquestSystem] 📢 Event: SIEGE_STARTED - ${event.targetName}`);
+    for (const listener of this.eventListeners) {
+      if (listener.onSiegeStarted) {
+        try {
+          listener.onSiegeStarted(event);
+        } catch (error) {
+          console.error('[ConquestSystem] Error in event listener:', error);
+        }
+      }
+    }
+  }
+
+  /**
+   * Emit siege ended event
+   */
+  private emitSiegeEnded(event: SiegeEndEvent): void {
+    console.log(`[ConquestSystem] 📢 Event: SIEGE_ENDED - Outcome: ${event.outcome}`);
+    for (const listener of this.eventListeners) {
+      if (listener.onSiegeEnded) {
+        try {
+          listener.onSiegeEnded(event);
+        } catch (error) {
+          console.error('[ConquestSystem] Error in event listener:', error);
+        }
+      }
+    }
+  }
+
+  // ====================================================================
+  // SIEGE OPERATIONS
+  // ====================================================================
 
   /**
    * Start a siege operation
@@ -267,6 +615,17 @@ export class ConquestSystem {
     });
 
     this.activeSieges.set(siege.id, siege);
+
+    // Emit siege started event
+    this.emitSiegeStarted({
+      type: 'SIEGE_STARTED',
+      timestamp: Date.now() / 1000,
+      siegeId: siege.id,
+      targetId,
+      targetName,
+      attacker: attackerFaction,
+      defender: defenderFaction
+    });
 
     console.log(`[Conquest] 🏴 SIEGE BEGINS: ${attackerFaction} attacks ${targetName}`);
     console.log(`  Attacking Force: ${attackingForce.toFixed(0)} vs Defending Force: ${defendingForce.toFixed(0)}`);
@@ -457,6 +816,15 @@ export class ConquestSystem {
     console.log(`  Duration: ${(siege.siegeDuration / 86400).toFixed(1)} days`);
     console.log(`  Casualties: Military ${(siege.defendingForce * 0.3).toFixed(0)}, Civilian ${siege.civilianCasualties.toFixed(0)}`);
 
+    // Emit siege ended event
+    this.emitSiegeEnded({
+      type: 'SIEGE_ENDED',
+      timestamp: Date.now() / 1000,
+      siegeId: siege.id,
+      outcome,
+      winner: siege.defenderFaction
+    });
+
     // Record in history
     this.conquestHistory.push({
       timestamp: Date.now() / 1000,
@@ -470,7 +838,7 @@ export class ConquestSystem {
   }
 
   /**
-   * Capture territory after successful siege
+   * Capture territory after successful siege - NOW WITH REAL OWNERSHIP TRANSFER
    */
   private captureTerritoryFromSiege(siege: SiegeOperation, outcome: SiegeOutcome = 'ATTACKER_VICTORY'): void {
     siege.status = 'CAPTURED';
@@ -485,8 +853,31 @@ export class ConquestSystem {
     // Calculate consequences
     const consequences = this.calculateConsequences(siege);
 
+    // === THE FIX: ACTUALLY TRANSFER OWNERSHIP ===
+    let ownershipTransferred = false;
+    if (siege.targetType === 'STATION') {
+      ownershipTransferred = this.transferStationOwnership(siege.targetId, siege.attackerFaction, consequences);
+    } else if (siege.targetType === 'CITY') {
+      ownershipTransferred = this.transferCityOwnership(siege.targetId, siege.attackerFaction, consequences);
+    }
+
+    if (!ownershipTransferred) {
+      console.error(`[Conquest] ❌ Failed to transfer ownership of ${siege.targetName} - target may have been destroyed`);
+      // Handle edge case: station/city was destroyed during siege
+      return;
+    }
+
     // Create occupation state
     this.createOccupation(siege, consequences);
+
+    // Emit siege ended event
+    this.emitSiegeEnded({
+      type: 'SIEGE_ENDED',
+      timestamp: Date.now() / 1000,
+      siegeId: siege.id,
+      outcome,
+      winner: siege.attackerFaction
+    });
 
     // Record in history
     this.conquestHistory.push({
@@ -723,7 +1114,7 @@ export class ConquestSystem {
   }
 
   /**
-   * Liberate occupied territory
+   * Liberate occupied territory - NOW WITH REAL OWNERSHIP TRANSFER
    */
   private liberateTerritory(occupation: OccupationState): void {
     occupation.status = 'LIBERATED';
@@ -731,6 +1122,49 @@ export class ConquestSystem {
     console.log(`[Conquest] 🗽 LIBERATED: ${occupation.territoryName} returned to ${occupation.originalOwner}`);
     console.log(`  Occupation duration: ${occupation.daysSinceOccupation.toFixed(1)} days`);
     console.log(`  Insurgent attacks: ${occupation.insurgentAttacks}`);
+
+    // === THE FIX: ACTUALLY TRANSFER BACK TO ORIGINAL OWNER ===
+    const consequences: ConquestConsequences = {
+      territoryTransferred: true,
+      newOwner: occupation.originalOwner,
+      oldOwner: occupation.occupier,
+      militaryCasualties: new Map([[occupation.occupier, occupation.garrisonSize]]),
+      civilianCasualties: occupation.population * 0.05, // 5% casualties in liberation
+      infrastructureDamage: 0.2, // Less damage during liberation
+      economicLoss: 100000,
+      productionLoss: 0.1,
+      refugees: occupation.population * 0.05,
+      populationLoss: occupation.population * 0.1,
+      populationMoraleChange: 0.5, // Morale boost from liberation
+      reputationChange: new Map(),
+      warCrimesCommitted: false,
+      strategicValue: 5,
+      borderChange: true,
+      controllingPower: occupation.originalOwner
+    };
+
+    let ownershipTransferred = false;
+    if (occupation.territoryType === 'STATION') {
+      ownershipTransferred = this.transferStationOwnership(occupation.territoryId, occupation.originalOwner, consequences);
+    } else if (occupation.territoryType === 'CITY') {
+      ownershipTransferred = this.transferCityOwnership(occupation.territoryId, occupation.originalOwner, consequences);
+    }
+
+    if (!ownershipTransferred) {
+      console.error(`[Conquest] ❌ Failed to liberate ${occupation.territoryName} - target may have been destroyed`);
+      return;
+    }
+
+    // Emit liberation event
+    this.emitTerritoryLiberation({
+      type: 'TERRITORY_LIBERATED',
+      timestamp: Date.now() / 1000,
+      territoryId: occupation.territoryId,
+      territoryName: occupation.territoryName,
+      liberator: occupation.originalOwner,
+      occupier: occupation.occupier,
+      occupationDuration: occupation.daysSinceOccupation * 86400
+    });
 
     // Record in history
     this.conquestHistory.push({
@@ -742,9 +1176,6 @@ export class ConquestSystem {
       outcome: 'DEFENDER_VICTORY',
       duration: occupation.daysSinceOccupation * 86400
     });
-
-    // Territory returns to original owner
-    // (Integration code would update the actual station/city object)
   }
 
   /**
