@@ -54,6 +54,9 @@ window.addEventListener('DOMContentLoaded', () => {
             }
         };
 
+        // Connect player integration to UI (Station 6: Operations)
+        ui.setPlayerIntegration(game.playerIntegration);
+
         // Pass game reference to UI for NPC updates
         (window as any).game = game;
         (window as any).ui = ui;

@@ -25,7 +25,7 @@ export class InputManager {
         this.keysPressed.add(key);
 
         // Rendering controls (higher priority than station switching)
-        if (key === '[' || key === ']' || key === 't' || key === 'h' || key === 'F3') {
+        if (key === '[' || key === ']' || key === 't' || key === 'h') {
             if (this.onRenderingControl) {
                 this.onRenderingControl(key);
             }
@@ -33,8 +33,8 @@ export class InputManager {
             return;
         }
 
-        // Station switching (F1-F2, F4-F5 keys, excluding F3)
-        if (key === 'F1' || key === 'F2' || key === 'F4' || key === 'F5') {
+        // Station switching (F1-F7 keys, F3 can be used for both rendering toggle and navigation)
+        if (key === 'F1' || key === 'F2' || key === 'F3' || key === 'F4' || key === 'F5' || key === 'F6' || key === 'F7') {
             const stationNum = parseInt(key.substring(1)); // Extract number from F1, F2, etc.
             if (this.onStationSwitch) {
                 this.onStationSwitch(stationNum);
