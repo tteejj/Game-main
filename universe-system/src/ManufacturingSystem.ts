@@ -767,6 +767,8 @@ export class ManufacturingSystem {
     job.status = 'COMPLETED';
     job.progress = 1.0;
 
+    console.log(`[MANUFACTURING] Completed: ${job.recipe.id} at ${facility.name} (${job.quantity} units)`);
+
     // Calculate actual output based on efficiency
     const totalEfficiency = job.recipe.efficiency * facility.efficiency * facility.condition;
 

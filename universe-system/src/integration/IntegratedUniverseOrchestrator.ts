@@ -165,12 +165,18 @@ export class IntegratedUniverseOrchestrator {
       const interactions = this.interactionManager.update(deltaTime, ships);
 
       // Record interaction events
+      if (interactions.length > 0) {
+        console.log(`[INTERACTIONS] ${interactions.length} interactions detected`);
+      }
       for (const interaction of interactions) {
         this.recordInteractionEvent(interaction);
       }
 
       // Check distress call responses
       const distressResponses = this.interactionManager.checkDistressResponse(ships);
+      if (distressResponses.length > 0) {
+        console.log(`[DISTRESS] ${distressResponses.length} distress responses`);
+      }
       for (const response of distressResponses) {
         this.recordInteractionEvent(response);
       }
