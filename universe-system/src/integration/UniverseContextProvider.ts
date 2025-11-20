@@ -486,6 +486,10 @@ export class UniverseContextProvider {
   }
 
   private calculateTrafficDensity(position: Vector3): number {
+    if (!this.starSystem.trafficManager || typeof this.starSystem.trafficManager.getNearbyVessels !== 'function') {
+      return 0.1; // Default low traffic
+    }
+
     const nearbyShips = this.starSystem.trafficManager.getNearbyVessels(position, 10000);
 
     // Normalize based on expected traffic (0-20 ships = 0-1 density)
