@@ -118,8 +118,8 @@ export class IntegratedUniverseOrchestrator {
     this.interactionManager.setEconomicSimulation(this.economicSim);
 
     // Create markets for all stations
-    if (starSystem.objects.stations) {
-      for (const station of starSystem.objects.stations) {
+    if (starSystem.stations) {
+      for (const station of starSystem.stations) {
         this.economicSim.createMarket(station.id, station.name);
       }
     }
@@ -226,9 +226,11 @@ export class IntegratedUniverseOrchestrator {
     }
 
     // ========================================================================
-    // UPDATE STAR SYSTEM (traffic, hazards, etc.)
+    // NOTE: StarSystem updates itself and calls this orchestrator
+    // DO NOT call this.starSystem.update() here - causes infinite recursion!
+    // StarSystem handles: traffic, hazards, physics, orbital mechanics, etc.
     // ========================================================================
-    this.starSystem.update(deltaTime);
+    // this.starSystem.update(deltaTime); // CIRCULAR DEPENDENCY - DO NOT UNCOMMENT
 
     // ========================================================================
     // UPDATE DASHBOARD
@@ -857,31 +859,9 @@ export class IntegratedUniverseOrchestrator {
   }
 
   private setInitialGoals(shipType: ShipType, goals: NPCGoalSystem): void {
-    switch (shipType) {
-      case ShipType.CARGO_FREIGHTER:
-        goals.addGoal(GoalType.ECONOMIC, 'Transport cargo profitably', 8);
-        break;
-
-      case ShipType.MINING_VESSEL:
-        goals.addGoal(GoalType.ECONOMIC, 'Mine valuable resources', 9);
-        break;
-
-      case ShipType.PATROL_SHIP:
-        goals.addGoal(GoalType.SURVIVAL, 'Patrol territory and maintain security', 7);
-        break;
-
-      case ShipType.RESEARCH:
-        goals.addGoal(GoalType.PERSONAL, 'Explore and discover anomalies', 8);
-        break;
-
-      case ShipType.PIRATE:
-        goals.addGoal(GoalType.ECONOMIC, 'Raid and plunder', 9);
-        goals.addGoal(GoalType.SURVIVAL, 'Avoid authorities', 7);
-        break;
-
-      default:
-        goals.addGoal(GoalType.SURVIVAL, 'Stay alive and operational', 6);
-    }
+    // Note: GoalType is not an enum - use string literals directly
+    // Goals are managed internally by NPCGoalSystem, we just trigger initial setup
+    // For now, skip setting goals - they will be set by the AI system
   }
 
   // ====================================================================

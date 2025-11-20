@@ -586,6 +586,16 @@ export class EventBus {
   }
 
   /**
+   * Get total number of active subscriptions
+   */
+  getSubscriberCount(): number {
+    return Array.from(this.subscriptions.values()).reduce(
+      (sum, set) => sum + set.size,
+      0
+    );
+  }
+
+  /**
    * Set maximum history size
    */
   setMaxHistorySize(size: number): void {

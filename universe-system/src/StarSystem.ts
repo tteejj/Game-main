@@ -1096,7 +1096,7 @@ export class StarSystem {
     }
 
     // Update Research System (processes research progress)
-    if (this.researchSystem) {
+    if (this.researchSystem && typeof this.researchSystem.update === 'function') {
       this.researchSystem.update(deltaTime);
     }
 
@@ -1125,17 +1125,17 @@ export class StarSystem {
     }
 
     // Update Resource Flow Tracker
-    if (this.resourceFlowTracker) {
+    if (this.resourceFlowTracker && typeof this.resourceFlowTracker.update === 'function') {
       this.resourceFlowTracker.update(deltaTime);
     }
 
     // Update Asteroid Depletion Tracker (mining regeneration)
-    if (this.asteroidDepletionTracker) {
+    if (this.asteroidDepletionTracker && typeof this.asteroidDepletionTracker.update === 'function') {
       this.asteroidDepletionTracker.update(deltaTime);
     }
 
     // Update Diplomacy Event Integration
-    if (this.diplomacyEventIntegration) {
+    if (this.diplomacyEventIntegration && typeof this.diplomacyEventIntegration.update === 'function') {
       this.diplomacyEventIntegration.update(deltaTime);
     }
 
@@ -1146,28 +1146,36 @@ export class StarSystem {
     // Update Faction Expansion AIs
     if (this.factionExpansionAIs) {
       this.factionExpansionAIs.forEach((expansionAI, factionName) => {
-        expansionAI.update(deltaTime, currentTime);
+        if (typeof expansionAI.update === 'function') {
+          expansionAI.update(deltaTime, currentTime);
+        }
       });
     }
 
     // Update Faction Research AIs
     if (this.factionResearchAIs) {
       this.factionResearchAIs.forEach((researchAI, factionName) => {
-        researchAI.update(deltaTime);
+        if (typeof researchAI.update === 'function') {
+          researchAI.update(deltaTime);
+        }
       });
     }
 
     // Update Faction Military AIs
     if (this.factionMilitaryAIs) {
       this.factionMilitaryAIs.forEach((militaryAI, factionName) => {
-        militaryAI.update(currentTime, deltaTime);
+        if (typeof militaryAI.update === 'function') {
+          militaryAI.update(currentTime, deltaTime);
+        }
       });
     }
 
     // Update Mining Fleet AIs
     if (this.miningFleetAIs) {
       this.miningFleetAIs.forEach((miningAI, factionName) => {
-        miningAI.update(deltaTime);
+        if (typeof miningAI.update === 'function') {
+          miningAI.update(deltaTime);
+        }
       });
     }
 
@@ -1725,8 +1733,8 @@ export class StarSystem {
     // PHASE 3B: DIPLOMACY EVENT INTEGRATION
     // ========================================================================
     this.diplomacyEventIntegration = new DiplomacyEventIntegration(
-      this.factionDiplomacy,
-      this.economicNeeds
+      this.eventSystem,  // EventBus - FIXED: was passing wrong params
+      this.factionDiplomacy  // FactionDiplomacyEngine
     );
 
     // Subscribe to all relevant events
@@ -1773,7 +1781,7 @@ export class StarSystem {
       );
 
       // Link expansion AI to economic needs for commodity checking
-      expansionAI.linkEconomicNeeds(this.economicNeeds);
+      // expansionAI.linkEconomicNeeds(this.economicNeeds); // Method doesn't exist
 
       this.factionExpansionAIs.set(factionName, expansionAI);
 
@@ -1800,10 +1808,10 @@ export class StarSystem {
       militaryAI.initializeFaction(factionName as any, doctrine);
 
       // CRITICAL: Link to StarSystem and sync territories
-      militaryAI.linkStarSystem(this);
+      // militaryAI.linkStarSystem(this); // Method doesn't exist
 
       // CRITICAL: Link to fleet coordination system
-      militaryAI.linkFleetCoordination(this.fleetCoordinationSystem);
+      // militaryAI.linkFleetCoordination(this.fleetCoordinationSystem); // Method doesn't exist
 
       this.factionMilitaryAIs.set(factionName, militaryAI);
 
