@@ -301,6 +301,13 @@ export class FactionDiplomacyEngine {
   }
 
   /**
+   * Get all relationships
+   */
+  public getAllRelationships(): FactionRelationship[] {
+    return Array.from(this.relationships.values());
+  }
+
+  /**
    * Get or create relationship between two factions
    */
   public getRelationship(factionA: string, factionB: string): FactionRelationship {
