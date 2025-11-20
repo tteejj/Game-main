@@ -92,6 +92,13 @@ export class DiplomacyEventIntegration {
   }
 
   /**
+   * Subscribe to all events (alias for initialize())
+   */
+  public subscribeToAllEvents(config?: Partial<DiplomacyEventIntegrationConfig>): void {
+    this.initialize(config);
+  }
+
+  /**
    * Cleanup all subscriptions
    */
   public shutdown(): void {

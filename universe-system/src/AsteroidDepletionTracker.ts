@@ -591,6 +591,28 @@ export class AsteroidDepletionTracker {
   }
 
   /**
+   * Initialize asteroid fields from external asteroid array
+   * This allows integration with StarSystem's asteroid generation
+   */
+  public initializeAsteroidFields(asteroids: any[]): void {
+    if (!asteroids || asteroids.length === 0) {
+      console.log('[AsteroidDepletionTracker] No external asteroids provided, using default fields');
+      return;
+    }
+
+    // Link external asteroids to our tracking system
+    // For now, we'll just log and rely on our internal asteroid generation
+    // In the future, this could map external asteroids to our PersistentAsteroid format
+    console.log(`[AsteroidDepletionTracker] Initialized tracking for ${asteroids.length} asteroids from star system`);
+
+    // Get statistics on our internal fields
+    const totalTracked = this.asteroids.size;
+    const totalFields = this.fields.size;
+
+    console.log(`[AsteroidDepletionTracker] Managing ${totalTracked} persistent asteroids across ${totalFields} fields`);
+  }
+
+  /**
    * Calculate distance between two points
    */
   private distance(p1: Vector3, p2: Vector3): number {

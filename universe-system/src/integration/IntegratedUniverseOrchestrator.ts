@@ -859,28 +859,28 @@ export class IntegratedUniverseOrchestrator {
   private setInitialGoals(shipType: ShipType, goals: NPCGoalSystem): void {
     switch (shipType) {
       case ShipType.CARGO_FREIGHTER:
-        goals.addGoal(GoalType.ECONOMIC, 'Transport cargo profitably', 8);
+        goals.addGoal('DELIVER_CARGO', 'Transport cargo profitably', 8);
         break;
 
       case ShipType.MINING_VESSEL:
-        goals.addGoal(GoalType.ECONOMIC, 'Mine valuable resources', 9);
+        goals.addGoal('ACCUMULATE_WEALTH', 'Mine valuable resources', 9);
         break;
 
       case ShipType.PATROL_SHIP:
-        goals.addGoal(GoalType.SURVIVAL, 'Patrol territory and maintain security', 7);
+        goals.addGoal('FIND_SAFETY', 'Patrol territory and maintain security', 7);
         break;
 
       case ShipType.RESEARCH:
-        goals.addGoal(GoalType.PERSONAL, 'Explore and discover anomalies', 8);
+        goals.addGoal('EXPLORE_UNKNOWN', 'Explore and discover anomalies', 8);
         break;
 
       case ShipType.PIRATE:
-        goals.addGoal(GoalType.ECONOMIC, 'Raid and plunder', 9);
-        goals.addGoal(GoalType.SURVIVAL, 'Avoid authorities', 7);
+        goals.addGoal('ACCUMULATE_WEALTH', 'Raid and plunder', 9);
+        goals.addGoal('ESCAPE_DANGER', 'Avoid authorities', 7);
         break;
 
       default:
-        goals.addGoal(GoalType.SURVIVAL, 'Stay alive and operational', 6);
+        goals.addGoal('FIND_SAFETY', 'Stay alive and operational', 6);
     }
   }
 
