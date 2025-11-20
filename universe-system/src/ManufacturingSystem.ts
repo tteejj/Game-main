@@ -763,11 +763,11 @@ export class ManufacturingSystem {
     // AUTO-PRODUCTION: If facility has capacity, try to start production
     // Use cooldown to prevent spamming expensive validation checks every tick
     const AUTO_PRODUCTION_COOLDOWN = 10; // seconds between attempts
-    const now = Date.now() / 1000;
+    const nowSeconds = Date.now() / 1000;
     const lastAttempt = this.autoProductionCooldowns.get(facility.id) || 0;
 
-    if (facility.activeJobs.length < 3 && (now - lastAttempt) >= AUTO_PRODUCTION_COOLDOWN) {
-      this.autoProductionCooldowns.set(facility.id, now);
+    if (facility.activeJobs.length < 3 && (nowSeconds - lastAttempt) >= AUTO_PRODUCTION_COOLDOWN) {
+      this.autoProductionCooldowns.set(facility.id, nowSeconds);
 
       // Get available recipes for this facility
       const recipes = this.getAvailableRecipes(facility.id);
