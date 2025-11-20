@@ -318,7 +318,7 @@ export class UniverseContextProvider {
           id: station.id,
           name: station.name,
           distance,
-          faction: station.owningFaction
+          faction: station.faction
         };
       }
     }
@@ -538,7 +538,7 @@ export class UniverseContextProvider {
 
       if (distance < radius) {
         // TODO: Check faction relationships
-        if (!factionId || station.owningFaction === factionId) {
+        if (!factionId || station.faction === factionId) {
           friendly.push(station.id);
         }
       }

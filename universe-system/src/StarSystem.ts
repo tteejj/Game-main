@@ -1947,7 +1947,7 @@ export class StarSystem {
       if (ship.originName) {
         const originStation = this.stations.find(s => s.name === ship.originName);
         if (originStation) {
-          factionId = originStation.owningFaction;
+          factionId = originStation.faction; // FIXED: faction, not owningFaction
         }
       }
 
@@ -1968,11 +1968,11 @@ export class StarSystem {
     const factionStations = new Map<string, typeof this.stations>();
 
     for (const station of this.stations) {
-      if (station.owningFaction) {
-        if (!factionStations.has(station.owningFaction)) {
-          factionStations.set(station.owningFaction, []);
+      if (station.faction) {
+        if (!factionStations.has(station.faction)) {
+          factionStations.set(station.faction, []);
         }
-        factionStations.get(station.owningFaction)!.push(station);
+        factionStations.get(station.faction)!.push(station);
       }
     }
 

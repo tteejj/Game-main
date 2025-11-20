@@ -36,6 +36,7 @@ export interface IntegratedNPCShip {
   factionId?: string; // CRITICAL: Track faction for interactions
   lastDecision?: any;
   lastContext?: UniverseContext;
+  wasInHazardZone?: boolean; // Track previous hazard state to detect transitions
 }
 
 export interface UniverseConfig {
@@ -724,10 +725,13 @@ export class IntegratedUniverseOrchestrator {
       ship.status = ShipStatus.DISABLED;
     }
 
-    // Entered hazard zone
-    if (npc.lastContext?.inHazardZone) {
+    // Entered hazard zone (only record on transition from safe to hazard)
+    const inHazard = npc.lastContext?.inHazardZone || false;
+    if (inHazard && !npc.wasInHazardZone) {
       this.recordShipEvent(ship, 'HAZARD_ENTRY', 6, `${ship.name} entered hazard zone`);
     }
+    // Update hazard state for next check
+    npc.wasInHazardZone = inHazard;
   }
 
   /**
@@ -881,6 +885,13 @@ export class IntegratedUniverseOrchestrator {
    */
   public getAllShips(): IntegratedNPCShip[] {
     return Array.from(this.integratedShips.values());
+  }
+
+  /**
+   * Get ships (alias for getAllShips for compatibility)
+   */
+  public getShips(): IntegratedNPCShip[] {
+    return this.getAllShips();
   }
 
   /**
