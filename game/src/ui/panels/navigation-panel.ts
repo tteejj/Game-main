@@ -162,8 +162,8 @@ export class NavigationPanel {
                 const autopilotModes = ['off', 'altitude_hold', 'vertical_speed_hold',
                                        'suicide_burn', 'hover', 'landing', 'docking', 'orbital_insertion'];
                 const currentMode = this.spacecraft.getAutopilotMode();
-                const currentIdx = autopilotModes.indexOf(currentMode);
-                const nextMode = autopilotModes[(currentIdx + 1) % autopilotModes.length];
+                const autopilotIdx = autopilotModes.indexOf(currentMode);
+                const nextMode = autopilotModes[(autopilotIdx + 1) % autopilotModes.length];
                 this.spacecraft.setAutopilotMode(nextMode);
                 console.log(`Autopilot: ${nextMode.toUpperCase().replace(/_/g, ' ')}`);
                 break;

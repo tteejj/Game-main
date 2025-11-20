@@ -14,7 +14,8 @@
 
 import { Vector3 } from '../CelestialBody';
 import { StarSystem } from '../StarSystem';
-import { FactionDiplomacyEngine, DiplomaticStatus } from '../faction-dynamics/FactionDiplomacyEngine';
+import { FactionDiplomacyEngine } from '../faction-dynamics/FactionDiplomacyEngine';
+import type { DiplomaticStatus } from '../faction-dynamics/FactionDiplomacyEngine';
 import { FactionEconomicNeeds } from '../faction-dynamics/FactionEconomicNeeds';
 import { UniverseContextProvider } from './UniverseContextProvider';
 import { HistoricalMemorySystem, HistoricalEvent } from '../simulation/HistoricalMemorySystem';
