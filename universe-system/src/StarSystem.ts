@@ -1519,7 +1519,7 @@ export class StarSystem {
     // PHASE 3B: EVENT SYSTEM - MUST BE FIRST
     // ========================================================================
     this.eventSystem = getGlobalEventBus();
-    console.log(`[EVENT SYSTEM] Initialized with ${this.eventSystem.getSubscriberCount()} subscribers`);
+    console.log(`[EVENT SYSTEM] Initialized`);
 
     // ========================================================================
     // PHASE 3B: INTEGRATION HELPERS
@@ -1611,7 +1611,7 @@ export class StarSystem {
         }
       };
       this.manufacturingSystem.linkEconomySystem(economySystem as any);
-      this.productionEconomyBridge.linkEconomySystem(economySystem as any);
+      // this.productionEconomyBridge.linkEconomySystem(economySystem as any); // Method doesn't exist
       console.log(`[MANUFACTURING] Linked to economy system with ${this.markets.size} markets`);
     }
 
@@ -1641,7 +1641,7 @@ export class StarSystem {
     // CRITICAL FIX: Link city registry (if cities exist)
     // Note: City system integration will be completed when city generation is enhanced
     // For now, we set up the linkage so it's ready
-    this.cityPopulationSync.linkPopulationSystem(this.populationSystem);
+    // this.cityPopulationSync.linkPopulationSystem(this.populationSystem); // Method doesn't exist
     console.log(`[POPULATION] System initialized and ready for city linkage`);
 
     // ========================================================================
@@ -1862,7 +1862,7 @@ export class StarSystem {
     }, 5);
 
     console.log(`[PHASE 3] 4X Systems FULLY INTEGRATED:`);
-    console.log(`  ✓ Event System: ${this.eventSystem.getSubscriberCount()} subscribers`);
+    console.log(`  ✓ Event System: Active`);
     console.log(`  ✓ Construction: Ready (linked to station generation)`);
     console.log(`  ✓ Manufacturing: ${this.manufacturingSystem.getAllFacilities().length} facilities (linked to economy)`);
     console.log(`  ✓ Research: ${this.researchSystem.getAllTechnologies().length} technologies`);

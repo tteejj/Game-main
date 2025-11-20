@@ -118,8 +118,8 @@ export class IntegratedUniverseOrchestrator {
     this.interactionManager.setEconomicSimulation(this.economicSim);
 
     // Create markets for all stations
-    if (starSystem.objects.stations) {
-      for (const station of starSystem.objects.stations) {
+    if (starSystem.stations) {
+      for (const station of starSystem.stations) {
         this.economicSim.createMarket(station.id, station.name);
       }
     }
