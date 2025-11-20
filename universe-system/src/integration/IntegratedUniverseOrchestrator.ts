@@ -355,8 +355,9 @@ export class IntegratedUniverseOrchestrator {
     }
 
     // Update ship physics/navigation (NPCShip handles this internally)
-    const nearbyShips = this.starSystem.trafficManager.getNearbyVessels(ship.position, 10000)
-      .filter(s => s.id !== ship.id) as NPCShip[];
+    const nearbyShips = this.starSystem.trafficManager
+      ? this.starSystem.trafficManager.getVesselsNear(ship.position, 10000).filter(s => s.id !== ship.id) as NPCShip[]
+      : [];
 
     ship.update(deltaTime, nearbyShips, []);
 

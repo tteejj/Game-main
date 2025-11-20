@@ -232,7 +232,7 @@ export class HistoricalMemorySystem {
     if (!this.eventsByLocation.has(locationKey)) {
       this.eventsByLocation.set(locationKey, []);
     }
-    this.eventsByLocation.get(event.location)!.push(event);
+    this.eventsByLocation.get(locationKey)!.push(event);  // FIXED: was using event.location instead of locationKey
 
     // Update category stats
     this.updateCategoryStats(event.category);
