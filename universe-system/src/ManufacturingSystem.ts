@@ -761,8 +761,8 @@ export class ManufacturingSystem {
 
     // AUTO-PRODUCTION: If facility has capacity, start production
     if (facility.activeJobs.length < 3) {
-      // Get available recipes for this facility type
-      const recipes = this.getAvailableRecipes(facility.type);
+      // Get available recipes for this facility
+      const recipes = this.getAvailableRecipes(facility.id);
       if (recipes && recipes.length > 0) {
         // Pick a random recipe the facility can produce
         const recipe = recipes[Math.floor(Math.random() * recipes.length)];
@@ -772,6 +772,11 @@ export class ManufacturingSystem {
         const result = this.startProduction(facility.id, recipe.id, quantity);
         if (result.success) {
           console.log(`[MANUFACTURING] Auto-started: ${recipe.id} x${quantity} at ${facility.name}`);
+        } else {
+          // Only log occasionally to avoid spam
+          if (Math.random() < 0.01) {
+            console.log(`[MANUFACTURING] Cannot start ${recipe.id}: ${result.message || 'Unknown reason'}`);
+          }
         }
       }
     }
