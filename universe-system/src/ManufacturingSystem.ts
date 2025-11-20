@@ -758,6 +758,19 @@ export class ManufacturingSystem {
 
     // Efficiency decreases with poor condition
     facility.efficiency = 0.5 + (facility.condition * 0.5);
+
+    // AUTO-PRODUCTION: If facility has capacity and no active jobs, start production
+    if (facility.activeJobs.length < 3 && facility.availableRecipes.length > 0) {
+      // Pick a random recipe the facility can produce
+      const recipe = facility.availableRecipes[Math.floor(Math.random() * facility.availableRecipes.length)];
+      const quantity = Math.floor(Math.random() * 5) + 1; // 1-5 units
+
+      // Try to start production (will check resources internally)
+      const result = this.startProduction(facility.id, recipe.id, quantity);
+      if (result.success) {
+        console.log(`[MANUFACTURING] Auto-started: ${recipe.id} x${quantity} at ${facility.name}`);
+      }
+    }
   }
 
   /**
