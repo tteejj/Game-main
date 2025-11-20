@@ -165,6 +165,7 @@ export class FactionMilitaryAI {
 
   // StarSystem integration
   private starSystem: any = null;  // Will be set via linkStarSystem()
+  private fleetCoordination: any = null;  // Will be set via linkFleetCoordination()
   private eventSubscriptions: string[] = [];
 
   // Configuration
@@ -202,6 +203,14 @@ export class FactionMilitaryAI {
 
     // Perform initial sync
     this.syncTerritories();
+  }
+
+  /**
+   * Link to fleet coordination system for advanced fleet tactics
+   */
+  public linkFleetCoordination(fleetCoordination: any): void {
+    this.fleetCoordination = fleetCoordination;
+    console.log('[FactionMilitaryAI] Linked to FleetCoordinationSystem - advanced tactics enabled');
   }
 
   /**

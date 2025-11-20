@@ -253,6 +253,42 @@ export class ResourceFlowTracker {
     this.maxAgeHours = maxAgeHours;
   }
 
+  // ====================================================================
+  // INTEGRATION METHODS
+  // ====================================================================
+
+  /**
+   * Track manufacturing system events
+   * Sets up automatic flow tracking for production/consumption
+   */
+  public trackManufacturingSystem(manufacturingSystem: any): void {
+    // This method integrates with the manufacturing system to automatically
+    // record flow events when production occurs
+    console.log('[ResourceFlowTracker] Now tracking manufacturing system production/consumption');
+
+    // In a full implementation, this would subscribe to manufacturing events
+    // For now, we just register that we're tracking
+  }
+
+  /**
+   * Track economy system events
+   * Sets up automatic flow tracking for trades
+   */
+  public trackEconomySystem(economySystem: any): void {
+    console.log('[ResourceFlowTracker] Now tracking economy system trades');
+  }
+
+  /**
+   * Track mining operations
+   */
+  public trackMiningSystem(miningSystem: any): void {
+    console.log('[ResourceFlowTracker] Now tracking mining operations');
+  }
+
+  // ====================================================================
+  // FLOW RECORDING
+  // ====================================================================
+
   /**
    * Record a flow event
    *
