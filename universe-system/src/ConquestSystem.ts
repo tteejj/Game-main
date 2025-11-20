@@ -259,6 +259,32 @@ export class ConquestSystem {
   // ====================================================================
 
   /**
+   * Link to star system - automatically extracts stations and cities
+   * @param starSystem - The StarSystem instance to link to
+   */
+  public linkStarSystem(starSystem: any): void {
+    // Link stations
+    if (starSystem.stations) {
+      this.linkStations(starSystem.stations);
+    }
+
+    // Link cities (if they exist)
+    const cities: PlanetaryCity[] = [];
+    if (starSystem.planets) {
+      for (const planet of starSystem.planets) {
+        if (planet.cities) {
+          cities.push(...planet.cities);
+        }
+      }
+    }
+    if (cities.length > 0) {
+      this.linkCities(cities);
+    }
+
+    console.log(`[ConquestSystem] Linked to star system ${starSystem.name}`);
+  }
+
+  /**
    * Link to universe system to access actual stations
    */
   public linkStations(stations: SpaceStation[]): void {
@@ -303,6 +329,25 @@ export class ConquestSystem {
     if (index !== -1) {
       this.eventListeners.splice(index, 1);
     }
+  }
+
+  /**
+   * Register a territory for conquest tracking
+   * This is called during initialization to set up all territories
+   */
+  public registerTerritory(territory: {
+    id: string;
+    name: string;
+    type: 'STATION' | 'CITY';
+    owner?: string;
+    position: any;
+    defenseRating: number;
+    population: number;
+    strategicValue: number;
+  }): void {
+    // Territory registration is handled through linkStations/linkCities
+    // This method is here for compatibility with initialization code
+    console.log(`[ConquestSystem] Registered ${territory.type}: ${territory.name} (Defense: ${territory.defenseRating}, Pop: ${territory.population})`);
   }
 
   /**

@@ -94,15 +94,38 @@ export interface ProductionChainStatus {
  * Bridge between Manufacturing and Economy systems
  */
 export class ProductionEconomyBridge {
-  private economySystem: EconomySystem;
-  private manufacturingSystem: ManufacturingSystem;
+  private economySystem?: EconomySystem;
+  private manufacturingSystem?: ManufacturingSystem;
   private events: ProductionEvent[] = [];
   private bottlenecks: Map<string, ResourceBottleneck> = new Map();
   private maxEventHistory: number = 100;
 
-  constructor(economySystem: EconomySystem, manufacturingSystem: ManufacturingSystem) {
+  constructor(economySystem?: EconomySystem, manufacturingSystem?: ManufacturingSystem) {
     this.economySystem = economySystem;
     this.manufacturingSystem = manufacturingSystem;
+  }
+
+  /**
+   * Link to the economy system (for deferred initialization)
+   */
+  public linkEconomySystem(economySystem: EconomySystem): void {
+    this.economySystem = economySystem;
+    console.log('[ProductionEconomyBridge] Linked to EconomySystem');
+  }
+
+  /**
+   * Link to the manufacturing system (for deferred initialization)
+   */
+  public linkManufacturingSystem(manufacturingSystem: ManufacturingSystem): void {
+    this.manufacturingSystem = manufacturingSystem;
+    console.log('[ProductionEconomyBridge] Linked to ManufacturingSystem');
+  }
+
+  /**
+   * Check if bridge is fully initialized
+   */
+  public isLinked(): boolean {
+    return !!this.economySystem && !!this.manufacturingSystem;
   }
 
   /**
@@ -114,6 +137,12 @@ export class ProductionEconomyBridge {
   ): { available: boolean; missing: Map<CommodityType, number>; details: string[] } {
     const missing = new Map<CommodityType, number>();
     const details: string[] = [];
+
+    // Early return if not linked
+    if (!this.economySystem) {
+      details.push('Economy system not linked');
+      return { available: false, missing: inputs, details };
+    }
 
     for (const [commodityType, requiredAmount] of inputs) {
       const economyId = COMMODITY_TYPE_TO_ECONOMY_ID.get(commodityType);
@@ -260,6 +289,16 @@ export class ProductionEconomyBridge {
     facilityId: string,
     outputs: Map<CommodityType, number>
   ): { success: boolean; produced: Map<CommodityType, number>; revenue: number; message: string } {
+    // Early return if not linked
+    if (!this.economySystem || !this.manufacturingSystem) {
+      return {
+        success: false,
+        produced: new Map(),
+        revenue: 0,
+        message: 'Production-Economy bridge not fully linked'
+      };
+    }
+
     const produced = new Map<CommodityType, number>();
     let totalRevenue = 0;
     const errors: string[] = [];
