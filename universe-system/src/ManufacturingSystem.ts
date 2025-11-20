@@ -533,6 +533,7 @@ export class ManufacturingSystem {
   private jobIdCounter: number = 0;
   private economySystem: EconomySystem | null = null;
   private economyBridge: ProductionEconomyBridge | null = null;
+  private autoProductionCooldowns: Map<string, number> = new Map(); // Prevent spamming production attempts
 
   constructor() {
     // Initialize recipe database
@@ -758,6 +759,35 @@ export class ManufacturingSystem {
 
     // Efficiency decreases with poor condition
     facility.efficiency = 0.5 + (facility.condition * 0.5);
+
+    // AUTO-PRODUCTION: If facility has capacity, try to start production
+    // Use cooldown to prevent spamming expensive validation checks every tick
+    const AUTO_PRODUCTION_COOLDOWN = 10; // seconds between attempts
+    const now = Date.now() / 1000;
+    const lastAttempt = this.autoProductionCooldowns.get(facility.id) || 0;
+
+    if (facility.activeJobs.length < 3 && (now - lastAttempt) >= AUTO_PRODUCTION_COOLDOWN) {
+      this.autoProductionCooldowns.set(facility.id, now);
+
+      // Get available recipes for this facility
+      const recipes = this.getAvailableRecipes(facility.id);
+      if (recipes && recipes.length > 0) {
+        // Pick a random recipe the facility can produce
+        const recipe = recipes[Math.floor(Math.random() * recipes.length)];
+        const quantity = Math.floor(Math.random() * 5) + 1; // 1-5 units
+
+        // Try to start production (will check resources internally)
+        const result = this.startProduction(facility.id, recipe.id, quantity);
+        if (result.success) {
+          console.log(`[MANUFACTURING] Auto-started: ${recipe.id} x${quantity} at ${facility.name}`);
+        } else {
+          // Only log occasionally to avoid spam
+          if (Math.random() < 0.01) {
+            console.log(`[MANUFACTURING] Cannot start ${recipe.id}: ${result.message || 'Unknown reason'}`);
+          }
+        }
+      }
+    }
   }
 
   /**

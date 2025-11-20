@@ -697,8 +697,9 @@ export class StarSystem {
       const station = this.rng.choice(this.stations);
       const stationPos = station.position;
 
-      // Random offset from station (1000-10000 km)
-      const offsetDistance = this.rng.range(1000000, 10000000);
+      // Random offset from station (5-30 km) - WITHIN interaction range!
+      // Combat: 5km, Trade: 10km, Comm: 50km - spawning at 5-30km ensures interactions
+      const offsetDistance = this.rng.range(5000, 30000);
       const offsetAngle = this.rng.range(0, 2 * Math.PI);
       const offsetPhi = this.rng.range(0, Math.PI);
 
