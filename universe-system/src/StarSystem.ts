@@ -670,7 +670,8 @@ export class StarSystem {
       shipsPerStation = Math.floor(this.rng.range(1, 2));
     }
 
-    const numShips = Math.min(shipsPerStation * this.stations.length, 100); // Cap at 100 ships
+    // BOOSTED: 3x more ships for active simulation
+    const numShips = Math.min(shipsPerStation * this.stations.length * 3, 100); // Cap at 100 ships
 
     for (let i = 0; i < numShips; i++) {
       // Choose ship type based on station types and civilization level
@@ -697,8 +698,8 @@ export class StarSystem {
       const station = this.rng.choice(this.stations);
       const stationPos = station.position;
 
-      // Random offset from station (1000-10000 km)
-      const offsetDistance = this.rng.range(1000000, 10000000);
+      // Random offset from station (100-2000 km) - closer for more interactions!
+      const offsetDistance = this.rng.range(100000, 2000000);
       const offsetAngle = this.rng.range(0, 2 * Math.PI);
       const offsetPhi = this.rng.range(0, Math.PI);
 

@@ -36,6 +36,7 @@ export interface IntegratedNPCShip {
   factionId?: string; // CRITICAL: Track faction for interactions
   lastDecision?: any;
   lastContext?: UniverseContext;
+  wasInHazardZone?: boolean; // Track previous hazard state to detect transitions
 }
 
 export interface UniverseConfig {
@@ -164,12 +165,18 @@ export class IntegratedUniverseOrchestrator {
       const interactions = this.interactionManager.update(deltaTime, ships);
 
       // Record interaction events
+      if (interactions.length > 0) {
+        console.log(`[INTERACTIONS] ${interactions.length} interactions detected`);
+      }
       for (const interaction of interactions) {
         this.recordInteractionEvent(interaction);
       }
 
       // Check distress call responses
       const distressResponses = this.interactionManager.checkDistressResponse(ships);
+      if (distressResponses.length > 0) {
+        console.log(`[DISTRESS] ${distressResponses.length} distress responses`);
+      }
       for (const response of distressResponses) {
         this.recordInteractionEvent(response);
       }
@@ -226,9 +233,10 @@ export class IntegratedUniverseOrchestrator {
     }
 
     // ========================================================================
-    // UPDATE STAR SYSTEM (traffic, hazards, etc.)
+    // NOTE: StarSystem updates itself and calls this orchestrator
+    // DO NOT call this.starSystem.update() here - causes infinite recursion!
+    // StarSystem handles: traffic, hazards, physics, orbital mechanics, etc.
     // ========================================================================
-    this.starSystem.update(deltaTime);
 
     // ========================================================================
     // UPDATE DASHBOARD
@@ -353,8 +361,8 @@ export class IntegratedUniverseOrchestrator {
     }
 
     // Update ship physics/navigation (NPCShip handles this internally)
-    const nearbyShips = (this.starSystem.trafficManager && typeof this.starSystem.trafficManager.getNearbyVessels === 'function')
-      ? this.starSystem.trafficManager.getNearbyVessels(ship.position, 10000).filter(s => s.id !== ship.id) as NPCShip[]
+    const nearbyShips = this.starSystem.trafficManager
+      ? this.starSystem.trafficManager.getVesselsNear(ship.position, 10000).filter(s => s.id !== ship.id) as NPCShip[]
       : [];
 
     ship.update(deltaTime, nearbyShips, []);
@@ -722,10 +730,13 @@ export class IntegratedUniverseOrchestrator {
       ship.status = ShipStatus.DISABLED;
     }
 
-    // Entered hazard zone
-    if (npc.lastContext?.inHazardZone) {
+    // Entered hazard zone (only record transition from safe to hazard)
+    const inHazard = npc.lastContext?.inHazardZone || false;
+    if (inHazard && !npc.wasInHazardZone) {
       this.recordShipEvent(ship, 'HAZARD_ENTRY', 6, `${ship.name} entered hazard zone`);
     }
+    // Update hazard state for next check
+    npc.wasInHazardZone = inHazard;
   }
 
   /**

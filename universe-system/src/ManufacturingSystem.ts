@@ -758,6 +758,28 @@ export class ManufacturingSystem {
 
     // Efficiency decreases with poor condition
     facility.efficiency = 0.5 + (facility.condition * 0.5);
+
+    // AUTO-PRODUCTION: If facility has capacity, start production
+    if (facility.activeJobs.length < 3) {
+      // Get available recipes for this facility
+      const recipes = this.getAvailableRecipes(facility.id);
+      if (recipes && recipes.length > 0) {
+        // Pick a random recipe the facility can produce
+        const recipe = recipes[Math.floor(Math.random() * recipes.length)];
+        const quantity = Math.floor(Math.random() * 5) + 1; // 1-5 units
+
+        // Try to start production (will check resources internally)
+        const result = this.startProduction(facility.id, recipe.id, quantity);
+        if (result.success) {
+          console.log(`[MANUFACTURING] Auto-started: ${recipe.id} x${quantity} at ${facility.name}`);
+        } else {
+          // Only log occasionally to avoid spam
+          if (Math.random() < 0.01) {
+            console.log(`[MANUFACTURING] Cannot start ${recipe.id}: ${result.message || 'Unknown reason'}`);
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -766,6 +788,8 @@ export class ManufacturingSystem {
   private completeJob(facility: ManufacturingFacility, job: ProductionJob): void {
     job.status = 'COMPLETED';
     job.progress = 1.0;
+
+    console.log(`[MANUFACTURING] Completed: ${job.recipe.id} at ${facility.name} (${job.quantity} units)`);
 
     // Calculate actual output based on efficiency
     const totalEfficiency = job.recipe.efficiency * facility.efficiency * facility.condition;
