@@ -640,6 +640,35 @@ export class EventBus {
       lastEventTime: 0,
     };
   }
+
+  /**
+   * Get total number of active subscriptions
+   * @returns Total subscription count across all event types
+   */
+  getSubscriberCount(): number {
+    let count = 0;
+    for (const subs of this.subscriptions.values()) {
+      count += subs.size;
+    }
+    return count;
+  }
+
+  /**
+   * Get subscription count for a specific event type
+   * @param eventType - Event type to check
+   * @returns Number of subscriptions for this event type
+   */
+  getSubscriberCountForType(eventType: UniverseEventType | '*'): number {
+    return this.subscriptions.get(eventType)?.size || 0;
+  }
+
+  /**
+   * Get all active event types with subscriptions
+   * @returns Array of event types that have active subscriptions
+   */
+  getActiveEventTypes(): (UniverseEventType | '*')[] {
+    return Array.from(this.subscriptions.keys());
+  }
 }
 
 /**

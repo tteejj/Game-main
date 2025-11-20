@@ -118,8 +118,8 @@ export class IntegratedUniverseOrchestrator {
     this.interactionManager.setEconomicSimulation(this.economicSim);
 
     // Create markets for all stations
-    if (starSystem.objects.stations) {
-      for (const station of starSystem.objects.stations) {
+    if (starSystem.stations) {
+      for (const station of starSystem.stations) {
         this.economicSim.createMarket(station.id, station.name);
       }
     }
@@ -353,8 +353,9 @@ export class IntegratedUniverseOrchestrator {
     }
 
     // Update ship physics/navigation (NPCShip handles this internally)
-    const nearbyShips = this.starSystem.trafficManager.getNearbyVessels(ship.position, 10000)
-      .filter(s => s.id !== ship.id) as NPCShip[];
+    const nearbyShips = (this.starSystem.trafficManager && typeof this.starSystem.trafficManager.getNearbyVessels === 'function')
+      ? this.starSystem.trafficManager.getNearbyVessels(ship.position, 10000).filter(s => s.id !== ship.id) as NPCShip[]
+      : [];
 
     ship.update(deltaTime, nearbyShips, []);
 
@@ -856,31 +857,55 @@ export class IntegratedUniverseOrchestrator {
     };
   }
 
+  private createSimpleGoal(type: GoalType, description: string, priority: number): any {
+    return {
+      id: `goal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      category: 'LONG_TERM' as any,
+      name: description,
+      description,
+      priority,
+      urgency: 50,
+      progress: 0,
+      subgoals: [],
+      currentSubgoal: 0,
+      prerequisites: [],
+      motivation: { type: 'INTRINSIC', strength: priority / 10 } as any,
+      expectedReward: { type: 'CREDITS', amount: 0 } as any,
+      status: 'ACTIVE' as any,
+      attempts: 0,
+      failures: 0,
+      createdAt: Date.now() / 1000,
+      createdBy: 'SELF' as any,
+      tags: []
+    };
+  }
+
   private setInitialGoals(shipType: ShipType, goals: NPCGoalSystem): void {
     switch (shipType) {
       case ShipType.CARGO_FREIGHTER:
-        goals.addGoal(GoalType.ECONOMIC, 'Transport cargo profitably', 8);
+        goals.addGoal(this.createSimpleGoal('DELIVER_CARGO', 'Transport cargo profitably', 8));
         break;
 
       case ShipType.MINING_VESSEL:
-        goals.addGoal(GoalType.ECONOMIC, 'Mine valuable resources', 9);
+        goals.addGoal(this.createSimpleGoal('ACCUMULATE_WEALTH', 'Mine valuable resources', 9));
         break;
 
       case ShipType.PATROL_SHIP:
-        goals.addGoal(GoalType.SURVIVAL, 'Patrol territory and maintain security', 7);
+        goals.addGoal(this.createSimpleGoal('FIND_SAFETY', 'Patrol territory and maintain security', 7));
         break;
 
       case ShipType.RESEARCH:
-        goals.addGoal(GoalType.PERSONAL, 'Explore and discover anomalies', 8);
+        goals.addGoal(this.createSimpleGoal('EXPLORE_UNKNOWN', 'Explore and discover anomalies', 8));
         break;
 
       case ShipType.PIRATE:
-        goals.addGoal(GoalType.ECONOMIC, 'Raid and plunder', 9);
-        goals.addGoal(GoalType.SURVIVAL, 'Avoid authorities', 7);
+        goals.addGoal(this.createSimpleGoal('ACCUMULATE_WEALTH', 'Raid and plunder', 9));
+        goals.addGoal(this.createSimpleGoal('ESCAPE_DANGER', 'Avoid authorities', 7));
         break;
 
       default:
-        goals.addGoal(GoalType.SURVIVAL, 'Stay alive and operational', 6);
+        goals.addGoal(this.createSimpleGoal('FIND_SAFETY', 'Stay alive and operational', 6));
     }
   }
 

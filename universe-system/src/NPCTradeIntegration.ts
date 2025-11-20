@@ -66,12 +66,27 @@ export interface TradeResult {
  * Manages NPC ship trading with real economy system
  */
 export class NPCTradeIntegration {
-  private economySystem: EconomySystem;
+  private economySystem?: EconomySystem;
   private events: TradeEvent[] = [];
   private maxEventHistory: number = 100;
 
-  constructor(economySystem: EconomySystem) {
+  constructor(economySystem?: EconomySystem) {
     this.economySystem = economySystem;
+  }
+
+  /**
+   * Link to economy system (for deferred initialization)
+   */
+  public linkEconomySystem(economySystem: EconomySystem): void {
+    this.economySystem = economySystem;
+    console.log('[NPCTradeIntegration] Linked to EconomySystem');
+  }
+
+  /**
+   * Check if integration is linked
+   */
+  public isLinked(): boolean {
+    return !!this.economySystem;
   }
 
   /**
@@ -84,6 +99,14 @@ export class NPCTradeIntegration {
     amount: number,
     buying: boolean
   ): TradeValidationResult {
+    // Early return if not linked
+    if (!this.economySystem) {
+      return {
+        valid: false,
+        reason: 'Economy system not linked'
+      };
+    }
+
     // Check if market exists
     const market = this.economySystem.getMarket(stationId);
     if (!market) {

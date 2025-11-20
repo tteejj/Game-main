@@ -39,7 +39,7 @@ export interface ProductionEfficiency {
  * Syncs population system with city instances
  */
 export class CityPopulationSync {
-  private populationSystem: PopulationSystem;
+  private populationSystem?: PopulationSystem;
 
   // Base consumption rates per capita
   private readonly BASE_FOOD_CONSUMPTION = 2.0;      // kg/person/day
@@ -48,14 +48,32 @@ export class CityPopulationSync {
   private readonly BASE_MEDICAL_CONSUMPTION = 0.1;   // units/1000/day
   private readonly BASE_CONSUMER_GOODS = 10;         // credits/person/day
 
-  constructor(populationSystem: PopulationSystem) {
+  constructor(populationSystem?: PopulationSystem) {
     this.populationSystem = populationSystem;
+  }
+
+  /**
+   * Link to population system (for deferred initialization)
+   */
+  public linkPopulationSystem(populationSystem: PopulationSystem): void {
+    this.populationSystem = populationSystem;
+    console.log('[CityPopulationSync] Linked to PopulationSystem');
+  }
+
+  /**
+   * Check if syncer is initialized
+   */
+  public isLinked(): boolean {
+    return !!this.populationSystem;
   }
 
   /**
    * Synchronize all city data from population system
    */
   syncCity(city: PlanetaryCity): void {
+    // Early return if not linked
+    if (!this.populationSystem) return;
+
     const stats = this.populationSystem.getCityStatistics(city.id);
     const labor = this.populationSystem.getLaborMarket(city.id);
 

@@ -80,6 +80,13 @@ export class FactionExpansionAI {
   }
 
   /**
+   * Alias for linkFactionEconomicNeeds (compatibility)
+   */
+  linkEconomicNeeds(economicNeeds: FactionEconomicNeeds): void {
+    this.linkFactionEconomicNeeds(economicNeeds);
+  }
+
+  /**
    * Update faction expansion logic
    *
    * Periodically evaluates faction needs and attempts expansion.
