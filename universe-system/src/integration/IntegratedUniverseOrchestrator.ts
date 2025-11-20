@@ -226,9 +226,10 @@ export class IntegratedUniverseOrchestrator {
     }
 
     // ========================================================================
-    // UPDATE STAR SYSTEM (traffic, hazards, etc.)
+    // NOTE: StarSystem updates itself and calls this orchestrator
+    // DO NOT call this.starSystem.update() here - causes infinite recursion!
+    // StarSystem handles: traffic, hazards, physics, orbital mechanics, etc.
     // ========================================================================
-    this.starSystem.update(deltaTime);
 
     // ========================================================================
     // UPDATE DASHBOARD
