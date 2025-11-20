@@ -547,20 +547,6 @@ export class SpacecraftAdapter {
     }
 
     /**
-     * Toggle O2 generator
-     */
-    toggleO2Generator(): void {
-        console.log('O2 generator toggled');
-    }
-
-    /**
-     * Toggle CO2 scrubber
-     */
-    toggleCO2Scrubber(): void {
-        console.log('CO2 scrubber toggled');
-    }
-
-    /**
      * Set auto equalization mode
      */
     setAutoEqualization(enabled: boolean): void {

@@ -5,7 +5,7 @@
 
 import { CrewManagementSystem, CrewMember, CrewRole } from './CrewManagementSystem';
 import { ResearchSystem, ResearchProject } from './ResearchSystem';
-import { NewsGenerationSystem, NewsArticle } from './NewsGenerationSystem';
+import { NewsGenerationEngine, NewsArticle } from './storytelling/NewsGenerationEngine';
 
 export interface ContrabandItem {
   commodity: string;
@@ -28,7 +28,7 @@ export interface IntelligenceData {
 export class PlayerSystemsIntegration {
   private crewSystem: CrewManagementSystem;
   private researchSystem: ResearchSystem;
-  private newsSystem: NewsGenerationSystem;
+  private newsSystem: NewsGenerationEngine;
 
   // Crew
   private dailySalaryDue: number = 0;
@@ -48,7 +48,7 @@ export class PlayerSystemsIntegration {
   constructor(
     crewSystem: CrewManagementSystem,
     researchSystem: ResearchSystem,
-    newsSystem: NewsGenerationSystem
+    newsSystem: NewsGenerationEngine
   ) {
     this.crewSystem = crewSystem;
     this.researchSystem = researchSystem;

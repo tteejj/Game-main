@@ -14,5 +14,7 @@
     "typescript": "^5.0.0",
     "vite": "^5.0.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "simplex-noise": "^4.0.3"
+  }
 }

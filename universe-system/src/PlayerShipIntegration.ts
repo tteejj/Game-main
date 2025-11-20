@@ -15,7 +15,7 @@ import { NPCInteractionInterface, NPCShipContact, InteractionOption, HailResult,
 import { PlayerSystemsIntegration } from './PlayerSystemsIntegration';
 import { CrewManagementSystem, CrewMember, CrewRole } from './CrewManagementSystem';
 import { ResearchSystem } from './ResearchSystem';
-import { NewsGenerationSystem } from './NewsGenerationSystem';
+import { NewsGenerationEngine } from './storytelling/NewsGenerationEngine';
 
 export interface PlayerState {
   // Identity
@@ -91,7 +91,7 @@ export class PlayerShipIntegration {
     // Initialize advanced player systems (crew, research, intel, smuggling)
     const crewSystem = new CrewManagementSystem(6);
     const researchSystem = new ResearchSystem();
-    const newsSystem = new NewsGenerationSystem();
+    const newsSystem = new NewsGenerationEngine();
     this.playerSystems = new PlayerSystemsIntegration(crewSystem, researchSystem, newsSystem);
 
     // Initialize player state
