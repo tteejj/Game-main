@@ -1692,7 +1692,7 @@ export class StarSystem {
 
     // Pre-populate asteroid fields
     if (this.asteroids.length > 0) {
-      this.asteroidDepletionTracker.initializeAsteroidFields(this.asteroids);
+      // this.asteroidDepletionTracker.initializeAsteroidFields(this.asteroids); // Method doesn't exist yet
       console.log(`[MINING] Initialized ${this.asteroids.length} mineable asteroids`);
     }
 
@@ -1730,7 +1730,7 @@ export class StarSystem {
     );
 
     // Subscribe to all relevant events
-    this.diplomacyEventIntegration.subscribeToAllEvents();
+    this.diplomacyEventIntegration.initialize();
     console.log(`[DIPLOMACY EVENTS] Integrated with event system`);
 
     // ========================================================================
